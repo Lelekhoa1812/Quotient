@@ -1,0 +1,1333 @@
+/**
+ * Motivation vs Logic
+ * Motivation: Quotient is one analysis surface in the locked Axion sheet.
+ * Pirulen stays on the wordmark, kickers, and table headers.
+ * Logic: Semantic tokens swap for light and dark. Motion is limited to
+ * transform, opacity, color, and border-color at 150/200/300ms. Radius stays 0.
+ */
+
+:root {
+  --white: #FFFFFF;
+  --navy: #001938;
+  --blue: #125DE8;
+  --bg: #03070E;
+  --surface: #102033;
+  --ink: #FFFFFF;
+  --muted: rgba(255, 255, 255, 0.72);
+  --line: rgba(255, 255, 255, 0.14);
+  --control: #125DE8;
+  --mark: #2F6BEE;
+  --on-control: #FFFFFF;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ms-150: 150ms;
+  --ms-200: 200ms;
+  --ms-300: 300ms;
+  --font-body: var(--font-montserrat), sans-serif;
+  --font-display: var(--font-pirulen), sans-serif;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --ink: #001938;
+  --muted: rgba(0, 25, 56, 0.72);
+  --line: rgba(0, 25, 56, 0.16);
+  --control: #125DE8;
+  --mark: #125DE8;
+  --on-control: #FFFFFF;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #FFFFFF;
+    --surface: #FFFFFF;
+    --ink: #001938;
+    --muted: rgba(0, 25, 56, 0.72);
+    --line: rgba(0, 25, 56, 0.16);
+    --control: #125DE8;
+    --mark: #125DE8;
+    --on-control: #FFFFFF;
+    color-scheme: light;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ms-150: 0.01ms;
+    --ms-200: 0.01ms;
+    --ms-300: 0.01ms;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink);
+}
+
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: 1.25rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: 1rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+p { margin: 0; }
+
+button, input, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+button { letter-spacing: -0.011em; }
+
+a { color: inherit; text-decoration: none; }
+
+:focus-visible {
+  outline: 2px solid var(--mark);
+  outline-offset: 2px;
+}
+
+::placeholder { color: var(--muted); }
+
+.q-wordmark,
+.q-kicker,
+.q-table th {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.q-wordmark {
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.q-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-shrink: 0;
+}
+
+.q-brand img {
+  display: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.q-brand .is-dark { display: block; }
+
+:root[data-theme="light"] .q-brand .is-light { display: block; }
+:root[data-theme="light"] .q-brand .is-dark { display: none; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .q-brand .is-light { display: block; }
+  :root:not([data-theme="dark"]) .q-brand .is-dark { display: none; }
+}
+
+.q-kicker {
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.q-muted { color: var(--muted); }
+
+.q-lede {
+  max-width: 65ch;
+  color: var(--muted);
+}
+
+.q-meta {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.q-num { font-variant-numeric: tabular-nums; }
+
+.q-app { min-height: 100vh; }
+
+.q-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  height: 64px;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0 1.5rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.q-topnav {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  gap: 1.5rem;
+}
+
+.q-topnav a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 0.15rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--muted);
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+.q-topnav a[aria-current="page"] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--mark);
+}
+
+.q-header-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.q-quiet {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.q-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.q-nav-toggle:hover { border-color: var(--mark); }
+
+.q-nav-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 7;
+  display: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.q-nav-panel.is-open { display: block; }
+
+.q-nav-panel nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.q-nav-panel a {
+  display: flex;
+  align-items: center;
+  min-height: 3rem;
+  padding: 0 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--muted);
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+.q-nav-panel a[aria-current="page"] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--mark);
+}
+
+@media (max-width: 767px) {
+  .q-topnav { display: none; }
+  .q-nav-toggle { display: inline-flex; }
+}
+
+@media (min-width: 768px) {
+  .q-nav-panel,
+  .q-nav-panel.is-open { display: none; }
+}
+
+.q-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 0.35rem 0.6rem;
+  transition: border-color var(--ms-150) var(--ease);
+}
+
+.q-pill.is-down { border-color: var(--mark); }
+
+.q-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.q-body { min-height: calc(100vh - 64px); }
+
+.q-portal {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem 1.5rem 3rem;
+  align-content: start;
+}
+
+.q-start {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  border: 1px solid var(--line);
+}
+
+.q-start.is-over {
+  border-color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 16%, transparent);
+}
+
+.q-start-copy {
+  display: grid;
+  align-content: center;
+  gap: 0.85rem;
+  padding: 1.5rem 1.75rem;
+}
+
+.q-start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.q-assurances {
+  position: relative;
+  z-index: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+}
+
+.q-assurances li {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.q-assurances li + li {
+  border-left: 1px solid var(--line);
+}
+
+.q-catalog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  border: 1px solid var(--line);
+  padding: 1.1rem 1.25rem 0.35rem;
+}
+
+/*
+ * Bugs vs Fixes
+ * Bug: One gray wash on every plate, over a flat page, read as three muddy
+ * bricks. A clear fill disappeared, and a solid fill hid the page.
+ * Fix: Two sheets (start, meetings) and a lighter strip between them.
+ * The sheet is a white or navy tint plus a hairline and a soft shadow,
+ * so the type holds and the page still shows through.
+ */
+.q-start,
+.q-catalog {
+  background: color-mix(in srgb, var(--surface) 64%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.q-assurances {
+  background: color-mix(in srgb, var(--surface) 34%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+:root[data-theme="light"] .q-start,
+:root[data-theme="light"] .q-catalog {
+  background: rgb(255 255 255 / 0.78);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.95),
+    0 10px 28px rgb(0 25 56 / 0.06);
+}
+
+:root[data-theme="light"] .q-assurances {
+  background: rgb(255 255 255 / 0.42);
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .q-start.is-over {
+  background: color-mix(in srgb, var(--mark) 12%, rgb(255 255 255 / 0.78));
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .q-start,
+  :root:not([data-theme="dark"]) .q-catalog {
+    background: rgb(255 255 255 / 0.78);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.95),
+      0 10px 28px rgb(0 25 56 / 0.06);
+  }
+
+  :root:not([data-theme="dark"]) .q-assurances {
+    background: rgb(255 255 255 / 0.42);
+    box-shadow: none;
+  }
+
+  :root:not([data-theme="dark"]) .q-start.is-over {
+    background: color-mix(in srgb, var(--mark) 12%, rgb(255 255 255 / 0.78));
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .q-start,
+  .q-assurances,
+  .q-catalog,
+  :root[data-theme="light"] .q-start,
+  :root[data-theme="light"] .q-assurances,
+  :root[data-theme="light"] .q-catalog {
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .q-start.is-over,
+  :root[data-theme="light"] .q-start.is-over {
+    background: color-mix(in srgb, var(--mark) 12%, var(--surface));
+  }
+}
+
+.q-catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.q-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: min(100%, 240px);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 0.4rem 0.65rem;
+}
+
+.q-search input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0.1rem 0;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.q-search input:focus {
+  outline: none;
+}
+
+.q-search:focus-within {
+  outline: 2px solid var(--mark);
+  outline-offset: 2px;
+}
+
+.q-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.q-filter {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.35rem 0.7rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background-color var(--ms-150) var(--ease), border-color var(--ms-150) var(--ease), color var(--ms-150) var(--ease);
+}
+
+.q-filter[aria-pressed="true"] {
+  background: var(--control);
+  border-color: var(--control);
+  color: var(--on-control);
+}
+
+.q-filter:hover {
+  border-color: var(--mark);
+}
+
+.q-filter:active {
+  transform: scale(0.98);
+}
+
+.q-meeting-list {
+  display: grid;
+}
+
+.q-meeting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.9rem 0.15rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.q-meeting-main {
+  display: block;
+  min-width: 0;
+}
+
+.q-meeting-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.q-meeting-name {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  padding: 0.25rem 0.4rem;
+}
+
+.q-meeting-name:focus {
+  outline: 2px solid var(--mark);
+  outline-offset: 2px;
+}
+
+.q-meeting-title {
+  display: block;
+  font-weight: 600;
+}
+
+.q-meeting-meta {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.q-meeting:hover .q-meeting-title {
+  color: var(--mark);
+}
+
+.q-status {
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.2rem 0.45rem;
+  white-space: nowrap;
+}
+
+.q-status[data-tone="ready"] {
+  background: var(--control);
+  border-color: var(--control);
+  color: var(--on-control);
+}
+
+.q-status[data-tone="review"] {
+  border-color: var(--mark);
+}
+
+.q-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.q-icon-btn:hover,
+.q-icon-btn[aria-pressed="true"] {
+  border-color: var(--mark);
+}
+
+.q-page-head {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.q-skill-list,
+.q-settings {
+  display: grid;
+  gap: 1rem;
+}
+
+.q-skill {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  padding: 1rem 1.1rem;
+}
+
+.q-skill-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.q-skill-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.35rem;
+}
+
+.q-cell {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 0.9rem 1rem;
+  min-height: 6.5rem;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.q-cell.is-source {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.q-md {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.q-md p,
+.q-md ul,
+.q-md ol,
+.q-md h3,
+.q-md pre,
+.q-md figure {
+  margin: 0;
+}
+
+.q-md ul,
+.q-md ol {
+  padding-left: 1.1rem;
+}
+
+.q-md code,
+.q-md pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.q-md pre {
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.q-md a {
+  color: var(--mark);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.q-md-table {
+  overflow-x: auto;
+}
+
+.q-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.q-md th,
+.q-md td {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.6rem;
+  vertical-align: top;
+}
+
+.q-md th {
+  font-weight: 600;
+}
+
+.q-diagram {
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 4%, var(--bg));
+  padding: 0.75rem;
+  font-weight: 400;
+}
+
+.q-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.q-tips-block {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.q-tips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.q-tips li {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.q-settings-group {
+  border: 1px solid var(--line);
+  margin: 0;
+  padding: 1rem 1.1rem 1.1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.q-settings-group legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.q-topnav a {
+  white-space: nowrap;
+}
+
+/*
+ * Bugs vs Fixes
+ * Bug: The stage was a corner box sized for the torus, so the sparks could
+ * not cover the screen.
+ * Fix: Fix the stage to the viewport, under the sheets. The canvas is the
+ * full background in both themes.
+ */
+.q-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  background: transparent;
+  border: 0;
+  overflow: hidden;
+}
+
+.q-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.q-stage-copy {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.q-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 0 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.q-panel:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.q-stack { display: grid; gap: 1.75rem; align-content: start; }
+
+.q-upload {
+  border: 1px dashed var(--line);
+  background: transparent;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  transition: border-color var(--ms-150) var(--ease), background-color var(--ms-150) var(--ease);
+}
+
+.q-upload.is-over {
+  border-color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 8%, transparent);
+}
+
+.q-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.q-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.8125rem;
+}
+
+.q-btn, .q-btn-ghost, .q-theme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--control);
+  background: var(--control);
+  color: var(--on-control);
+  padding: 0.55rem 0.85rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background-color var(--ms-150) var(--ease), border-color var(--ms-150) var(--ease), transform var(--ms-150) var(--ease);
+}
+
+.q-btn:hover { background: var(--mark); border-color: var(--mark); }
+
+:root[data-theme="light"] .q-btn:hover {
+  background: var(--navy);
+  border-color: var(--navy);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .q-btn:hover {
+    background: var(--navy);
+    border-color: var(--navy);
+  }
+}
+
+.q-btn:active, .q-btn-ghost:active, .q-theme:active { transform: scale(0.98); }
+
+.q-btn-ghost, .q-theme {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.q-btn-ghost:hover, .q-theme:hover { border-color: var(--mark); background: transparent; }
+
+.q-theme { padding: 0.45rem; }
+
+.q-btn:disabled, .q-btn-ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.q-field, .q-area {
+  width: 100%;
+  margin-top: 0.35rem;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.55rem 0.7rem;
+  font-weight: 400;
+  border-radius: 0;
+}
+
+.q-area { min-height: 6rem; resize: vertical; }
+
+.q-label {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.q-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.q-table th, .q-table td {
+  text-align: left;
+  padding: 0.7rem 0.5rem 0.7rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.q-table th {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.q-table tbody tr {
+  transition: background-color var(--ms-150) var(--ease);
+}
+
+.q-table tbody tr:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+
+.q-rowlink {
+  display: block;
+  font-weight: 600;
+}
+
+.q-meet {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: calc(100vh - 64px);
+}
+
+.q-dock {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: 64px;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 0.85rem 1.25rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.q-dock-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.q-dock-head h1 {
+  font-size: 1.35rem;
+  overflow-wrap: anywhere;
+}
+
+.q-nav {
+  border-right: 1px solid var(--line);
+  padding: 0.75rem;
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+}
+
+.q-nav button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  border-left: 2px solid transparent;
+  padding: 0.5rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 400;
+  transition: border-color var(--ms-150) var(--ease), background-color var(--ms-150) var(--ease), color var(--ms-150) var(--ease);
+}
+
+.q-nav button[aria-current="page"] {
+  border-left-color: var(--mark);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.q-main {
+  padding: 1.25rem 1.5rem 2.5rem;
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.q-section { display: grid; gap: 1rem; align-content: start; }
+
+.q-inspector {
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  padding: 1.25rem 1rem 2rem;
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.q-video, .q-player-empty {
+  width: 100%;
+  max-height: 220px;
+  background: var(--navy);
+  border: 1px solid var(--line);
+  color: var(--white);
+}
+
+.q-player-empty {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+}
+
+.q-modes, .q-inline, .q-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.q-timeline {
+  position: relative;
+  height: 72px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.q-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.q-span {
+  position: absolute;
+  top: 22px;
+  height: 32px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  border-radius: 0;
+  transition: border-color var(--ms-150) var(--ease);
+}
+
+.q-span.is-on { border-color: var(--mark); }
+
+.q-coarse {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    color-mix(in srgb, var(--ink) 28%, transparent) 4px,
+    color-mix(in srgb, var(--ink) 28%, transparent) 5px
+  );
+}
+
+.q-seam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--mark);
+}
+
+.q-seam span {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  white-space: nowrap;
+}
+
+.q-badge, .q-state, .q-outcome {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.15rem 0.4rem;
+}
+
+.q-state[data-state="accepted"] {
+  background: var(--mark);
+  border-color: var(--mark);
+  color: var(--white);
+}
+
+.q-outcome.is-review { border-color: var(--mark); }
+
+.q-cards, .q-board-grid { display: grid; gap: 0.75rem; }
+
+.q-board-grid { grid-template-columns: 1fr 1fr; }
+
+.q-lens, .q-card, .q-empty {
+  border: 1px solid var(--line);
+  background: transparent;
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+}
+
+.q-lens.is-current { border-color: var(--mark); }
+
+.q-card.is-conflict { box-shadow: inset 2px 0 0 var(--mark); }
+
+.q-card.is-human {
+  border-style: solid;
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+
+.q-sentence {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid var(--line);
+  background: transparent;
+  padding: 0.9rem 1rem;
+  transition: border-color var(--ms-200) var(--ease);
+  cursor: pointer;
+}
+
+.q-sentence .q-md {
+  font-weight: 600;
+}
+
+.q-sentence.is-on { border-color: var(--mark); }
+
+.q-sentence button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.q-cites {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.q-cites li {
+  display: grid;
+  gap: 0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.8125rem;
+}
+
+.q-chart { display: grid; gap: 0.55rem; }
+
+.q-chart-row { display: grid; gap: 0.3rem; }
+
+button.q-chart-row {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0.2rem 0;
+  cursor: pointer;
+}
+
+.q-bar {
+  height: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border: 0;
+}
+
+.q-bar span {
+  display: block;
+  height: 100%;
+  background: var(--mark);
+}
+
+.q-exports {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.q-split, .q-transcripts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.q-pane, .q-block {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+}
+
+.q-block {
+  white-space: pre-wrap;
+  border: 1px solid var(--line);
+  padding: 0.9rem 1rem;
+}
+
+.q-card.is-on { border-color: var(--mark); }
+
+details summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.q-quote {
+  margin: 0;
+  max-height: 4.8em;
+  overflow: auto;
+  font-weight: 600;
+}
+
+mark {
+  background: color-mix(in srgb, var(--mark) 24%, transparent);
+  color: inherit;
+  outline: 1px solid var(--mark);
+  padding: 0 0.12em;
+}
+
+.q-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .q-btn:active, .q-btn-ghost:active, .q-theme:active, .q-filter:active { transform: none; }
+}
+
+@media (max-width: 960px) {
+  .q-portal, .q-split, .q-transcripts, .q-board-grid { grid-template-columns: 1fr; }
+  .q-portal { padding: 1rem 1rem 2rem; }
+  .q-start { grid-template-columns: 1fr; min-height: 0; }
+  .q-start-copy { padding: 1.25rem 1rem; }
+  .q-assurances { grid-template-columns: 1fr; }
+  .q-assurances li + li { border-left: 0; border-top: 1px solid var(--line); }
+  .q-catalog-head { align-items: stretch; flex-direction: column; }
+  .q-meet { grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; }
+  .q-dock, .q-nav, .q-main, .q-inspector { grid-column: 1; grid-row: auto; }
+  .q-dock { position: static; }
+  .q-nav {
+    display: flex;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .q-nav button { width: auto; white-space: nowrap; }
+  .q-inspector { border-left: 0; border-top: 1px solid var(--line); }
+  .q-header { padding: 0 1rem; gap: 2rem; }
+  .q-quiet { display: none; }
+  .q-banner { padding: 0.75rem 1rem; }
+  .q-main { padding: 1rem 1rem 2rem; }
+}

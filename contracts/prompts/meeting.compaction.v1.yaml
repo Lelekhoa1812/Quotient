@@ -1,0 +1,37 @@
+# Motivation vs Logic
+# Motivation: Pin payload omission to Luna so silence and visual-idle drops are a versioned output.
+# Logic: The fill stage returns span ids whose kind is silence or visual-idle. Overlap is not a kind.
+id: meeting.compaction.v1
+version: 1
+model_role: slm
+schema: meeting.compaction.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - span_table
+  exclude: []
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.compaction.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Omit silence and visual-idle spans from later model payloads.
+  Never omit an overlap span. Never omit a speech span. Never omit any other kind.
+  If a span is both visual-idle and overlap, keep it.
+  The timeline keeps each span's original start and end. You are choosing payload membership, not deleting time.
+  Do not rewrite span text. Do not invent spans. Do not emit timestamps.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

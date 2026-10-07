@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "statement",
+    "due_kind",
+    "claim_ids",
+    "origin",
+    "acceptance"
+  ],
+  "properties": {
+    "statement": {
+      "type": "string"
+    },
+    "owner_span_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "agreement_span_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "due_kind": {
+      "enum": [
+        "absolute",
+        "relative",
+        "none"
+      ]
+    },
+    "due_surface": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "due_iso": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "due_span_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "origin": {
+      "enum": [
+        "model",
+        "human"
+      ]
+    },
+    "acceptance": {
+      "enum": [
+        "proposed",
+        "accepted"
+      ]
+    }
+  }
+}

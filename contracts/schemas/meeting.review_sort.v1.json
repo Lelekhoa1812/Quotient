@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.review_sort.v1.json",
+  "title": "Review sort",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "score"],
+  "properties": {
+    "type": { "const": "score" },
+    "score": { "type": "number" }
+  }
+}

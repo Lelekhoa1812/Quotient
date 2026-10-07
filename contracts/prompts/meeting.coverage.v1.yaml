@@ -1,0 +1,41 @@
+# Motivation vs Logic
+# Motivation: Pin the coverage audit to Luna so a speech span cannot leave the brief silently.
+# Logic: The fill stage lists speech span ids that have neither a claim nor an omission.
+id: meeting.coverage.v1
+version: 1
+model_role: slm
+schema: meeting.coverage.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - speech_span_ids
+    - claim_span_ids
+    - omission_span_ids
+  exclude:
+    - span_text
+    - draft_brief
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.coverage.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  List speech span ids that have neither a claim nor an omission.
+  Return ids that appear in speech_span_ids and in neither claim_span_ids nor omission_span_ids.
+  Do not add a claim. Do not write an omission reason.
+  Do not include silence, visual-idle, page, or cell ids.
+  Do not drop an uncovered speech span by leaving it off the list.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

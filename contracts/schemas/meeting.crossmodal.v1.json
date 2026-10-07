@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.crossmodal.v1.json",
+  "title": "CrossModal",
+  "description": "Agreement or disagreement between one Sonic span and one Pegasus observation. Quote offsets stay in code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "relation",
+    "sonic_span_id",
+    "observation_id"
+  ],
+  "properties": {
+    "relation": {
+      "type": "string",
+      "enum": [
+        "agreement",
+        "disagreement"
+      ]
+    },
+    "sonic_span_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "relation": {
+            "const": "disagreement"
+          }
+        },
+        "required": [
+          "relation"
+        ]
+      },
+      "then": {
+        "required": [
+          "statement"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# Motivation vs Logic
+# Motivation: Pin the dissent check to Luna so a dropped or softened finding is listed instead of debated away.
+# Logic: The fill stage returns finding ids only. It does not rewrite the synthesis.
+id: meeting.dissent.v1
+version: 1
+model_role: slm
+schema: meeting.dissent.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - synthesis
+    - findings
+  exclude:
+    - raw_transcript
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.dissent.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Compare the synthesis sentences with the finding set.
+  List finding ids the synthesis dropped.
+  List finding ids the synthesis softened. Softened includes a conflict rewritten as agreement, and stakeholder findings that were averaged.
+  A finding that is fully stated and still in conflict is neither dropped nor softened.
+  Do not rewrite the synthesis. Do not add findings. Do not try to make the lenses agree.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

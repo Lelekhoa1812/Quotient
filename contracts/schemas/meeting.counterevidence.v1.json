@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.counterevidence.v1.json",
+  "title": "Counterevidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "searched_ids",
+    "finding"
+  ],
+  "properties": {
+    "searched_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "finding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "empty"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "quote",
+            "span_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "contradicts"
+            },
+            "quote": {
+              "type": "string",
+              "minLength": 1
+            },
+            "span_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

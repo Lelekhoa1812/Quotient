@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.synthesis.v1.json",
+  "title": "Synthesis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sentences"
+  ],
+  "properties": {
+    "sentences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text",
+          "finding_ids"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Markdown prose. A mermaid fence is optional."
+          },
+          "finding_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

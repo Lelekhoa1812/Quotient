@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.supplement.v1.json",
+  "title": "CoverageSupplement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "span_id",
+              "outcome",
+              "reason"
+            ],
+            "properties": {
+              "span_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "const": "omission"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "span_id",
+              "outcome",
+              "proposition",
+              "kind",
+              "quote",
+              "decision_status"
+            ],
+            "properties": {
+              "span_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "const": "claim"
+              },
+              "proposition": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decision",
+                  "action",
+                  "commitment",
+                  "question",
+                  "figure",
+                  "observation"
+                ]
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decision_status": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "aligned",
+                      "needs_discussion",
+                      "disagreed",
+                      "shelved"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

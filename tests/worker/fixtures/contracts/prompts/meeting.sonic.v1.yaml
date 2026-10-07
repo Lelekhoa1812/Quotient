@@ -1,0 +1,5 @@
+id: meeting.sonic.v1
+version: 1
+cache_breakpoints: 1
+body: |
+  fixture-sonic

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.pegasus.v1.json",
+  "title": "PegasusObservations",
+  "description": "Complete visual observations for one video part. start_ms and end_ms are local milliseconds when both are present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observations"
+  ],
+  "properties": {
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statement"
+        ],
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "integer"
+          },
+          "end_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

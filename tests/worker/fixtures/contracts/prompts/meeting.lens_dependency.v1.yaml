@@ -1,0 +1,6 @@
+id: meeting.lens_dependency.v1
+version: 1
+model_role: llm
+cache_breakpoints: 1
+body: |
+  fixture-lens_dependency

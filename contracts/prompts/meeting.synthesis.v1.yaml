@@ -1,0 +1,52 @@
+# Motivation vs Logic
+# Motivation: Pin synthesis to Sol so every sentence cites finding ids and the raw transcript stays out.
+# Logic: Conflicts stay conflicts. Stakeholder findings are not averaged. Sentences cannot cite spans.
+id: meeting.synthesis.v1
+version: 1
+model_role: llm
+schema: meeting.synthesis.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - findings
+  exclude:
+    - raw_transcript
+    - span_text
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.synthesis.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Write synthesis sentences from findings only.
+  The raw transcript is not in this call. Do not request span text. Do not cite span ids.
+  Every sentence cites one or more finding ids. A sentence with no finding id is invalid.
+  Do not add a fact the findings do not already state.
+  A finding whose stance is conflicts stays visible as a conflict. Do not resolve it.
+  Do not average two stakeholder findings into one sentence.
+  An empty findings list yields an empty sentences list. Do not emit a gist, a score, or an overview.
+
+  Sentence text is markdown.
+  Use a heading, a list, or emphasis when it makes the brief easier to scan.
+  A mermaid fence is allowed only when a diagram states a relationship
+  the prose would bury: an architecture, a component boundary, a decision
+  flow, or a dependency the cited findings already name.
+  One fence is enough. Most sentences have none.
+  Leave the fence out for status, disagreement, dates, owners, and quantities.
+  Quantities stay on the chart pass.
+  Do not invent nodes, edges, or labels the cited findings do not state.
+  The fence info string is mermaid. No other diagram language.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. Do not wrap that object in a fence. Sentence text may contain one mermaid fence when the rule above applies. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.chart.v1.json",
+  "title": "ChartQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ids",
+    "aggregation",
+    "subject"
+  ],
+  "properties": {
+    "ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "aggregation": {
+      "type": "string",
+      "enum": [
+        "count",
+        "sum",
+        "mean",
+        "min",
+        "max",
+        "duration_union"
+      ]
+    },
+    "subject": {
+      "type": "string",
+      "enum": [
+        "spans",
+        "claims",
+        "findings",
+        "actions",
+        "cells"
+      ]
+    },
+    "field": {
+      "type": "string",
+      "enum": [
+        "cell_value"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "aggregation": {
+            "const": "duration_union"
+          }
+        },
+        "required": [
+          "aggregation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "subject": {
+            "const": "spans"
+          }
+        },
+        "not": {
+          "required": [
+            "field"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "aggregation": {
+            "enum": [
+              "sum",
+              "mean",
+              "min",
+              "max"
+            ]
+          }
+        },
+        "required": [
+          "aggregation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "subject": {
+            "const": "cells"
+          },
+          "field": {
+            "const": "cell_value"
+          }
+        },
+        "required": [
+          "field"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "aggregation": {
+            "const": "count"
+          }
+        },
+        "required": [
+          "aggregation"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "field"
+          ]
+        }
+      }
+    }
+  ]
+}

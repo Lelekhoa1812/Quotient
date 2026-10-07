@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.lens_decision.v1.json",
+  "title": "LensDecision",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "disposition"
+      ],
+      "properties": {
+        "dimension": {
+          "const": "decision"
+        },
+        "disposition": {
+          "const": "none_in_transcript"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "disposition",
+        "findings"
+      ],
+      "properties": {
+        "dimension": {
+          "const": "decision"
+        },
+        "disposition": {
+          "const": "findings"
+        },
+        "findings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statement",
+              "stance",
+              "claim_ids",
+              "decision_status"
+            ],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stance": {
+                "type": "string",
+                "enum": [
+                  "supports",
+                  "conflicts",
+                  "unknown"
+                ]
+              },
+              "claim_ids": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "decision_status": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "aligned",
+                      "needs_discussion",
+                      "disagreed",
+                      "shelved"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

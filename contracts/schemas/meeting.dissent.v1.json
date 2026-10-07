@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.dissent.v1.json",
+  "title": "Dissent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dropped_finding_ids",
+    "softened_finding_ids"
+  ],
+  "properties": {
+    "dropped_finding_ids": {
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "softened_finding_ids": {
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

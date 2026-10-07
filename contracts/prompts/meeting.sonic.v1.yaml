@@ -1,0 +1,40 @@
+# Motivation vs Logic
+# Motivation: USER and FINAL text must stay words only, because source time is the sample clock in code.
+# Logic: The system text forbids timestamps and character offsets. The schema rejects those fields.
+id: meeting.sonic.v1
+version: 1
+model_role: sonic
+schema: meeting.sonic.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - audio
+    - proper_nouns
+  exclude:
+    - timestamps
+    - char_offsets
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.sonic.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Transcribe the speech in this session.
+  The audio is 16-bit mono LPCM at 16 kHz.
+  USER and FINAL text is the words only.
+  Do not put a timestamp in that text.
+  The clock is samples. Code maps samples to source time.
+  Do not emit character offsets.
+  Do not label speakers. Speaker hypotheses are attached in code.
+  A proper-noun list, when present, is short names only. It is not a find-and-replace on the words.
+  Do not emit a JSON object. The schema rejects timestamp fields and character-offset fields.

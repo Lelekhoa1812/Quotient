@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.coverage.v1.json",
+  "title": "Coverage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "uncovered_span_ids"
+  ],
+  "properties": {
+    "uncovered_span_ids": {
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

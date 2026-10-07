@@ -1,0 +1,45 @@
+# Motivation vs Logic
+# Motivation: Pin Sol's entailment label to the paraphrase and the cited span texts.
+# Logic: The user message excludes the extractor sentence and the draft brief. The label is entails, neutral, or contradicts.
+id: meeting.entailment.v1
+version: 1
+model_role: llm
+schema: meeting.entailment.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - paraphrase
+    - cited_span_texts
+  exclude:
+    - extractor_sentence
+    - draft_brief
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.entailment.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Label whether the cited span texts entail the paraphrase.
+  The only claim material in this call is the paraphrase and the cited span texts.
+  The extractor's original sentence is not in this prompt. The draft brief is not in this prompt.
+  You have no tool. Do not open spans. You are not shown another model's label.
+  Label entails when the cited texts state the same proposition as the paraphrase.
+  A decontextualized restatement still entails when it adds no fact, time, number, person, or commitment that the cited texts do not state.
+  Pronoun replacement and light wording changes are not new facts.
+  Label contradicts when a cited text states the opposite.
+  Label neutral when the texts neither state nor contradict the paraphrase. Neutral is not support.
+  Do not negotiate the label. Do not check numbers, percents, currency, or clock times. Code does that check.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

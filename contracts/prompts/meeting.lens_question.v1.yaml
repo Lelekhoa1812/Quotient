@@ -1,0 +1,55 @@
+# Motivation vs Logic
+# Motivation: Pin the question lens so it cannot read another dimension's prose.
+# Logic: The fill stage emits findings that cite supported claims, or none_in_transcript.
+id: meeting.lens_question.v1
+version: 1
+model_role: slm
+schema: meeting.lens_question.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools:
+  - name: open_span
+    description: Return one span in this meeting by id, including raw_text, text, start_ms, and end_ms.
+    parameters:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      additionalProperties: false
+      required:
+        - span_id
+      properties:
+        span_id:
+          type: string
+          minLength: 1
+input:
+  include:
+    - supported_claims
+  exclude:
+    - other_lens_prose
+    - raw_transcript
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.lens_question.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  You write the question lens for this meeting.
+
+  You see supported claims and you may open spans in this meeting during the reason stage. You are not shown prose from any other dimension.
+
+  A finding states an open question the cited claims already ask. Do not answer it.
+
+  stance is supports, conflicts, or unknown. Cite claim ids of supported claims only. If you have nothing to say, emit none_in_transcript and no findings.
+
+  Do not write a synthesis sentence.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

@@ -1,0 +1,6 @@
+id: meeting.lens_temporal.v1
+version: 1
+model_role: slm
+cache_breakpoints: 1
+body: |
+  fixture-lens_temporal

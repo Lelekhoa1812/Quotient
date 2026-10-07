@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.compaction.v1.json",
+  "title": "Compaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "omissions"
+  ],
+  "properties": {
+    "omissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "span_id",
+          "kind"
+        ],
+        "properties": {
+          "span_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "silence",
+              "visual_idle"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

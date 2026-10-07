@@ -1,0 +1,2 @@
+[console_scripts]
+quotient-api = quotient.__main__:main

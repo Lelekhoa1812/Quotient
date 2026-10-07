@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.claim.v1.json",
+  "title": "ClaimExtraction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "claims",
+    "gaps"
+  ],
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "proposition",
+          "kind",
+          "quote",
+          "span_ids",
+          "decision_status"
+        ],
+        "properties": {
+          "proposition": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "decision",
+              "action",
+              "commitment",
+              "question",
+              "figure",
+              "observation"
+            ]
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision_status": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "aligned",
+                  "needs_discussion",
+                  "disagreed",
+                  "shelved"
+                ]
+              }
+            ]
+          },
+          "span_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "span_ids",
+          "reason"
+        ],
+        "properties": {
+          "span_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

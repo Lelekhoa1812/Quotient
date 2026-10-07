@@ -1,0 +1,40 @@
+# Motivation vs Logic
+# Motivation: Pin the chart query to Luna so the worker, not the model, computes every plotted number.
+# Logic: The object is ids plus an aggregation enum. JSON numbers, cell values, and duration totals are rejected.
+id: meeting.chart.v1
+version: 1
+model_role: slm
+schema: meeting.chart.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - candidate_ids
+  exclude:
+    - numeric_literals
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.chart.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Request a chart by naming ids, one subject, and one aggregation.
+  Do not emit a numeric literal. Do not emit counts, totals, percents, durations, cell values, or coordinates.
+  aggregation is count, sum, mean, min, max, or duration_union.
+  duration_union is only for subject spans. Do not send a field with it.
+  sum, mean, min, and max are only for subject cells with field cell_value. The worker reads the cell value. You do not.
+  count takes no field.
+  Do not emit a Python program.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.pegasus.continue.v1.json",
+  "title": "PegasusContinuation",
+  "description": "A complete observations object. A length stop does not make this call a JSON fragment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observations"
+  ],
+  "properties": {
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statement"
+        ],
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "integer"
+          },
+          "end_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,132 @@
+/*
+ * Motivation vs Logic
+ * Motivation: A person needs the live connection values and the full partner
+ * contract on one screen, with icon-only copy controls.
+ * Logic: Stack the connection line, a definition list of parameters, and the
+ * contract cell. Radius stays 0. The contract grows with the document.
+ */
+
+.q-mcp-block {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.q-mcp-connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 1rem 1.1rem;
+}
+
+.q-mcp-status {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.q-mcp-phase {
+  font-weight: 600;
+}
+
+.q-mcp-params {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.q-mcp-row {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.q-mcp-row:first-child {
+  border-top: 0;
+}
+
+.q-mcp-row dt {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.q-mcp-row dd {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.q-mcp-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.q-mcp-value {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.q-mcp-note {
+  display: block;
+  margin-top: 0.15rem;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.q-mcp-doc.q-cell {
+  max-height: none;
+  border-radius: 0;
+}
+
+.q-mcp-tools {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.q-mcp-tool {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.85rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.q-mcp-tool:first-child {
+  border-top: 0;
+}
+
+.q-mcp-tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+.q-mcp-offline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0.85rem 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .q-mcp-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}

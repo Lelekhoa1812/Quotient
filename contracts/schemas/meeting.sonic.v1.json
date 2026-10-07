@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.sonic.v1.json",
+  "title": "SonicText",
+  "description": "USER and FINAL text is not a JSON object. Timestamp and character-offset fields are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

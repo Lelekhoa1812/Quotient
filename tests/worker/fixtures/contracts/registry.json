@@ -1,0 +1,138 @@
+{
+  "prompts": {
+    "meeting.sonic.v1": {
+      "version": 1,
+      "file": "prompts/meeting.sonic.v1.yaml"
+    },
+    "meeting.pegasus.v1": {
+      "version": 1,
+      "file": "prompts/meeting.pegasus.v1.yaml",
+      "schema": "meeting.pegasus.v1"
+    },
+    "meeting.pegasus.continue.v1": {
+      "version": 1,
+      "file": "prompts/meeting.pegasus.continue.v1.yaml"
+    },
+    "meeting.compaction.v1": {
+      "version": 1,
+      "file": "prompts/meeting.compaction.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.crossmodal.v1": {
+      "version": 1,
+      "file": "prompts/meeting.crossmodal.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.claim.v1": {
+      "version": 1,
+      "file": "prompts/meeting.claim.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.counterevidence.v1": {
+      "version": 1,
+      "file": "prompts/meeting.counterevidence.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.entailment.v1": {
+      "version": 1,
+      "file": "prompts/meeting.entailment.v1.yaml",
+      "model_role": "llm",
+      "schema": "meeting.entailment.v1"
+    },
+    "meeting.entailment_luna.v1": {
+      "version": 1,
+      "file": "prompts/meeting.entailment_luna.v1.yaml",
+      "model_role": "slm",
+      "schema": "meeting.entailment.v1"
+    },
+    "meeting.coverage.v1": {
+      "version": 1,
+      "file": "prompts/meeting.coverage.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.supplement.v1": {
+      "version": 1,
+      "file": "prompts/meeting.supplement.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.synthesis.v1": {
+      "version": 1,
+      "file": "prompts/meeting.synthesis.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.dissent.v1": {
+      "version": 1,
+      "file": "prompts/meeting.dissent.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.chart.v1": {
+      "version": 1,
+      "file": "prompts/meeting.chart.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_decision.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_decision.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_commitment.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_commitment.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_temporal.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_temporal.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_stakeholder.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_stakeholder.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.lens_cross_modal.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_cross_modal.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.lens_documentary.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_documentary.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_risk.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_risk.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.lens_gap.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_gap.v1.yaml",
+      "model_role": "slm"
+    },
+    "meeting.lens_dependency.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_dependency.v1.yaml",
+      "model_role": "llm"
+    },
+    "meeting.lens_question.v1": {
+      "version": 1,
+      "file": "prompts/meeting.lens_question.v1.yaml",
+      "model_role": "slm"
+    }
+  },
+  "schemas": {
+    "meeting.action.v1": {
+      "version": 1,
+      "file": "schemas/meeting.action.v1.json"
+    },
+    "meeting.entailment.v1": {
+      "version": 1,
+      "file": "schemas/meeting.entailment.v1.json"
+    },
+    "meeting.pegasus.v1": {
+      "version": 1,
+      "file": "schemas/meeting.pegasus.v1.json"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+# Motivation vs Logic
+# Motivation: Pin atomic claim wording to Luna so the extractor does not verdict its own sentence.
+# Logic: The fill stage returns decontextualized claims with verbatim quotes, or gaps for ambiguous sentences.
+id: meeting.claim.v1
+version: 1
+model_role: slm
+schema: meeting.claim.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - span_window
+    - proper_nouns
+  exclude:
+    - draft_brief
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.claim.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Extract atomic claims from one window of spans.
+  Each claim is one decontextualized proposition. Replace pronouns with the speaker hypothesis id or a named entity before the proposition is stored.
+  Do not verdict the proposition. Do not emit character offsets.
+  Attach the verbatim quote as it appears in span text. The quote must be a contiguous slice of one cited span. If you cannot do that, emit a gap instead of a claim.
+  An ambiguous sentence is a gap. A gap lists the span ids that were read and why it is ambiguous.
+  kind is one of decision, action, commitment, question, figure, or observation.
+  decision_status is aligned, needs_discussion, disagreed, shelved, or null. Null means the spans do not state a status. Do not invent a status.
+  A proper-noun list, when present, is short names only. It is not evidence and it is not a find-and-replace on the transcript.
+  Upload filenames and form fields are not name sources.
+  Do not emit an owner string. Do not smooth two speakers into one proposition.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.entailment.v1.json",
+  "title": "Entailment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "label"
+  ],
+  "properties": {
+    "label": {
+      "type": "string",
+      "enum": [
+        "entails",
+        "neutral",
+        "contradicts"
+      ],
+      "description": "Neutral is not support."
+    }
+  }
+}

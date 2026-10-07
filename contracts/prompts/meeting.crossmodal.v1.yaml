@@ -1,0 +1,47 @@
+# Motivation vs Logic
+# Motivation: Sol must judge one already extracted speech span against one overlapping visual observation.
+# Logic: The fill object echoes both ids and labels agreement or disagreement. It does not write a second transcript.
+id: meeting.crossmodal.v1
+version: 1
+model_role: llm
+schema: meeting.crossmodal.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - sonic_span_id
+    - observation_id
+    - quote
+    - observation
+  exclude:
+    - raw_transcript
+    - audio
+    - other_lens_prose
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.crossmodal.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  You are a blinded pass over already extracted spans.
+  This is not a second transcript. Do not transcribe audio.
+  You receive one speech quote and one visual observation that overlap in time.
+  Echo sonic_span_id and observation_id exactly.
+  relation is agreement or disagreement.
+  On agreement, do not write a merged sentence.
+  On disagreement, statement is the conflict. Keep both records. Do not smooth them into one sentence.
+  Do not rewrite the speech text.
+  Do not emit character offsets. Quote resolution stays in code.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

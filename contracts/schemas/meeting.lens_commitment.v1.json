@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.lens_commitment.v1.json",
+  "title": "LensCommitment",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "disposition"
+      ],
+      "properties": {
+        "dimension": {
+          "const": "commitment"
+        },
+        "disposition": {
+          "const": "none_in_transcript"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "disposition",
+        "findings",
+        "actions"
+      ],
+      "properties": {
+        "dimension": {
+          "const": "commitment"
+        },
+        "disposition": {
+          "const": "findings"
+        },
+        "findings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statement",
+              "stance",
+              "claim_ids"
+            ],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stance": {
+                "type": "string",
+                "enum": [
+                  "supports",
+                  "conflicts",
+                  "unknown"
+                ]
+              },
+              "claim_ids": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statement",
+              "owner_span_id",
+              "agreement_span_id",
+              "due_kind",
+              "due_surface",
+              "due_span_id",
+              "claim_ids",
+              "acceptance"
+            ],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner_span_id": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "agreement_span_id": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "due_kind": {
+                "type": "string",
+                "enum": [
+                  "absolute",
+                  "relative",
+                  "none"
+                ]
+              },
+              "due_surface": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "due_span_id": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "claim_ids": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "acceptance": {
+                "const": "proposed"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "due_kind": {
+                      "const": "none"
+                    }
+                  },
+                  "required": [
+                    "due_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "due_surface": {
+                      "type": "null"
+                    },
+                    "due_span_id": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "due_kind": {
+                      "const": "absolute"
+                    }
+                  },
+                  "required": [
+                    "due_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "due_surface": {
+                      "type": "string",
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                    },
+                    "due_span_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "due_kind": {
+                      "const": "relative"
+                    }
+                  },
+                  "required": [
+                    "due_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "due_surface": {
+                      "type": "string",
+                      "minLength": 1,
+                      "not": {
+                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                      }
+                    },
+                    "due_span_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

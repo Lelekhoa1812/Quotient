@@ -1,0 +1,41 @@
+# Motivation vs Logic
+# Motivation: A Pegasus part must return one complete observations object at the vendor output maximum.
+# Logic: Local part times become cited observations. A sentence with no time range is a note. Truncation fails the call.
+id: meeting.pegasus.v1
+version: 1
+model_role: pegasus
+schema: meeting.pegasus.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - video_part
+  exclude:
+    - char_offsets
+    - partial_json
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.pegasus.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Describe what is visible in this video part.
+  The inputPrompt budget is the vendor maximum of 2000 tokens.
+  maxOutputTokens stays at the vendor maximum of 4096.
+  Each observation has a statement.
+  When you know the time, start_ms and end_ms are both present and are milliseconds from the start of this part.
+  A statement with no time range cannot support a claim. Put that statement in notes.
+  Do not emit character offsets. Quote resolution stays in code.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

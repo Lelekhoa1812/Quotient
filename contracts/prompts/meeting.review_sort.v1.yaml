@@ -1,0 +1,31 @@
+# Motivation vs Logic
+# Motivation: A human reviewer should see the most urgent queued item first.
+# Logic: Shared state is this body. Each Score question carries one id, proposition, and quote. There is no model_role.
+id: meeting.review_sort.v1
+version: 1
+schema: meeting.review_sort.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+question: How urgently should a human reviewer look at this one queued item?
+criteria:
+  - No deadline and no consequence if a reviewer waits
+  - Useful this week, no same-day consequence
+  - A reviewer should see this today
+  - Same-day consequence if a reviewer waits
+body: |
+  Rate how soon a human reviewer should look at the one queued item in the question.
+  The item's id, proposition, and quote are in that question. This shared note is not a claim.
+  Do not decide entailment. Do not write a synthesis or a dissent. Do not emit a chart number or a character offset.
+  A higher level means the reviewer should look sooner. This is not a publish decision.

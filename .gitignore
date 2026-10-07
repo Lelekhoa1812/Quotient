@@ -1,0 +1,36 @@
+.env
+node_modules/
+
+# local boot pidfiles and logs
+.local/
+.venv/
+src/*.mp4
+
+# media derivatives
+derivatives/
+*.pcm
+*.lpcm
+
+.agents
+.cursor
+.claude
+
+*mp4
+*mp3
+*wav
+*flac
+*m4a
+*wma
+*aac
+*ogg
+*opus
+*webm
+*mkv
+*avi
+*mov
+*mpg
+*mpeg
+
+.zip
+.docx
+.pdf

@@ -1,0 +1,46 @@
+# Motivation vs Logic
+# Motivation: finishReason length discarded the partial message, so this call must stand alone.
+# Logic: Ask for one complete observations object. Forbid repair and concatenation of any partial JSON value.
+id: meeting.pegasus.continue.v1
+version: 1
+model_role: pegasus
+schema: meeting.pegasus.continue.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - video_part
+  exclude:
+    - partial_json
+    - char_offsets
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.pegasus.continue.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  The previous response stopped because finishReason was length.
+  That partial text was discarded. It is not in this call.
+  Emit one complete JSON object for this same video part.
+  Do not repair a partial JSON value.
+  Do not concatenate a partial JSON value.
+  Do not continue an open bracket or an open string from any previous message.
+  Use observations and notes.
+  When you know the time, start_ms and end_ms are both present and are milliseconds from the start of this part.
+  A statement with no time range cannot support a claim. Put that statement in notes.
+  Do not emit character offsets. Quote resolution stays in code.
+  The inputPrompt budget is the vendor maximum of 2000 tokens.
+  maxOutputTokens stays at the vendor maximum of 4096.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one complete JSON object that validates against the schema. No markdown fence. A truncated object is a failed call.
