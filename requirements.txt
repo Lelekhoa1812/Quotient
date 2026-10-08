@@ -1,0 +1,11 @@
+# Runtime dependencies of the MCP API and the analysis worker, pinned to the versions the local
+# services run with. apps/api/pyproject.toml declares the API's own ranges; this file pins the
+# full set, including the worker's HTTP/2 transport and SigV4 signing, which no manifest declares.
+PyJWT[crypto]==2.15.1
+starlette==1.7.0
+uvicorn==0.54.0
+h2==4.4.1
+botocore==1.43.108
+PyYAML==6.0.3
+jsonschema==4.26.0
+openpyxl==3.1.5

@@ -63,7 +63,7 @@ the release and shown read-only. Changing settings requires a same-origin JSON r
 sentences under a "Partial brief" notice. The `quotient://meetings/{id}/brief` resource still
 reports `withheld: true`; that MCP contract is unchanged.
 
-**Benchmark harness.** `scripts/bench_meeting.py <object_key> <label>` submits a file under
+**Benchmark harness.** `.venv/bin/python scripts/bench_meeting.py <object_key> <label>` submits a file under
 `derivatives/` and writes `submitted/result/summary/graph` JSON to `.local/run/bench/`. See
 `docs/quality-ledger.md` for results.
 
