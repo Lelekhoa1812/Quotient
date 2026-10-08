@@ -5,6 +5,7 @@ import json
 from starlette.testclient import TestClient
 
 from quotient.app import create_app
+from quotient.graph.gate import page_graph
 from quotient.worker.memory import MemoryPort
 
 from conftest import open_session, rpc
@@ -82,6 +83,18 @@ def test_read_span_and_read_graph_expose_raw_and_synthesized_strings():
             "tools/call",
             {"name": "read_span", "arguments": {"meeting_id": meeting_id, "span_id": "s-early"}},
         )
+        revised = rpc(
+            client,
+            headers,
+            "tools/call",
+            {"name": "revise_text", "arguments": {"meeting_id": meeting_id, "span_id": "s-early", "text": "alpha corrected"}},
+        )
+        speaker = rpc(
+            client,
+            headers,
+            "tools/call",
+            {"name": "revise_speaker", "arguments": {"meeting_id": meeting_id, "span_id": "s-early", "scope": "span", "display_name": "Speaker A"}},
+        )
         late = rpc(
             client,
             headers,
@@ -97,6 +110,10 @@ def test_read_span_and_read_graph_expose_raw_and_synthesized_strings():
     late_body = late["result"]["structuredContent"]
     assert early_body["raw_text"] == "alpha from audio"
     assert early_body["text"] == "alpha synthesized"
+    revised_span = revised["result"]["structuredContent"]
+    assert revised_span["text"] == "alpha corrected"
+    assert revised_span["raw_text"] == "alpha from audio"
+    assert speaker["result"]["structuredContent"]["status"] == "needs_review"
     assert late_body["raw_text"] == "beta from audio"
     assert late_body["text"] == "beta synthesized"
 
@@ -114,6 +131,37 @@ def test_read_span_and_read_graph_expose_raw_and_synthesized_strings():
     stored = json.loads(resource["result"]["contents"][0]["text"])
     assert stored["raw_transcript"] == page["raw_transcript"]
     assert stored["spans"][2]["raw_text"] == "alpha from audio"
-    assert stored["spans"][2]["text"] == "alpha synthesized"
+    assert stored["spans"][2]["text"] == "alpha corrected"
     published = json.loads(brief["result"]["contents"][0]["text"])
     assert "raw_transcript" not in published
+
+
+def test_graph_pagination_sends_large_shared_metadata_only_on_first_page():
+    graph = {
+        "meeting_id": "m1",
+        "status": "needs_review",
+        "prompt_release": "release",
+        "playback": "meetings/m1",
+        "dimensions": [{"dimension": "decision", "state": "none_in_transcript"}],
+        "raw_transcript": {"audio": "large transcript", "video": "visual notes"},
+        "charts": [{"chart_id": "c1", "title": "Timeline"}],
+        "synthesis_omissions": [{"finding_id": "f1", "reason": "unsupported"}],
+        "dissent_omissions": [],
+        "spans": [{"span_id": f"s{i}"} for i in range(75)],
+        "claims": [{"claim_id": f"c{i}"} for i in range(75)],
+        "findings": [],
+        "synthesis": [],
+        "actions": [],
+        "disagreements": [],
+        "omissions": [],
+    }
+    first, next_offset = page_graph(graph, 0, 50)
+    second, final_offset = page_graph(graph, next_offset, 50)
+    assert next_offset == 50
+    assert final_offset is None
+    assert first["raw_transcript"] == graph["raw_transcript"]
+    assert first["charts"] == graph["charts"]
+    assert "raw_transcript" not in second
+    assert "charts" not in second
+    assert "dimensions" not in second
+    assert len(first["spans"]) + len(second["spans"]) == 75

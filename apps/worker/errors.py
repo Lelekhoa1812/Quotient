@@ -40,3 +40,11 @@ class NotInvocable(RuntimeError):
         self.model_id = model_id
         self.code = code
         super().__init__(f"{model_id} rejected the call ({code})")
+
+
+class AnalysisCancelled(Exception):
+    """The meeting was cancelled while its analysis was running. Not a failure."""
+
+
+class NoAudioTrack(ValueError):
+    """The recording has no audio stream, so there is nothing to transcribe."""

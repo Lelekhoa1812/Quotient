@@ -29,6 +29,8 @@ class Claim:
     opened_ids: list[str] = field(default_factory=list)
     contradicting_quote: str | None = None
     evidence_kind: str = "span"
+    # Extractor-provided evidence candidates, validated against its input window.
+    source_span_ids: list[str] | None = None
 
 
 @dataclass

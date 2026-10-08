@@ -145,7 +145,16 @@ async def _post(request: Request, runtime: object) -> Response:
     content_type = request.headers.get("content-type", "")
     if not content_type.lower().startswith("application/json"):
         return _json(error(INVALID_REQUEST, "Content-Type must be application/json", None), status=400)
-    body = await request.body()
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > _MAX_BODY:
+        return _json(error(INVALID_REQUEST, "Request body is too large", None), status=413)
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_BODY:  # stop reading; do not buffer an unbounded upload
+            return _json(error(INVALID_REQUEST, "Request body is too large", None), status=413)
+    body = bytes(body)
+    request._body = body  # later request.body() calls (audit, parsing) read the same bytes
     if len(body) > _MAX_BODY:
         return _json(error(INVALID_REQUEST, "Request body is too large", None), status=400)
     try:

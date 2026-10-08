@@ -20,7 +20,13 @@ def finalize_claim(claim: Claim, spans: list[Span], *, duration_ms: int) -> Clai
     if claim.evidence_kind == "uncited_note":
         claim.status = "unresolved"
         return claim
-    resolution = resolve_quote(claim.quote, spans, meeting_id=claim.meeting_id, duration_ms=duration_ms)
+    resolution = resolve_quote(
+        claim.quote,
+        spans,
+        meeting_id=claim.meeting_id,
+        duration_ms=duration_ms,
+        span_ids=set(claim.source_span_ids) if claim.source_span_ids is not None else None,
+    )
     if resolution.status != "resolved":
         claim.status = "unresolved"
         return claim

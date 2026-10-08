@@ -146,6 +146,7 @@ def test_portal_series_are_the_worker_table(tmp_path, monkeypatch):
     assert review == {"review_queue": 2, "published": 1}
     density = [(row["label"], row["value"]) for row in found["timeline-density"]["rows"]]
     assert density == [("s1", 2), ("s2", 3), ("s3", 3), ("s4", 2)]
+    assert all(row["ids"] == [row["label"]] for row in found["timeline-density"]["rows"])
     assert "s4" in {row["label"] for row in found["timeline-density"]["rows"]}
     assert "v1" not in {row["label"] for row in found["timeline-density"]["rows"]}
     blob = json.dumps(charts).casefold()
@@ -160,6 +161,16 @@ def test_portal_series_are_the_worker_table(tmp_path, monkeypatch):
     assert "sandbox-test-credential" not in page
     assert "http" not in page
     assert "src=" not in page
+
+
+def test_timeline_density_stays_compact_for_many_overlapping_spans():
+    meeting = graph()
+    meeting["spans"] = [_span(f"s{i}", "speech", 0, 1_200_000, None) for i in range(500)]
+    density = _by_id(portal_charts(meeting))["timeline-density"]
+    assert len(density["rows"]) == 500
+    assert all(row["value"] == 500 for row in density["rows"])
+    assert all(row["ids"] == [row["label"]] for row in density["rows"])
+    assert len(json.dumps(density)) < 100_000
 
 
 def test_missing_ids_and_numeric_literals_fail_closed(tmp_path):

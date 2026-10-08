@@ -11,22 +11,32 @@ export type SettingField = {
   label: string;
   secret: boolean;
   group: "Keys" | "Models";
+  /** Only keys the worker actually reads can be changed here. */
+  editable: boolean;
 };
 
 export const SETTINGS: SettingField[] = [
-  { key: "AWS_BEDROCK_API_KEY", label: "Bedrock API key", secret: true, group: "Keys" },
-  { key: "JEV_TYPESAFE_API_KEY", label: "TypeSafe API key", secret: true, group: "Keys" },
-  { key: "AWS_BEDROCK_TRANSCRIBE", label: "Transcription model", secret: false, group: "Models" },
-  { key: "AWS_BEDROCK_TRANSCRIBE_REGION", label: "Transcription region", secret: false, group: "Models" },
-  { key: "AWS_BEDROCK_MEETING", label: "Meeting model", secret: false, group: "Models" },
-  { key: "AWS_BEDROCK_LLM", label: "Language model", secret: false, group: "Models" },
-  { key: "AWS_BEDROCK_SLM", label: "Smaller model", secret: false, group: "Models" },
+  { key: "AWS_BEDROCK_API_KEY", label: "Analysis service key", secret: true, group: "Keys", editable: true },
+  { key: "JEV_TYPESAFE_API_KEY", label: "Sorting service key", secret: true, group: "Keys", editable: true },
+  { key: "AWS_BEDROCK_TRANSCRIBE", label: "Transcription model", secret: false, group: "Models", editable: false },
+  { key: "AWS_BEDROCK_TRANSCRIBE_REGION", label: "Transcription location", secret: false, group: "Models", editable: false },
+  { key: "AWS_BEDROCK_MEETING", label: "Meeting analysis model", secret: false, group: "Models", editable: false },
+  { key: "AWS_BEDROCK_LLM", label: "Reasoning model", secret: false, group: "Models", editable: false },
+  { key: "AWS_BEDROCK_SLM", label: "Fast checking model", secret: false, group: "Models", editable: false },
 ];
 
 const ALLOWED = new Set(SETTINGS.map((field) => field.key));
 
 export function isSettingKey(key: string): boolean {
   return ALLOWED.has(key);
+}
+
+// Bugs vs Fixes
+// Bug: The model and region fields were editable, but the worker pins its models in the release
+// and never reads these values, so saving them silently did nothing.
+// Fix: Only keys the worker reads (the two API keys) are writable. The rest are shown read-only.
+export function isEditableKey(key: string): boolean {
+  return SETTINGS.some((field) => field.key === key && field.editable);
 }
 
 export function settingField(key: string): SettingField | undefined {

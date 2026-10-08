@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Protocol
@@ -79,9 +80,13 @@ class WorkerPort(Protocol):
         display_name: str,
     ) -> dict: ...
 
+    def revise_text(self, meeting_id: str, subject: str, span_id: str, text: str) -> dict: ...
+
     def cancel(self, meeting_id: str, subject: str) -> dict: ...
 
     def export_bytes(self, meeting_id: str, subject: str, name: str) -> tuple[str, bytes] | None: ...
+
+    def media_url(self, meeting_id: str, subject: str) -> str | None: ...
 
 
 def _repo_root() -> Path:
@@ -117,8 +122,16 @@ def _import_worker_port() -> WorkerPort | None:
 def load_worker_port() -> WorkerPort:
     try:
         loaded = _import_worker_port()
-    except Exception:
-        logger.info("worker port unavailable; using the memory ledger")
+    except Exception as exc:
+        # Bugs vs Fixes
+        # Bug: Any failure (for example a corrupt local meetings file) fell back to a ledger that
+        # never runs analysis, so new meetings stayed "queued" forever with no visible cause.
+        # Fix: In the local environment, fail startup loudly. Elsewhere keep the fallback, now on stderr.
+        print(f"worker port failed to load: {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr, flush=True)
+        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+            raise RuntimeError(
+                "The local worker could not start (see the line above). Fix or move .local/run/meetings.json and start again."
+            ) from exc
         loaded = None
     if loaded is None:
         from quotient.worker.memory import MemoryPort

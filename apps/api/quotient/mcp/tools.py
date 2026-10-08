@@ -1,6 +1,6 @@
 """Motivation vs Logic
 
-Motivation: The seven tools are the only meeting operations partners can call.
+Motivation: The eight tools are the only meeting operations partners can call.
 submit_meeting has to run as a task. Reads are read-only. Cancel is destructive.
 Logic: TOOLS is the tools/list catalog. call_tool enforces taskSupport before
 it touches arguments, then dispatches the read and edit tools. submit_meeting
@@ -92,7 +92,8 @@ TOOLS: list[dict] = [
         "title": "Read graph",
         "description": (
             "Read one page of the provenance graph: spans, claims, findings, synthesis, actions, "
-            "disagreements, and omissions. Every dimension is findings or none_in_transcript. "
+            "disagreements, and omissions. Every dimension is findings, none_in_transcript, or not_evaluated. "
+            "Shared dimensions, charts, and the joined raw_transcript are included on the first page only. "
             "Each span includes raw_text and text. raw_transcript.audio joins span raw_text in time order. "
             "raw_transcript.video joins Pegasus observation statements in time order. "
             "Citations include start_ms, end_ms, and a playback path. "
@@ -166,8 +167,7 @@ TOOLS: list[dict] = [
         "title": "Revise speaker",
         "description": (
             "Set the speaker display on one span, or on every span that shares that span's speaker hypothesis. "
-            "The analysis run does not wait for this call. "
-            "Schedules claim checks to run again in the worker. Accepted actions are kept. raw_text is not changed."
+            "This updates the transcript presentation immediately; it does not rerun analysis. raw_text is unchanged."
         ),
         "inputSchema": _schema(
             {
@@ -193,6 +193,18 @@ TOOLS: list[dict] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+    },
+    {
+        "name": "revise_text",
+        "title": "Revise transcript text",
+        "description": "Edit the synthesized text for one transcript span. The original raw_text is preserved; this edit does not rerun analysis.",
+        "inputSchema": _schema({
+            "meeting_id": _MEETING,
+            "span_id": {"type": "string", "description": "Span to edit."},
+            "text": {"type": "string", "description": "Corrected synthesized transcript text."},
+        }, ["meeting_id", "span_id", "text"]),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {"title": "Revise transcript text", "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
         "name": "cancel_meeting",
@@ -257,6 +269,7 @@ def _handlers() -> dict[str, Callable]:
         "read_span": _read_span,
         "accept_action": _accept_action,
         "revise_speaker": _revise_speaker,
+        "revise_text": _revise_text,
         "cancel_meeting": _cancel_meeting,
     }
 
@@ -316,6 +329,22 @@ def _revise_speaker(arguments: dict, subject: str, port: object) -> dict:
     raw = port.revise_speaker(meeting_id, subject, span_id, scope, display_name)  # type: ignore[attr-defined]
     projected = project_meeting(raw)
     return summary(projected)
+
+
+def _revise_text(arguments: dict, subject: str, port: object) -> dict:
+    meeting_id = _required_id(arguments, "meeting_id")
+    span_id = _required_text(arguments, "span_id")
+    text = arguments.get("text")
+    if not isinstance(text, str):
+        raise ValueError("text must be a string")
+    if len(text) > 20_000:
+        raise ValueError("text is too long")
+    raw = port.revise_text(meeting_id, subject, span_id, text)  # type: ignore[attr-defined]
+    projected = project_meeting(raw)
+    for span in projected["graph"]["spans"]:
+        if span.get("span_id") == span_id:
+            return span
+    raise PortError("not_found", "Span not found.")
 
 
 def _cancel_meeting(arguments: dict, subject: str, port: object) -> dict:

@@ -116,7 +116,8 @@ def gate(
     if set(brief["claim_ids"]) & set(review_queue):
         raise RuntimeError("a queued claim entered the brief")
     status = "ready"
-    if review_queue or not covered or conflicts_hidden:
+    unevaluated = [name for name, value in published_dimensions.items() if value == "not_evaluated"]
+    if review_queue or not covered or conflicts_hidden or gaps or unevaluated:
         status = "needs_review"
     if ceiling_hit:
         status = "needs_review"
@@ -127,7 +128,7 @@ def gate(
         "claims": "ready",
         "counterevidence": "ready",
         "entailment": "ready",
-        "coverage": "ready" if covered else "incomplete",
+        "coverage": "ready" if covered and not gaps else "incomplete",
         "exports": "not_run",
     }
     return GateResult(

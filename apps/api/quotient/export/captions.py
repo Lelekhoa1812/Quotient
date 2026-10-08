@@ -3,7 +3,9 @@
 Motivation: Captions are a projection of speech spans onto the source clock,
 including spans left out of model payloads.
 Logic: WebVTT and SRT cues use start_ms and end_ms. Cue text is the human text
-field. No model is asked to rewrite a line.
+field. No model is asked to rewrite a line. When a cue would still be on screen
+as the next one starts, its end is cut to that start so two lines are never
+shown at once; cues that start together are left as they are.
 """
 
 from __future__ import annotations
@@ -25,6 +27,15 @@ def _document(spans: list[dict], *, separator: str) -> str:
             continue
         start_ms, end_ms = _bounds(span)
         cues.append((start_ms, end_ms, text))
+    # Bugs vs Fixes
+    # Bug: Neighbouring spans overlap (the sample-clock estimate is coarse), so players stacked
+    # two captions on screen.
+    # Fix: End a cue where the next one begins when they overlap.
+    for position in range(len(cues) - 1):
+        start_ms, end_ms, text = cues[position]
+        next_start = cues[position + 1][0]
+        if start_ms < next_start < end_ms:
+            cues[position] = (start_ms, next_start, text)
     lines: list[str] = []
     if separator == ".":
         lines.extend(["WEBVTT", ""])

@@ -10,9 +10,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from bedrock.wire import Transport
+from bedrock.wire import Transport, invalidate_iam
 from graph.span import Span
 from loop.pool import map_ordered
 from loop.quality import Ledger
@@ -20,17 +21,43 @@ from media.clock import build_table
 from media.compact import IndexedSpan
 from media.pcm import write_pcm
 from media.probe import classify_file, probe
-from pegasus.client import PegasusClient
+from pegasus.client import PegasusClient, VisualNote
 from pegasus.parts import pack_scenes
 from registry.load import Registry
 from sonic.client import SonicClient
 
-LIVE_CEILING = 240
-_BUCKET = "axion-meeting-probe-255834078973-apse2"
+_BUCKET = "axion-meeting-local"
 
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+# Motivation vs Logic
+# Motivation: ffmpeg and aws calls had no timeout, so a hung process left a meeting "working"
+# forever and held its thread. Logic: Generous fixed ceilings (a long recording legitimately
+# takes minutes); a timeout raises and the meeting fails with a plain message.
+MEDIA_TIMEOUT_SECONDS = int(os.environ.get("QUOTIENT_MEDIA_TIMEOUT_SECONDS", "3600"))
+UPLOAD_TIMEOUT_SECONDS = int(os.environ.get("QUOTIENT_UPLOAD_TIMEOUT_SECONDS", "1800"))
+
+
+def _transcript_cache(scope: str | None, pcm: bytes, registry, context: str | None):
+    """Per-owner, per-audio cache of finished transcription segments. Off unless local or configured."""
+    from bedrock.limits import SONIC_HANDOFF_SAMPLES, SONIC_MODEL
+    from registry.ids import SONIC
+    from sonic.cache import TranscriptCache, cache_key
+
+    directory = os.environ.get("QUOTIENT_TRANSCRIPT_CACHE_DIR", "").strip()
+    if directory.lower() == "off" or not scope:
+        return None
+    if not directory:
+        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
+            return None
+        directory = str(repo_root() / ".local" / "run" / "transcripts")
+    key = cache_key(
+        scope, pcm, handoff=SONIC_HANDOFF_SAMPLES, model=SONIC_MODEL, version=registry.prompt(SONIC).version, context=context
+    )
+    return TranscriptCache(Path(directory), key)
 
 
 def resolve_object(object_key: str) -> Path:
@@ -44,7 +71,39 @@ def resolve_object(object_key: str) -> Path:
     return candidate
 
 
-def assemble(path: Path, meeting_id: str, *, context: str | None = None) -> Ledger:
+def assemble(
+    path: Path,
+    meeting_id: str,
+    *,
+    context: str | None = None,
+    progress_callback=None,
+    should_stop=None,
+    cache_scope: str | None = None,
+) -> Ledger:
+    # The extracted PCM is large and contains the full spoken meeting. Keep it
+    # outside derivatives and remove it after success or any failed stage.
+    with tempfile.TemporaryDirectory(prefix="quotient-audio-") as temporary:
+        return _assemble(
+            path,
+            meeting_id,
+            pcm_path=Path(temporary) / "audio.pcm",
+            context=context,
+            progress_callback=progress_callback,
+            should_stop=should_stop,
+            cache_scope=cache_scope,
+        )
+
+
+def _assemble(
+    path: Path,
+    meeting_id: str,
+    *,
+    pcm_path: Path,
+    context: str | None = None,
+    progress_callback=None,
+    should_stop=None,
+    cache_scope: str | None = None,
+) -> Ledger:
     info = probe(path)
     kind = classify_file(path)
     duration_ms = _duration_ms(info)
@@ -52,8 +111,6 @@ def assemble(path: Path, meeting_id: str, *, context: str | None = None) -> Ledg
     # Bug: PCM, silence detection, and the S3 put ran one after another, and
     # Sonic's real-time stream finished before Pegasus was even opened.
     # Fix: Prepare the file on three threads, then run Sonic and Pegasus together.
-    pcm_path = path.with_suffix(".pcm")
-
     def prepare_pcm() -> None:
         _stage("pcm")
         write_pcm(path, pcm_path)
@@ -72,10 +129,20 @@ def assemble(path: Path, meeting_id: str, *, context: str | None = None) -> Ledg
     registry = Registry()
     transport = Transport()
     table = build_table(duration_ms, [])
+    if progress_callback:
+        if kind == "video" and os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip():
+            progress_callback("Streaming audio transcription; visual analysis is unavailable on local MinIO")
+        elif kind == "video":
+            progress_callback("Transcribing audio and analyzing video in parallel")
+        else:
+            progress_callback("Streaming audio transcription")
 
     def run_sonic():
         _stage("sonic")
         client = SonicClient(registry, transport)
+        client.should_stop = should_stop
+        client.refresh_credentials = invalidate_iam
+        client.cache = _transcript_cache(cache_scope, pcm, registry, context)
         return client.transcribe(
             pcm,
             meeting_id=meeting_id,
@@ -85,6 +152,19 @@ def assemble(path: Path, meeting_id: str, *, context: str | None = None) -> Ledg
         )
 
     def run_pegasus():
+        # AWS Bedrock cannot read objects from a developer's local S3-compatible
+        # endpoint. Keep the local upload path exercised, but do not hand a
+        # MinIO URI to Pegasus as if it were an AWS-owned bucket.
+        if os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip():
+            _stage("pegasus_skipped_local_s3")
+            note = VisualNote(
+                id=f"{meeting_id}-note-local-s3",
+                statement=(
+                    "Visual analysis was skipped because the media is stored in a local S3-compatible "
+                    "endpoint that Bedrock cannot access."
+                ),
+            )
+            return [], [note]
         _stage("pegasus")
         scenes = [(0, duration_ms)]
         parts = pack_scenes(scenes)
@@ -200,7 +280,11 @@ def _silence_ranges(path: Path, duration_ms: int) -> list[tuple[int, int]]:
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
+        timeout=MEDIA_TIMEOUT_SECONDS,
     )
+    if completed.returncode != 0 and "silence_" not in (completed.stderr or ""):
+        # A failed run used to read as "no silence found", so the whole file counted as speech.
+        raise subprocess.CalledProcessError(completed.returncode, ["ffmpeg", "silencedetect"], stderr=completed.stderr)
     ranges: list[tuple[int, int]] = []
     start: int | None = None
     for line in (completed.stderr or "").splitlines():
@@ -260,6 +344,7 @@ def _cut(path: Path, part) -> Path:
         check=True,
         capture_output=True,
         stdin=subprocess.DEVNULL,
+        timeout=MEDIA_TIMEOUT_SECONDS,
     )
     return dest
 
@@ -269,25 +354,64 @@ def _put_object(path: Path, key: str) -> str:
     # Bug: The object went up without a video content type, and Pegasus
     # answered that the video was unprocessable.
     # Fix: Set the object content type to video/mp4 on the upload.
-    bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", _BUCKET).strip() or _BUCKET
+    bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", "").strip()
+    if not bucket:
+        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
+            raise RuntimeError("QUOTIENT_MEDIA_BUCKET must be configured outside local development")
+        bucket = _BUCKET
     uri = f"s3://{bucket}/{key}"
-    completed = subprocess.run(
+    endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
+    command = [
+        "aws",
+        "s3",
+        "cp",
+        str(path),
+        uri,
+        "--region",
+        os.environ.get("AWS_REGION", "ap-southeast-2"),
+    ]
+    if endpoint:
+        command.extend(["--endpoint-url", endpoint])
+    command.extend(
         [
-            "aws",
-            "s3",
-            "cp",
-            str(path),
-            uri,
-            "--region",
-            "ap-southeast-2",
             "--content-type",
             "video/mp4",
             "--only-show-errors",
-        ],
+        ]
+    )
+    upload_env = None
+    if endpoint:
+        # MinIO credentials must not replace the worker's AWS identity. Bedrock
+        # uses the normal process credential chain while this child alone gets
+        # credentials for the developer's local S3-compatible service.
+        access_key = os.environ.get("QUOTIENT_S3_ACCESS_KEY_ID", "")
+        secret_key = os.environ.get("QUOTIENT_S3_SECRET_ACCESS_KEY", "")
+        if bool(access_key) != bool(secret_key):
+            raise RuntimeError("Local S3 credentials must include both access and secret keys")
+        upload_env = os.environ.copy()
+        if access_key and secret_key:
+            upload_env["AWS_ACCESS_KEY_ID"] = access_key
+            upload_env["AWS_SECRET_ACCESS_KEY"] = secret_key
+            upload_env.pop("AWS_SESSION_TOKEN", None)
+    completed = subprocess.run(
+        command,
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
+        env=upload_env,
+        timeout=UPLOAD_TIMEOUT_SECONDS,
     )
     if completed.returncode != 0:
-        raise RuntimeError(f"S3 upload failed ({completed.returncode})")
+        # Keep the failure useful without copying arbitrary CLI output into the
+        # meeting's public failure message (which may contain account details).
+        diagnostic = (completed.stderr or "").casefold()
+        if "session has expired" in diagnostic or "expiredtoken" in diagnostic:
+            reason = "AWS session expired; reauthenticate with `aws login`"
+        elif "accessdenied" in diagnostic or "access denied" in diagnostic or "not authorized" in diagnostic:
+            reason = "AWS credentials lack permission to upload the media object"
+        elif "could not connect" in diagnostic or "connection timed out" in diagnostic:
+            reason = "S3 endpoint could not be reached; check endpoint and network connectivity"
+        else:
+            reason = "check AWS credentials, bucket configuration, and upload permissions"
+        raise RuntimeError(f"S3 upload failed: {reason}")
     return uri

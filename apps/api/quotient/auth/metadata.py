@@ -66,8 +66,12 @@ def environment_locks_bypass(env: Mapping[str, str]) -> bool:
 
 
 def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> AuthSettings:
-    resource = env.get("QUOTIENT_RESOURCE_URL", "").strip() or "http://127.0.0.1:8080/mcp"
-    issuer = env.get("QUOTIENT_AUTHORIZATION_SERVER", "").strip()
+    resource = (
+        env.get("QUOTIENT_RESOURCE_URL", "").strip()
+        or env.get("MCP_RESOURCE_URL", "").strip()
+        or "http://127.0.0.1:8080/mcp"
+    )
+    issuer = env.get("QUOTIENT_AUTHORIZATION_SERVER", "").strip() or env.get("COGNITO_ISSUER", "").strip()
     if not issuer:
         issuer = "https://cognito-idp.ap-southeast-2.amazonaws.com/unconfigured"
     origins = _csv_origins(env.get("QUOTIENT_ALLOWED_ORIGINS", ""))
@@ -80,7 +84,19 @@ def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> A
                 "http://localhost:8080",
             }
         )
-    enabled = bypass_requested(env, auth_bypass) and not environment_locks_bypass(env)
+    # Motivation vs Logic
+    # Motivation: The bypass makes every caller the shared subject "local-dev". It was locked
+    # only for staging and production, so an unset or misspelled QUOTIENT_ENVIRONMENT ("prod")
+    # failed open.
+    # Logic: The QUOTIENT_AUTH_BYPASS environment flag is honoured only when
+    # QUOTIENT_ENVIRONMENT is exactly "local". An explicit auth_bypass=True argument (tests,
+    # embedding code) still works except in staging and production.
+    environment = env.get("QUOTIENT_ENVIRONMENT", "").strip().lower()
+    if auth_bypass is None:
+        enabled = bypass_requested(env, None) and environment == "local"
+    else:
+        enabled = bypass_requested(env, auth_bypass) and not environment_locks_bypass(env)
+    enabled = enabled and not environment_locks_bypass(env)
     return AuthSettings(
         resource_url=resource,
         authorization_server=issuer,

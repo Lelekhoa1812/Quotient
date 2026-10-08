@@ -70,8 +70,8 @@ def require_dimensions(dimensions: dict) -> None:
         raise DimensionSkipped("skipped dimensions: " + ", ".join(missing))
     for name in LENS_ORDER:
         value = dimensions[name]
-        if value != "none_in_transcript" and not value:
-            raise DimensionSkipped(f"{name} has no finding and no none_in_transcript marker")
+        if value not in ("none_in_transcript", "not_evaluated") and not value:
+            raise DimensionSkipped(f"{name} has no finding, no none_in_transcript marker, and no not_evaluated marker")
 
 
 def run_lenses(model, registry, claims: list) -> dict:
@@ -79,6 +79,9 @@ def run_lenses(model, registry, claims: list) -> dict:
         "claims": [
             {
                 "id": claim.id,
+                # The lens contracts ask for owner/agreement/due span ids and offer open_span;
+                # without a span id here the model opened claim ids instead.
+                "span_id": claim.span_id,
                 "kind": claim.kind,
                 "paraphrase": claim.paraphrase,
                 "quote": claim.quote,
@@ -101,9 +104,17 @@ def run_lenses(model, registry, claims: list) -> dict:
     findings: list[Finding] = []
     for dimension, turn in map_ordered(ask, LENS_ORDER):
         output = turn.output or {}
+        # An empty answer (for example a tool call nobody could run) says nothing about
+        # the recording. It is "not evaluated", never "none in transcript".
+        if not output:
+            dimensions[dimension] = "not_evaluated"
+            continue
         disposition = output.get("disposition") or output.get("result")
         if disposition == "none_in_transcript":
             dimensions[dimension] = "none_in_transcript"
+            continue
+        if disposition == "not_evaluated":
+            dimensions[dimension] = "not_evaluated"
             continue
         sibling_actions = list(output.get("actions") or []) if dimension == "commitment" else []
         built: list[Finding] = []

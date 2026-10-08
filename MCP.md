@@ -51,13 +51,13 @@ The metadata document contains:
 - `scopes_supported`: `["quotient:meetings"]`
 - `resource_name`: `Quotient`
 
-Until `QUOTIENT_AUTHORIZATION_SERVER` is set, metadata advertises `https://cognito-idp.ap-southeast-2.amazonaws.com/unconfigured`. Replace that with the staging user-pool issuer before any non-local deployment.
+Until `QUOTIENT_AUTHORIZATION_SERVER` (or the CDK deployment variable `COGNITO_ISSUER`) is set, metadata advertises `https://cognito-idp.ap-southeast-2.amazonaws.com/unconfigured`. Replace that with the staging user-pool issuer before any non-local deployment. Configure the canonical MCP URL with `QUOTIENT_RESOURCE_URL` or `MCP_RESOURCE_URL`. Configure `QUOTIENT_OAUTH_CLIENT_IDS` or `COGNITO_CLIENT_ID` when access tokens do not contain a resource `aud` claim.
 
 The scope challenged on HTTP 401 is `quotient:meetings`. A token that verifies but lacks that scope receives HTTP 403 and `error="insufficient_scope"`.
 
 ### Token check in this build
 
-`TokenVerifier` is the extension point for Cognito JWKS (RS256, issuer match, `token_use=access`, audience or resource equal to the canonical MCP URL). The shipped verifier is a stub: every bearer token is rejected with HTTP 401 and `error="invalid_token"`. Signature checks are not performed. Do not point a partner at this stub and expect a Cognito token to succeed.
+The API verifies Cognito access tokens against the configured user-pool JWKS using RS256, exact issuer matching, expiration and issue-time checks, and `token_use=access`. A token with `aud` must target the canonical MCP resource URL. A token without `aud` must have a `client_id` in `QUOTIENT_OAUTH_CLIENT_IDS` (or the CDK variable `COGNITO_CLIENT_ID`). The API then enforces the `quotient:meetings` scope. An unset or `unconfigured` issuer fails closed; it never accepts bearer tokens.
 
 ### Local bypass
 
@@ -132,7 +132,7 @@ sequenceDiagram
 
 ## Tools
 
-`tools/list` returns the seven tools below. Each description is safe to show before consent. `execution.taskSupport` is `required` or `forbidden`. Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
+`tools/list` returns the eight tools below. Each description is safe to show before consent. `execution.taskSupport` is `required` or `forbidden`. Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
 
 A `forbidden` tool invoked with `params.task` returns `-32601`. `submit_meeting` invoked without `params.task` returns `-32601`.
 
@@ -171,7 +171,7 @@ Meeting status is `queued`, `working`, `ready`, `needs_review`, `cancelled`, or 
 
 Arguments: `meeting_id`, optional opaque `cursor`.
 
-Returns one page of `spans`, `claims`, `findings`, `synthesis`, `actions`, `disagreements`, and `omissions` (50 rows per collection). Every page also includes `raw_transcript`. `raw_transcript.audio` joins span `raw_text` with newlines in `start_ms` order. `raw_transcript.video` joins Pegasus observation statements the same way. The server builds both strings from those records. A model does not write them, and the client does not send them. Each span on the page includes `raw_text` (audio transcription) and `text` (synthesized transcript). `dimensions` is complete on every page: each of the ten dimensions is `findings` or `none_in_transcript`. Citations that resolve include `start_ms`, `end_ms`, and `playback`.
+Returns one page of `spans`, `claims`, `findings`, `synthesis`, `actions`, `disagreements`, and `omissions` (50 rows per collection). Shared metadata (`raw_transcript`, `dimensions`, and `charts`) appears on the first page only. `raw_transcript.audio` joins span `raw_text` with newlines in `start_ms` order. `raw_transcript.video` joins Pegasus observation statements the same way. Each span includes `raw_text` (audio transcription) and `text` (synthesized transcript). Citations that resolve include `start_ms`, `end_ms`, and `playback`.
 
 This graph is the system of record. It may contain unpublished claims. The brief is the published projection.
 
@@ -202,7 +202,15 @@ Moves `acceptance` from `proposed` to `accepted`. Does not set an owner. The ret
 | `scope` | yes | `span` or `hypothesis` |
 | `display_name` | yes | Human label, at most 128 characters |
 
-`span` updates the anchor and detaches it onto a new hypothesis id. `hypothesis` updates every span that shares the anchor's hypothesis id. `raw_text` is unchanged. Accepted actions are kept. The worker is asked to run claim checks again; this server does not run that loop. Until those checks finish, meeting status is `working` and the brief stays withheld.
+`span` updates the anchor and detaches it onto a new hypothesis id. `hypothesis` updates every span that shares the anchor's hypothesis id. This is a transcript presentation edit; it does not rerun analysis, change meeting status, or alter `raw_text`.
+
+### `revise_text`
+
+`taskSupport`: `forbidden`. Not read-only. Not destructive.
+
+Arguments: `meeting_id`, `span_id`, `text` (at most 20,000 characters).
+
+Updates the synthesized transcript text on one span. The original `raw_text` is preserved. It does not rerun analysis or change meeting status.
 
 ### `cancel_meeting`
 

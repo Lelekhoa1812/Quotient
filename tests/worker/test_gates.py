@@ -60,7 +60,7 @@ def publish(spans, claims, findings=None, sentences=None, **kwargs):
         actions=kwargs.pop("actions", []),
         disagreements=[],
         omissions=kwargs.pop("omissions", []),
-        gaps=[],
+        gaps=kwargs.pop("gaps", []),
         dimensions=kwargs.pop("dimensions", dimensions()),
         ceiling_hit=kwargs.pop("ceiling_hit", False),
     )
@@ -81,6 +81,32 @@ def test_quote_resolution_requires_exactly_one_hit():
     assert resolve_quote("The margin is 50.", [foreign], meeting_id="m", duration_ms=10_000).status == "unresolved"
 
 
+def test_claim_source_span_ids_disambiguate_repeated_quotes_safely():
+    first = speech("s1", "The margin is 50.")
+    repeated = speech("s2", "The margin is 50.", start_ms=1000, end_ms=2000)
+    spans = [first, repeated]
+    assert resolve_quote("The margin is 50.", spans, meeting_id="m", duration_ms=10_000).hits == 2
+
+    claim = claim_for(
+        repeated,
+        "The margin is 50.",
+        "The margin is 50.",
+        source_span_ids=["s2"],
+    )
+    resolved = finalize_claim(claim, spans, duration_ms=10_000)
+    assert resolved.status == "supported"
+    assert resolved.span_id == "s2"
+
+    invalid = claim_for(
+        repeated,
+        "The margin is 50.",
+        "The margin is 50.",
+        id="c-invalid-source",
+        source_span_ids=["foreign"],
+    )
+    assert finalize_claim(invalid, spans, duration_ms=10_000).status == "unresolved"
+
+
 def test_fifteen_percent_against_fifty_stays_out_of_the_brief():
     span = speech("s1", "The margin is 50.")
     claim = finalize_claim(
@@ -93,6 +119,13 @@ def test_fifteen_percent_against_fifty_stays_out_of_the_brief():
     assert result.status == "needs_review"
     assert claim.id in result.review_queue
     assert claim.id not in result.brief["claim_ids"]
+
+
+def test_extraction_gap_keeps_meeting_in_review_and_coverage_incomplete():
+    span = speech("s-gap", "A difficult sentence.")
+    result = publish([span], [], gaps=[type("Gap", (), {"span_ids": ["s-gap"], "reason": "No reliable claim."})()])
+    assert result.status == "needs_review"
+    assert result.artifacts["coverage"] == "incomplete"
 
 
 def test_percent_must_match_unit_and_direction_and_word_forms():

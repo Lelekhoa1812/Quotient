@@ -88,11 +88,13 @@ def _sync(task: TaskRecord, runtime: object) -> bool:
         task.fail_tool("Meeting not found.")
         return True
     projected = project_meeting(raw)
-    task.touch(f"Meeting {task.meeting_id} is {projected['status']}.")
+    phase = raw.get("progress_message") if isinstance(raw.get("progress_message"), str) else None
+    message = phase or f"Meeting {task.meeting_id} is {projected['status']}."
     status = projected["stored_status"]
     if status in {"queued", "working"} and projected["status"] in {"queued", "working"}:
-        _progress(task, runtime, 2, task.status_message)
+        _progress(task, runtime, 2, message)
         return False
+    task.touch(message)
     if projected["status"] in {"ready", "needs_review"}:
         _progress(task, runtime, 3, task.status_message)
         task.complete_tool(tool_text(summary(projected)))
@@ -172,9 +174,14 @@ def _names(value: object) -> tuple[str, ...]:
 
 
 def _progress(task: TaskRecord, runtime: object, progress: int, message: str) -> None:
-    if task.progress_token is None or progress <= task.progress:
+    if progress < task.progress:
+        return
+    if progress == task.progress and task.status_message == message:
         return
     task.progress = progress
+    task.touch(message)
+    if task.progress_token is None:
+        return
     _fanout(
         runtime,
         task.session_id,

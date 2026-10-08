@@ -58,11 +58,14 @@ export function emptyGraph(): GraphPage {
     claims: [],
     findings: [],
     none_in_transcript: [],
+    not_evaluated: [],
+    held: {},
     synthesis: [],
     synthesis_omissions: [],
     actions: [],
     disagreements: [],
     omissions: [],
+    gaps: [],
     review: [],
     review_present: false,
     charts: [],
@@ -86,6 +89,18 @@ export function parseGraph(result: unknown, meetingId: string): GraphPage {
   ]);
   for (const finding of findings) {
     if (finding.none_in_transcript) none.add(finding.dimension);
+  }
+  const notEvaluated = new Set<Dimension>([
+    ...parseDimensions(graph.not_evaluated),
+    ...parseDimensions(asArray(graph.dimensions).filter((item) => asString(asRecord(item)?.state) === "not_evaluated")),
+  ]);
+  for (const name of notEvaluated) none.delete(name);
+  const held: Partial<Record<Dimension, number>> = {};
+  for (const item of asArray(graph.dimensions)) {
+    const row = asRecord(item);
+    const name = asString(row?.dimension);
+    const count = asFinite(row?.held_findings);
+    if (name && isDimension(name) && count !== null && count > 0) held[name] = count;
   }
   const synthesisOmissions: SynthesisOmission[] = [];
   const speechOmissions: SpeechOmission[] = [];
@@ -111,11 +126,19 @@ export function parseGraph(result: unknown, meetingId: string): GraphPage {
     claims: asArray(graph.claims).map(parseClaim).filter((item): item is Claim => item !== null),
     findings,
     none_in_transcript: [...none],
+    not_evaluated: [...notEvaluated],
+    held,
     synthesis: asArray(graph.synthesis).map(parseSentence).filter((item): item is SynthesisSentence => item !== null),
     synthesis_omissions: dedupeOmissions(synthesisOmissions),
     actions: asArray(graph.actions).map(parseAction).filter((item): item is ActionItem => item !== null),
     disagreements: asArray(graph.disagreements).map(parseDisagreement).filter((item): item is Disagreement => item !== null),
     omissions: speechOmissions,
+    gaps: asArray(graph.gaps).flatMap((item, index) => {
+      const record = asRecord(item);
+      if (!record) return [];
+      const spanIds = asArray(record.span_ids).map(asString).filter((id): id is string => id !== null);
+      return spanIds.length ? [{ id: asString(record.gap_id) ?? `gap-${index + 1}`, spanIds, reason: asString(record.reason) ?? "" }] : [];
+    }),
     review: asArray(reviewSource).map(parseClaim).filter((item): item is Claim => item !== null),
     review_present: reviewSource !== undefined,
     charts: asArray(graph.charts).map(parseChart).filter((item): item is ChartTable => item !== null),
@@ -135,11 +158,14 @@ export function mergeGraph(base: GraphPage, page: GraphPage): GraphPage {
     claims: dedupe(base.claims, page.claims),
     findings: dedupe(base.findings, page.findings),
     none_in_transcript: [...new Set([...base.none_in_transcript, ...page.none_in_transcript])],
+    not_evaluated: [...new Set([...base.not_evaluated, ...page.not_evaluated])],
+    held: { ...base.held, ...page.held },
     synthesis: dedupe(base.synthesis, page.synthesis),
     synthesis_omissions: dedupeOmissions([...base.synthesis_omissions, ...page.synthesis_omissions]),
     actions: dedupe(base.actions, page.actions),
     disagreements: dedupe(base.disagreements, page.disagreements),
     omissions: [...base.omissions, ...page.omissions],
+    gaps: dedupe(base.gaps, page.gaps),
     review: page.review_present ? dedupe(base.review, page.review) : base.review,
     review_present: base.review_present || page.review_present,
     charts: dedupe(base.charts, page.charts),
@@ -176,6 +202,10 @@ export function parseMeetingStatus(result: unknown, fallbackId: string): Meeting
     reviewCount,
     reviewCounts: parseReviewCounts(meeting.review_counts),
     artifacts,
+    progressMessage: asString(meeting.progress_message) ?? "",
+    failureMessage: asString(meeting.failure_message) ?? "",
+    updatedAt: asString(meeting.updated_at) ?? "",
+    sourceName: asString(meeting.source_name) ?? "",
   };
 }
 
@@ -518,7 +548,7 @@ function parseDimensions(value: unknown): Dimension[] {
     const record = asRecord(item);
     const dimension = asString(record?.dimension);
     const state = asString(record?.state);
-    if (dimension && isDimension(dimension) && (state === null || state === "none_in_transcript")) found.push(dimension);
+    if (dimension && isDimension(dimension) && (state === null || state === "none_in_transcript" || state === "not_evaluated")) found.push(dimension);
   }
   return found;
 }

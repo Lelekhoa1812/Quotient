@@ -1,6 +1,6 @@
 # Motivation vs Logic
 # Motivation: The model emits a verbatim quote and does not emit character offsets.
-# Logic: Exactly one contiguous hit in this meeting's span text writes the offsets. Zero or many hits stay unresolved.
+# Logic: Exactly one contiguous hit in the allowed meeting spans writes the offsets. Zero or many hits stay unresolved.
 
 from dataclasses import dataclass
 
@@ -20,12 +20,21 @@ class Resolution:
     overlap: bool = False
 
 
-def resolve_quote(quote: str, spans: list[Span], *, meeting_id: str, duration_ms: int) -> Resolution:
+def resolve_quote(
+    quote: str,
+    spans: list[Span],
+    *,
+    meeting_id: str,
+    duration_ms: int,
+    span_ids: set[str] | None = None,
+) -> Resolution:
     if not quote:
         return Resolution(status="unresolved", hits=0)
     hits: list[tuple[Span, int]] = []
     for span in spans:
         if span.meeting_id != meeting_id:
+            continue
+        if span_ids is not None and span.id not in span_ids:
             continue
         if span.start_ms < 0 or span.end_ms > duration_ms or span.start_ms >= span.end_ms:
             continue

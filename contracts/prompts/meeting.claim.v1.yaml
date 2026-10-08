@@ -31,6 +31,7 @@ body: |
   Extract atomic claims from one window of spans.
   Each claim is one decontextualized proposition. Replace pronouns with the speaker hypothesis id or a named entity before the proposition is stored.
   Do not verdict the proposition. Do not emit character offsets.
+  For each claim, span_ids must contain only supplied span ids that support that claim, including the span containing its quote. Do not list the whole window or unrelated spans.
   Attach the verbatim quote as it appears in span text. The quote must be a contiguous slice of one cited span. If you cannot do that, emit a gap instead of a claim.
   An ambiguous sentence is a gap. A gap lists the span ids that were read and why it is ambiguous.
   kind is one of decision, action, commitment, question, figure, or observation.

@@ -52,15 +52,21 @@ def accept_action(payload: dict, registry, spans: list[Span], *, quote: str, anc
 
 
 # Bugs vs Fixes
-# Bug: The analysis run called accept_action, which forced model rows to stay
+# Bug 1: The analysis run called accept_action, which forced model rows to stay
 # proposed until a person accepted them.
-# Fix: When the owner span is still set after schema, due, and owner checks,
-# store acceptance accepted. Human rows keep the acceptance they already have.
+# Fix 1: A model row is stored accepted when the run itself found the agreement.
+# Bug 2: "Accepted" was stored whenever an owner span resolved. The commitment lens contract says
+# a suggestion with a null agreement_span_id stays proposed, so a lecturer's teaching move
+# ("I'll multiply by three") with a speaker but no agreement became an accepted action.
+# Fix 2: Accepted needs BOTH a resolved owner span and an agreement span that exists in this
+# meeting. Anything else stays proposed until a person accepts it. Human rows keep their own state.
 def ground_action(payload: dict, registry, spans: list[Span], *, quote: str, anchor_date: str | None) -> Action:
     action = _checked(payload, registry, spans, quote=quote, anchor_date=anchor_date)
     if action.origin == "human":
         return action
-    action.acceptance = "accepted" if action.owner_span_id else "proposed"
+    known = {span.id for span in spans}
+    agreed = bool(action.agreement_span_id) and action.agreement_span_id in known
+    action.acceptance = "accepted" if action.owner_span_id and agreed else "proposed"
     return action
 
 

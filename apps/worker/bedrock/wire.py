@@ -35,6 +35,13 @@ _IAM: tuple[float, object] | None = None
 _IAM_LOCK = threading.Lock()
 
 
+def invalidate_iam() -> None:
+    """Drop the cached session credentials so the next call re-reads them (after an HTTP 401/403)."""
+    global _IAM
+    with _IAM_LOCK:
+        _IAM = None
+
+
 def iam_credentials():
     """Session credentials for SigV4. The Bedrock API key is not logged and is not required."""
 
@@ -230,6 +237,34 @@ class Transport:
         return _json_object(payload)
 
 
+# Motivation vs Logic
+# Motivation: The Sonic socket is non-blocking so reads can be polled. sendall() on
+# a non-blocking TLS socket raises SSLWantWriteError / BlockingIOError whenever the
+# send buffer is momentarily full, which happens under load or when two streams
+# run at once, and it failed the whole transcription session.
+# Logic: Write what the socket accepts, wait (select) until it is writable again,
+# and continue until every byte is out or the deadline passes. A TLS socket that
+# needs to read first is waited on for readability.
+def _send_all(sock, data: bytes, *, timeout: float = 30.0) -> None:
+    view = memoryview(data)
+    deadline = time.monotonic() + timeout
+    while len(view):
+        want_read = False
+        try:
+            sent = sock.send(view)
+            view = view[sent:]
+            continue
+        except ssl.SSLWantReadError:
+            want_read = True
+        except (ssl.SSLWantWriteError, BlockingIOError):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Sonic send timed out")
+        readable, writable, _ = select.select([sock] if want_read else [], [] if want_read else [sock], [], min(remaining, 1.0))
+        del readable, writable
+
+
 class _SonicSession:
     """One Nova session. send() writes one event and returns any text already buffered."""
 
@@ -330,7 +365,7 @@ class _SonicSession:
             view = view[take:]
             last = end_stream and not view
             self._conn.send_data(self._stream_id, chunk, end_stream=last)
-            self._sock.sendall(self._conn.data_to_send())
+            _send_all(self._sock, self._conn.data_to_send())
             if last:
                 self._ended = True
             if not view:
@@ -359,7 +394,7 @@ class _SonicSession:
                 self._ended = True
                 return
             events = self._conn.receive_data(incoming)
-            self._sock.sendall(self._conn.data_to_send())
+            _send_all(self._sock, self._conn.data_to_send())
             for event in events:
                 self._on_event(event)
             if timeout == 0 and not readable:
@@ -375,7 +410,7 @@ class _SonicSession:
         elif isinstance(event, DataReceived):
             self._buffer.extend(event.data)
             self._conn.acknowledge_received_data(event.flow_controlled_length, event.stream_id)
-            self._sock.sendall(self._conn.data_to_send())
+            _send_all(self._sock, self._conn.data_to_send())
             for headers, payload in _decode_frames(self._buffer):
                 parsed = _sonic_event(headers, payload)
                 if parsed is not None:
@@ -388,6 +423,11 @@ class _SonicSession:
     def _raise_status(self) -> None:
         if self._status == 404:
             raise NotInvocable(self._model_id, "ResourceNotFoundException")
+        if self._status == 403:
+            raise RuntimeError(
+                "sonic HTTP 403: check the configured AWS identity, Sonic model access, "
+                "and bidirectional-stream permission"
+            )
         if self._status is not None and self._status >= 400:
             raise RuntimeError(self._error or f"sonic HTTP {self._status}")
         if self._error and "ResourceNotFound" in self._error:
@@ -545,7 +585,7 @@ def _open_h2(region: str, model_id: str, token: str):
         headers.append((key.lower(), value))
     conn.send_headers(stream_id, headers, end_stream=False)
     conn.increment_flow_control_window(8 * 1024 * 1024, stream_id=stream_id)
-    sock.sendall(conn.data_to_send())
+    _send_all(sock, conn.data_to_send())
     return sock, conn, stream_id, signer
 
 

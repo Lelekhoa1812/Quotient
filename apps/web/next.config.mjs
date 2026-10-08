@@ -19,6 +19,9 @@ const mcp = process.env.QUOTIENT_MCP_URL ?? "http://127.0.0.1:8080/mcp";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Keep live development output separate from production builds. `next build`
+  // otherwise replaces files the running `next dev` process is serving.
+  distDir: process.env.QUOTIENT_NEXT_DIST_DIR ?? (process.env.NODE_ENV === "development" ? ".next-dev" : ".next"),
   poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
   webpack(config) {

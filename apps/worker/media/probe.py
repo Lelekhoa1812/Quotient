@@ -24,6 +24,7 @@ def probe(path: str | Path) -> dict:
         check=True,
         capture_output=True,
         text=True,
+        timeout=120,
     )
     return json.loads(completed.stdout)
 

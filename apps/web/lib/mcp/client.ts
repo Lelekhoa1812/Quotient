@@ -10,7 +10,7 @@
 
 import { emptyGraph, mergeGraph, parseGraph, parseMeetingId, parseMeetingStatus, unwrapTool } from "@/lib/graph";
 import { asArray, asFinite, asRecord, asString } from "@/lib/json";
-import { meetingIdFromUri, upsertLibrary } from "@/lib/library";
+import { meetingIdFromUri, readLibrary, upsertLibrary } from "@/lib/library";
 import { prepareElicitationContent } from "@/lib/mcp/upload";
 import type { GraphPage, MeetingStatus, TaskSnapshot } from "@/lib/types";
 
@@ -287,7 +287,7 @@ function handleIncoming(message: JsonRpc): void {
     const params = asRecord(message.params);
     if (!params) return;
     const token = asString(params.progressToken);
-    const taskId = (token && tokenToTask.get(token)) || activeTaskId;
+    const taskId = (token && tokenToTask.get(token)) || relatedTask(message) || activeTaskId;
     if (!taskId || !tasks.has(taskId)) return;
     const progress = asFinite(params.progress);
     const total = asFinite(params.total);
@@ -386,10 +386,12 @@ function ensureResult(taskId: string): void {
       if (meetingId) {
         patchTask(taskId, { meetingId });
         const file = staged.get(taskId)?.[0];
+        // Keep the name the user typed at submit; fall back to the file name only when no row has one.
+        const known = readLibrary().find((row) => row.taskId === taskId);
         upsertLibrary({
           meetingId,
           taskId,
-          title: file?.name ?? meetingId,
+          title: known?.title || file?.name || meetingId,
           filename: file?.name ?? "",
           status: current?.status ?? "completed",
           reviewCount: null,
@@ -431,7 +433,10 @@ function watchTask(taskId: string): void {
       if (!core) throw new Error("tasks/get returned no task");
       const snapshot = publishCore(core);
       if (snapshot.status === "input_required" || snapshot.status === "completed") ensureResult(taskId);
-      if (snapshot.status === "failed" || snapshot.status === "cancelled" || snapshot.status === "completed") return;
+      if (snapshot.status === "failed" || snapshot.status === "cancelled" || snapshot.status === "completed") {
+        watches.delete(taskId);
+        return;
+      }
       timer = setTimeout(() => void tick(), snapshot.pollInterval);
     } catch (error) {
       if (error instanceof McpDisconnected) {
@@ -492,7 +497,7 @@ export const mcp = {
   stagedFiles(taskId: string): File[] {
     return staged.get(taskId) ?? [];
   },
-  async submitMeeting(primary: File, others: File[]): Promise<TaskSnapshot> {
+  async submitMeeting(primary: File, others: File[], title: string): Promise<TaskSnapshot> {
     await ensure();
     const token = `submit:${primary.size}:${nextId + 1}`;
     const result = await request("tools/call", {
@@ -515,7 +520,7 @@ export const mcp = {
     upsertLibrary({
       meetingId: snapshot.meetingId,
       taskId: snapshot.taskId,
-      title: primary.name,
+      title,
       filename: primary.name,
       status: snapshot.status,
       reviewCount: null,
@@ -591,9 +596,6 @@ export const mcp = {
   },
   async reviseText(meetingId: string, spanId: string, text: string): Promise<void> {
     await callTool("revise_text", { meeting_id: meetingId, span_id: spanId, text });
-  },
-  async restoreGraph(meetingId: string): Promise<void> {
-    await callTool("restore_graph", { meeting_id: meetingId });
   },
   async cancelMeeting(meetingId: string): Promise<void> {
     await callTool("cancel_meeting", { meeting_id: meetingId });

@@ -56,9 +56,9 @@ def render_local(name: str, projected: dict) -> tuple[str, bytes] | None:
     if name == "graph.json":
         body = json.dumps(projected["graph"], ensure_ascii=False, indent=2).encode("utf-8")
     elif name == "brief.html":
-        body = _html(projected["brief"]).encode("utf-8")
+        body = _html(_export_brief(projected)).encode("utf-8")
     elif name == "brief.pdf":
-        body = _pdf(_pdf_blocks(projected["brief"]))
+        body = _pdf(_pdf_blocks(_export_brief(projected)))
     elif name == "actions.csv":
         body = _csv(projected["graph"]["actions"]).encode("utf-8")
     elif name == "actions.xlsx":
@@ -70,6 +70,33 @@ def render_local(name: str, projected: dict) -> tuple[str, bytes] | None:
     else:
         return None
     return mime, body
+
+
+# Motivation vs Logic
+# Motivation: The brief resource stays withheld until a meeting is ready (a documented contract
+# for MCP clients). The PDF and web-page downloads are for people, and a meeting that is
+# "needs review" has confirmed sentences the portal already shows. Downloading an empty
+# "withheld" page for those was a dead end.
+# Logic: When the brief is withheld but the graph holds confirmed sentences, export those under a
+# partial notice stating how many statements were left out. Nothing unconfirmed is added; the
+# sentences are the same ones the gate already allowed into the graph. With no sentences the old
+# "withheld" page is unchanged.
+def _export_brief(projected: dict) -> dict:
+    brief = projected["brief"]
+    if not brief.get("withheld"):
+        return brief
+    sentences = [row for row in projected["graph"].get("synthesis") or [] if isinstance(row, dict) and row.get("text")]
+    if not sentences:
+        return brief
+    counts = projected.get("review_counts") or {}
+    left_out = sum(int(value or 0) for value in counts.values()) if isinstance(counts, dict) else 0
+    return {**brief, "withheld": False, "partial": True, "left_out": left_out, "synthesis": sentences}
+
+
+def _partial_notice(brief: dict) -> str:
+    left = int(brief.get("left_out") or 0)
+    tail = f" {left} other statements were left out because they could not be confirmed." if left else ""
+    return "Partial brief. It only includes points that were confirmed against the recording." + tail
 
 
 def is_text(name: str) -> bool:
@@ -91,6 +118,8 @@ def _html(brief: dict) -> str:
         "<body>",
         "<h1>Brief</h1>",
     ]
+    if brief.get("partial"):
+        parts.append(f"<p><strong>{html.escape(_partial_notice(brief))}</strong></p>")
     if brief.get("withheld"):
         parts.append("<p>The brief is withheld. Unpublished claims stay in the review queue.</p>")
         parts.append("</body></html>")
@@ -112,7 +141,7 @@ def _html(brief: dict) -> str:
         parts.append(f"<p>{label}: {statement} ({owner})</p>")
     for omission in brief.get("omissions") or []:
         reason = html.escape(str(omission.get("reason") or ""))
-        parts.append(f"<p>Omission: {reason}</p>")
+        parts.append(f"<p>Left out: {reason}</p>")
     if script:
         parts.append(mermaid_script())
     parts.append("</body></html>")
@@ -139,6 +168,9 @@ def _pdf_blocks(brief: dict) -> list[tuple[str, str]]:
     """
 
     blocks: list[tuple[str, str]] = [("title", "Brief")]
+    if brief.get("partial"):
+        blocks.append(("p", _partial_notice(brief)))
+        blocks.append(("gap", ""))
     if brief.get("withheld"):
         blocks.append(("p", "The brief is withheld. Unpublished claims stay in the review queue."))
         return blocks
@@ -162,7 +194,7 @@ def _pdf_blocks(brief: dict) -> list[tuple[str, str]]:
             )
     for omission in brief.get("omissions") or []:
         if isinstance(omission, dict) and omission.get("reason"):
-            blocks.append(("p", f"Omission: {omission.get('reason')}"))
+            blocks.append(("p", f"Left out: {omission.get('reason')}"))
     return blocks
 
 
@@ -319,10 +351,23 @@ def _action_rows(actions: list[dict]) -> list[list[str]]:
     return rows
 
 
+# Motivation vs Logic
+# Motivation: actions.csv opens in a spreadsheet. A statement the model took from speech that
+# begins with = + - @ (or tab/CR) would be run as a formula.
+# Logic: Prefix such text cells with an apostrophe so they stay text. Numbers are untouched.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value: object) -> object:
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        return "'" + value
+    return value
+
+
 def _csv(actions: list[dict]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerows(_action_rows(actions))
+    writer.writerows([[_csv_cell(cell) for cell in row] for row in _action_rows(actions)])
     return buffer.getvalue()
 
 

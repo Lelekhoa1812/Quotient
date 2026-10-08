@@ -1,11 +1,14 @@
 """Task lifecycle, auth binding, and partner prompts."""
 
 import json
+from types import SimpleNamespace
 
 from starlette.testclient import TestClient
 
 from quotient.app import create_app
 from quotient.worker.memory import MemoryPort
+from quotient.mcp.jobs import _progress, _sync
+from quotient.mcp.tasks import TaskRecord
 
 from conftest import MapVerifier, open_session, published_graph, rpc
 
@@ -15,6 +18,85 @@ def _meeting_id(client, headers, task_id: str) -> str:
     message = viewed["result"]["statusMessage"]
     assert message.startswith("Meeting ")
     return message.split(" ", 2)[1]
+
+
+def test_long_running_task_reports_same_phase_progress_updates():
+    events = []
+    session = SimpleNamespace(enqueue=events.append)
+    runtime = SimpleNamespace(sessions=SimpleNamespace(get=lambda _session_id: session))
+    task = TaskRecord(
+        task_id="task-1",
+        auth_subject="subject-1",
+        session_id="session-1",
+        status="working",
+        status_message="Meeting m1 is queued.",
+        created_at="2026-10-08T00:00:00Z",
+        last_updated_at="2026-10-08T00:00:00Z",
+        ttl_ms=60_000,
+        poll_interval_ms=1000,
+        progress_token="p1",
+    )
+    _progress(task, runtime, 2, "Extracting claims from the transcript")
+    _progress(task, runtime, 2, "Analyzing all ten evidence lenses")
+    assert task.progress == 2
+    assert task.status_message == "Analyzing all ten evidence lenses"
+    assert [event["params"]["message"] for event in events] == [
+        "Extracting claims from the transcript",
+        "Analyzing all ten evidence lenses",
+    ]
+
+    without_token = TaskRecord(
+        task_id="task-no-token",
+        auth_subject="subject-1",
+        session_id="session-1",
+        status="working",
+        status_message="Meeting m1 is queued.",
+        created_at="2026-10-08T00:00:00Z",
+        last_updated_at="2026-10-08T00:00:00Z",
+        ttl_ms=60_000,
+        poll_interval_ms=1000,
+    )
+    _progress(without_token, runtime, 2, "Checking transcript coverage")
+    assert without_token.status_message == "Checking transcript coverage"
+
+
+def test_task_sync_forwards_persisted_worker_stage_changes():
+    port = MemoryPort()
+    meeting_id = port.submit(
+        subject="subject-1",
+        object_key="derivatives/source.mp4",
+        context_names=(),
+        idempotency_key=None,
+    )
+    port._rows[meeting_id]["status"] = "working"
+    port._rows[meeting_id]["progress_message"] = "Checking transcript coverage"
+    events = []
+    session = SimpleNamespace(enqueue=events.append)
+    runtime = SimpleNamespace(
+        port=port,
+        sessions=SimpleNamespace(get=lambda _session_id: session),
+    )
+    task = TaskRecord(
+        task_id="task-stage",
+        auth_subject="subject-1",
+        session_id="session-1",
+        status="working",
+        status_message="Meeting queued",
+        created_at="2026-10-08T00:00:00Z",
+        last_updated_at="2026-10-08T00:00:00Z",
+        ttl_ms=60_000,
+        poll_interval_ms=1000,
+        progress_token="stage-token",
+        meeting_id=meeting_id,
+    )
+
+    assert _sync(task, runtime) is False
+    port._rows[meeting_id]["progress_message"] = "Analyzing all ten evidence lenses"
+    assert _sync(task, runtime) is False
+    assert [event["params"]["message"] for event in events] == [
+        "Checking transcript coverage",
+        "Analyzing all ten evidence lenses",
+    ]
 
 
 def test_submit_task_reaches_ready_and_prompts_are_partner_workflows():

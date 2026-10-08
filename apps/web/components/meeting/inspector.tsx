@@ -2,12 +2,17 @@
 
 /**
  * Motivation vs Logic
- * Motivation: Opening a synthesis sentence reveals findings before the span.
- * Logic: The panel keeps the finding list mounted, then appends the span once
- * read_span returns. Quote text is marked only on an exact slice.
+ * Motivation: Opening a brief sentence or a claim has to show what supports it:
+ * the quote, who said it, and when, without engineering detail.
+ * Logic: The panel exists only while something is selected. It lists the
+ * findings, then the cited moment with the quote highlighted when the stored
+ * offsets slice to exactly that quote. The worker's cleaned text and the raw
+ * transcript are shown as "what was understood" and "what was heard".
  */
-import { quoteParts, speakerText } from "@/lib/format";
-import { formatMs } from "@/lib/format";
+import { useEffect, useRef } from "react";
+import { X } from "lucide-react";
+import { formatMs, quoteParts } from "@/lib/format";
+import { dimensionTitle, speakerName, stanceText } from "@/lib/present";
 import type { Citation, Finding, Span } from "@/lib/types";
 
 export function Inspector({
@@ -15,43 +20,56 @@ export function Inspector({
   span,
   citation,
   phase,
+  onClose,
 }: {
   findings: Finding[];
   span: Span | null;
   citation: Citation | null;
   phase: "idle" | "findings" | "span";
+  onClose: () => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  // When the layout stacks (narrow windows) the panel opens below the page; bring it into view.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1180px)").matches) {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [span?.id, findings.length]);
+
   return (
-    <aside className="q-inspector" aria-live="polite">
-      <p className="q-kicker">Inspector</p>
-      {phase === "idle" ? <p className="q-muted">Select a synthesis sentence to open its findings.</p> : null}
-      {findings.length > 0 ? (
-        <div className="q-cards">
-          <h2>Findings</h2>
-          {findings.map((finding) => (
-            <article key={finding.id} className={finding.stance === "conflicts" ? "q-card is-conflict" : "q-card"}>
-              <p className="q-kicker">{finding.dimension}</p>
-              <p className="q-kicker">{finding.stance}</p>
-              <p>{finding.text}</p>
-            </article>
-          ))}
-        </div>
-      ) : null}
-      {phase === "span" && span ? (
-        <div className="q-card">
-          <p className="q-kicker">Span</p>
-          <p className="q-kicker">{speakerText(span)}</p>
-          {span.start_ms !== null ? <p className="q-muted">{formatMs(span.start_ms)}</p> : null}
-          <div className="q-inline">
-            {span.coarse ? <span className="q-badge">Coarse</span> : null}
-            {span.overlap ? <span className="q-badge">Overlap</span> : null}
-          </div>
-          <p className="q-meta">Synthesized</p>
-          <Highlighted text={span.text} citation={citation} />
-          <p className="q-meta">Raw</p>
-          <p>{span.raw_text || "No raw text on this span."}</p>
-        </div>
-      ) : null}
+    <aside className="q-inspector" aria-label="Supporting evidence" ref={ref}>
+      <div className="q-inspector-head">
+        <h2>Supporting evidence</h2>
+        <button className="q-icon-btn" type="button" onClick={onClose} aria-label="Close evidence panel">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+      <div aria-live="polite" className="q-cards">
+        {findings.map((finding) => (
+          <article key={finding.id} className={finding.stance === "conflicts" ? "q-card is-conflict" : "q-card"}>
+            <p className="q-meta">{dimensionTitle(finding.dimension)} · {stanceText(finding.stance)}</p>
+            <p>{finding.text}</p>
+          </article>
+        ))}
+        {phase === "span" && span ? (
+          <article className="q-card">
+            <p className="q-meta">
+              {speakerName(span.speaker_label, span.speaker_hypothesis_id)}
+              {span.start_ms !== null ? ` · ${formatMs(span.start_ms)}` : ""}
+            </p>
+            <h3>What was understood</h3>
+            <Highlighted text={span.text} citation={citation} />
+            {span.raw_text && span.raw_text !== span.text ? (
+              <>
+                <h3>What was heard</h3>
+                <p className="q-muted">{span.raw_text}</p>
+              </>
+            ) : null}
+            {span.coarse ? <p className="q-muted">The exact timing of this moment is approximate.</p> : null}
+          </article>
+        ) : null}
+        {phase === "findings" ? <p className="q-muted">Finding the supporting moment…</p> : null}
+      </div>
     </aside>
   );
 }

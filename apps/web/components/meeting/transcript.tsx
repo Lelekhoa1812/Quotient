@@ -2,222 +2,189 @@
 
 /**
  * Motivation vs Logic
- * Motivation: Raw evidence and synthesized analysis have to stay readable at
- * the same time. A click on a raw sentence seeks only when a span id exists.
- * Logic: Audio raw is span.raw_text. Video raw is observation statements, plus
- * a meeting-level raw_transcript string when the graph includes one. Synthesized
- * text is span.text and the brief. Empty raw stays on the page. Brief
- * sentences render markdown, including a mermaid fence, in reading order.
+ * Motivation: People read a transcript as one conversation in time order, can
+ * search it, and jump to the recording from any line. The worker's cleaned text
+ * and the original wording are both evidence, but only one is the default view.
+ * Logic: Spans sort by start_ms into one list. Each line shows the speaker, the
+ * time, and the understood text; "Original wording" reveals raw_text when it
+ * differs. Video observations are interleaved as "On screen" notes. Citation
+ * quotes are highlighted only on an exact slice. Edits go through the same
+ * revise_text and revise_speaker calls as before.
  */
-import { useState } from "react";
-import { Markdown } from "@/components/markdown";
-import { formatMs, formatTableNumber, quoteParts, speakerText } from "@/lib/format";
-import { timelineSeams } from "@/lib/graph";
-import type { Citation, RawTranscript, Seam, Span, SpeakerHypothesis, SynthesisSentence, VideoObservation } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { formatMs, quoteParts, speakerText } from "@/lib/format";
+import { friendlyError } from "@/lib/present";
+import type { Citation, Span, VideoObservation } from "@/lib/types";
 
 const VIDEO_KIND = new Set(["video", "visual", "observation", "pegasus", "visual-idle", "visual_idle"]);
 
 export function Transcript({
   spans,
-  seams,
-  omissions,
-  rawTranscript,
   observations,
-  speakers,
-  synthesis,
   activeId,
   citation,
   onSeek,
-  onOpenSentence,
   onReviseText,
   onReviseSpeaker,
 }: {
   spans: Span[];
-  seams: Seam[];
-  omissions: { span_id: string; reason: string }[];
-  rawTranscript: RawTranscript;
   observations: VideoObservation[];
-  speakers: SpeakerHypothesis[];
-  synthesis: SynthesisSentence[];
   activeId: string | null;
   citation: Citation | null;
   onSeek: (span: Span) => void;
-  onOpenSentence: (sentence: SynthesisSentence) => void;
   onReviseText: (span: Span, text: string) => Promise<void>;
   onReviseSpeaker: (span: Span, scope: "span" | "hypothesis", displayName: string) => Promise<void>;
 }) {
-  const ordered = spans.slice().sort((left, right) => (left.start_ms ?? 0) - (right.start_ms ?? 0));
-  const marks = new Set(timelineSeams(spans, seams).map((mark) => mark.at_ms));
-  const audio = ordered.filter((span) => !VIDEO_KIND.has(span.kind) && span.raw_text.trim().length > 0);
-  const videoSpans = ordered.filter((span) => VIDEO_KIND.has(span.kind) && span.raw_text.trim().length > 0);
-  const videoSeen = new Set(videoSpans.map((span) => `${span.start_ms ?? ""}:${span.raw_text}`));
-  const videoNotes = observations.filter((item) => !videoSeen.has(`${item.start_ms ?? ""}:${item.statement}`));
-  const synthesized = ordered.filter((span) => span.text.trim().length > 0);
-  const audioEmpty = audio.length === 0 && rawTranscript.audio.trim().length === 0;
-  const videoEmpty = videoSpans.length === 0 && videoNotes.length === 0 && rawTranscript.video.trim().length === 0;
+  const [query, setQuery] = useState("");
+  // A long meeting has well over a thousand lines; draw them in pages. Searching shows every match.
+  const PAGE = 300;
+  const [limit, setLimit] = useState(PAGE);
+  const ordered = useMemo(
+    () => spans.slice().sort((left, right) => (left.start_ms ?? 0) - (right.start_ms ?? 0)),
+    [spans],
+  );
+  const speech = ordered.filter(
+    (span) => span.kind === "untranscribed" || (!VIDEO_KIND.has(span.kind) && (span.text.trim() || span.raw_text.trim())),
+  );
+  const seen = new Set(
+    ordered.filter((span) => VIDEO_KIND.has(span.kind)).map((span) => `${span.start_ms ?? ""}:${span.raw_text}`),
+  );
+  const screen = [
+    ...ordered
+      .filter((span) => VIDEO_KIND.has(span.kind) && span.raw_text.trim())
+      .map((span) => ({ key: span.id, at: span.start_ms, text: span.raw_text, span })),
+    ...observations
+      .filter((item) => !seen.has(`${item.start_ms ?? ""}:${item.statement}`))
+      .map((item) => ({
+        key: `${item.id ?? "obs"}:${item.start_ms ?? "t"}:${item.statement.slice(0, 24)}`,
+        at: item.start_ms,
+        text: item.statement,
+        span: item.id ? ordered.find((candidate) => candidate.id === item.id) ?? null : null,
+      })),
+  ];
+  const needle = query.trim().toLocaleLowerCase();
+  const matching = speech.filter(
+    (span) => span.kind === "untranscribed" ? !needle : !needle || `${span.text} ${span.raw_text}`.toLocaleLowerCase().includes(needle),
+  );
+  const rows = needle ? matching : matching.slice(0, limit);
+  // A line selected from elsewhere (a citation) must be on the page.
+  const activeIndex = activeId ? matching.findIndex((span) => span.id === activeId) : -1;
+  useEffect(() => {
+    if (!needle && activeIndex >= limit) setLimit(activeIndex + 50);
+  }, [activeIndex, limit, needle]);
 
   return (
     <section className="q-section">
       <div>
-        <p className="q-kicker">Transcript</p>
-        <h2>Two records</h2>
-        <p className="q-lede">Raw is the evidence. Synthesized is the analysis text. They stay separate.</p>
+        <h2>Transcript</h2>
+        <p className="q-lede">Everything that was said, in order. Select a line to hear it.</p>
       </div>
-      <Hypotheses speakers={speakers} />
-      <div className="q-transcripts">
-        <div className="q-pane">
-          <h2>Raw</h2>
-          <p className="q-muted">Immutable audio and video transcription.</p>
-          <h3>Audio</h3>
-          {rawTranscript.audio.trim() ? <p className="q-block">{rawTranscript.audio}</p> : null}
-          {audioEmpty ? <p className="q-empty">No raw audio on this graph page.</p> : null}
-          {audio.map((span) => (
-            <RawRow
-              key={span.id}
-              span={span}
-              body={span.raw_text}
-              active={span.id === activeId}
-              citation={span.id === citation?.span_id ? citation : null}
-              seam={span.start_ms !== null && marks.has(span.start_ms)}
-              onSeek={onSeek}
-            />
-          ))}
-          <h3>Video</h3>
-          {rawTranscript.video.trim() ? <p className="q-block">{rawTranscript.video}</p> : null}
-          {videoEmpty ? <p className="q-empty">No raw video on this graph page.</p> : null}
-          {videoSpans.map((span) => (
-            <RawRow
-              key={span.id}
-              span={span}
-              body={span.raw_text}
-              active={span.id === activeId}
-              citation={null}
-              seam={span.start_ms !== null && marks.has(span.start_ms)}
-              onSeek={onSeek}
-            />
-          ))}
-          {videoNotes.map((item) => {
-            const span = item.id ? ordered.find((candidate) => candidate.id === item.id) ?? null : null;
-            return (
-              <article key={`${item.id ?? "video"}:${item.start_ms ?? "t"}:${item.statement}`} className={span && span.id === activeId ? "q-card is-on" : "q-card"}>
-                <div className="q-inline">
-                  <span className="q-meta">Video</span>
-                  {item.start_ms !== null ? <span className="q-muted q-num">{formatMs(item.start_ms)}</span> : null}
+      <label className="q-search q-search-wide">
+        <span className="q-sr">Search the transcript</span>
+        <input
+          type="search"
+          value={query}
+          placeholder="Search the transcript"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      {speech.length === 0 ? <p className="q-empty">No transcript is available for this meeting.</p> : null}
+      {speech.length > 0 && rows.length === 0 ? <p className="q-empty">Nothing in the transcript matches “{query}”.</p> : null}
+      <ol className="q-lines">
+        {rows.map((span) => span.kind === "untranscribed" ? (
+          <li key={span.id} className="q-line q-line-gap">
+            <div className="q-line-head">
+              {span.start_ms !== null ? (
+                <button className="q-time" type="button" onClick={() => onSeek(span)} aria-label={`Play from ${formatMs(span.start_ms)}`}>{formatMs(span.start_ms)}</button>
+              ) : null}
+              <span className="q-speaker">Not transcribed</span>
+            </div>
+            <p className="q-muted">
+              This part of the recording{span.start_ms !== null && span.end_ms !== null ? ` (${formatMs(span.start_ms)} to ${formatMs(span.end_ms)})` : ""} could
+              not be transcribed. Nothing from it is in the transcript or the brief.
+            </p>
+          </li>
+        ) : (
+          <Line
+            key={span.id}
+            span={span}
+            active={span.id === activeId}
+            citation={span.id === citation?.span_id ? citation : null}
+            onSeek={onSeek}
+            onReviseText={onReviseText}
+            onReviseSpeaker={onReviseSpeaker}
+          />
+        ))}
+      </ol>
+      {!needle && matching.length > rows.length ? (
+        <div className="q-inline">
+          <button className="q-btn-ghost" type="button" onClick={() => setLimit(limit + PAGE)}>
+            Show {Math.min(PAGE, matching.length - rows.length)} more lines ({matching.length - rows.length} not shown)
+          </button>
+          <button className="q-btn-ghost" type="button" onClick={() => setLimit(matching.length)}>Show everything</button>
+        </div>
+      ) : null}
+      {screen.length > 0 && !needle ? (
+        <details className="q-details">
+          <summary>What was shown on screen ({screen.length})</summary>
+          <ul className="q-lines">
+            {screen.map((item) => (
+              <li key={item.key} className="q-line">
+                <div className="q-line-head">
+                  {item.at !== null ? (
+                    item.span ? (
+                      <button className="q-time" type="button" onClick={() => onSeek(item.span as Span)}>{formatMs(item.at)}</button>
+                    ) : (
+                      <span className="q-time is-static">{formatMs(item.at)}</span>
+                    )
+                  ) : null}
                 </div>
-                <p>{item.statement}</p>
-                {span ? (
-                  <button className="q-btn-ghost" type="button" onClick={() => onSeek(span)}>Open span</button>
-                ) : (
-                  <p className="q-muted">No span id on this observation.</p>
-                )}
-              </article>
-            );
-          })}
-        </div>
-        <div className="q-pane">
-          <h2>Synthesized</h2>
-          <p className="q-muted">Analysis text. The brief cites findings. The review queue is not part of this brief.</p>
-          <h3>Brief</h3>
-          {synthesis.length === 0 ? <p className="q-empty">No brief sentences on this graph page.</p> : null}
-          {synthesis.map((sentence) => (
-            <article
-              key={sentence.id}
-              className="q-sentence"
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpenSentence(sentence)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onOpenSentence(sentence);
-                }
-              }}
-            >
-              <Markdown text={sentence.text} />
-            </article>
-          ))}
-          <h3>Span text</h3>
-          {synthesized.length === 0 ? <p className="q-empty">No synthesized span text on this graph page.</p> : null}
-          {synthesized.map((span) => (
-            <article key={span.id} className={span.id === activeId ? "q-card is-on" : "q-card"}>
-              <div className="q-inline">
-                <span className="q-meta">{speakerText(span)}</span>
-                {span.start_ms !== null ? <span className="q-muted q-num">{formatMs(span.start_ms)}</span> : null}
-                {span.coarse ? <span className="q-badge">Coarse</span> : null}
-                {span.overlap ? <span className="q-badge">Overlap</span> : null}
-              </div>
-              <Highlighted text={span.text} citation={span.id === citation?.span_id ? citation : null} />
-              {omissions.filter((item) => item.span_id === span.id).map((item) => (
-                <p key={`${span.id}:${item.reason}`} className="q-muted">Omission: {item.reason || "recorded"}</p>
-              ))}
-              <button className="q-btn-ghost" type="button" onClick={() => onSeek(span)}>Open span</button>
-              <SpanEdit span={span} onReviseText={onReviseText} onReviseSpeaker={onReviseSpeaker} />
-            </article>
-          ))}
-        </div>
-      </div>
+                <p>{item.text}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </section>
   );
 }
 
-function Hypotheses({ speakers }: { speakers: SpeakerHypothesis[] }) {
-  return (
-    <div className="q-pane">
-      <h3>Speaker hypotheses</h3>
-      <p className="q-muted">Duration, share, and turn count are hypotheses. This page does not compute them.</p>
-      {speakers.length === 0 ? <p className="q-empty">No speaker hypothesis measures on this graph page.</p> : null}
-      {speakers.length > 0 ? (
-        <table className="q-table">
-          <thead>
-            <tr>
-              <th>Hypothesis</th>
-              <th>Duration ms</th>
-              <th>Share</th>
-              <th>Turns</th>
-            </tr>
-          </thead>
-          <tbody>
-            {speakers.map((row) => (
-              <tr key={row.id}>
-                <td>{row.label || row.id}</td>
-                <td className="q-num">{row.duration_ms === null ? "" : formatTableNumber(row.duration_ms)}</td>
-                <td className="q-num">{row.duration_share === null ? "" : formatTableNumber(row.duration_share)}</td>
-                <td className="q-num">{row.turn_count === null ? "" : formatTableNumber(row.turn_count)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
-    </div>
-  );
-}
-
-function RawRow({
+function Line({
   span,
-  body,
   active,
   citation,
-  seam,
   onSeek,
+  onReviseText,
+  onReviseSpeaker,
 }: {
   span: Span;
-  body: string;
   active: boolean;
   citation: Citation | null;
-  seam: boolean;
   onSeek: (span: Span) => void;
+  onReviseText: (span: Span, text: string) => Promise<void>;
+  onReviseSpeaker: (span: Span, scope: "span" | "hypothesis", displayName: string) => Promise<void>;
 }) {
+  const body = span.text.trim() ? span.text : span.raw_text;
+  const differs = span.raw_text.trim() && span.raw_text.trim() !== body.trim();
   return (
-    <article className={active ? "q-card is-on" : "q-card"}>
-      {seam ? <p className="q-meta">Seam</p> : null}
-      <div className="q-inline">
-        <span className="q-meta">{speakerText(span)}</span>
-        {span.start_ms !== null ? <span className="q-muted q-num">{formatMs(span.start_ms)}</span> : null}
-        {span.coarse ? <span className="q-badge">Coarse</span> : null}
+    <li className={active ? "q-line is-on" : "q-line"}>
+      <div className="q-line-head">
+        {span.start_ms !== null ? (
+          <button className="q-time" type="button" onClick={() => onSeek(span)} aria-label={`Play from ${formatMs(span.start_ms)}`}>
+            {formatMs(span.start_ms)}
+          </button>
+        ) : null}
+        <span className="q-speaker">{speakerText(span)}</span>
       </div>
       <Highlighted text={body} citation={citation} />
-      <button className="q-btn-ghost" type="button" onClick={() => onSeek(span)}>Open span</button>
-    </article>
+      {differs ? (
+        <details className="q-details q-inline-details">
+          <summary>Original wording</summary>
+          <p className="q-muted">{span.raw_text}</p>
+        </details>
+      ) : null}
+      <SpanEdit span={span} onReviseText={onReviseText} onReviseSpeaker={onReviseSpeaker} />
+    </li>
   );
 }
 
@@ -239,48 +206,53 @@ function SpanEdit({
   const [text, setText] = useState(span.text);
   const [name, setName] = useState(span.speaker_label ?? "");
   const [message, setMessage] = useState("");
+
+  function saveText() {
+    setMessage("");
+    onReviseText(span, text).then(
+      () => setMessage("Saved"),
+      (error: unknown) => setMessage(friendlyError(error instanceof Error ? error.message : null, "Could not save. Please try again.")),
+    );
+  }
+
+  function saveSpeaker(scope: "span" | "hypothesis") {
+    setMessage("");
+    onReviseSpeaker(span, scope, name.trim()).then(
+      () => setMessage("Saved"),
+      (error: unknown) => setMessage(friendlyError(error instanceof Error ? error.message : null, "Could not save. Please try again.")),
+    );
+  }
+
   return (
-    <details>
-      <summary>Revise synthesized text or speaker</summary>
+    <details className="q-details q-inline-details">
+      <summary>Correct this line</summary>
       <div className="q-stack">
         <label className="q-label">
-          Synthesized text
+          Text
           <textarea className="q-area" value={text} onChange={(event) => setText(event.target.value)} />
         </label>
-        <button
-          className="q-btn-ghost"
-          type="button"
-          onClick={() => {
-            void onReviseText(span, text).then(() => setMessage("Text sent")).catch((error: unknown) => {
-              setMessage(error instanceof Error ? error.message : "revise_text failed");
-            });
-          }}
-        >
-          Save text
-        </button>
+        <div className="q-inline">
+          <button className="q-btn-ghost" type="button" onClick={saveText}>Save text</button>
+        </div>
         <label className="q-label">
-          Display name
+          Speaker name
           <input className="q-field" value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <div className="q-inline">
-          <button className="q-btn-ghost" type="button" disabled={name.trim().length === 0} onClick={() => void send("span")}>This span</button>
+          <button className="q-btn-ghost" type="button" disabled={name.trim().length === 0} onClick={() => saveSpeaker("span")}>
+            Apply to this line
+          </button>
           <button
             className="q-btn-ghost"
             type="button"
             disabled={name.trim().length === 0 || !span.speaker_hypothesis_id}
-            onClick={() => void send("hypothesis")}
+            onClick={() => saveSpeaker("hypothesis")}
           >
-            This hypothesis
+            Apply to this speaker everywhere
           </button>
         </div>
         {message ? <p role="status">{message}</p> : null}
       </div>
     </details>
   );
-
-  function send(scope: "span" | "hypothesis") {
-    return onReviseSpeaker(span, scope, name.trim()).then(() => setMessage("Speaker sent")).catch((error: unknown) => {
-      setMessage(error instanceof Error ? error.message : "revise_speaker failed");
-    });
-  }
 }

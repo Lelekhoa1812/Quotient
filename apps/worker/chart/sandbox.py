@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import bisect
+import heapq
 import html
 import importlib.util
 import io
@@ -330,18 +332,28 @@ def _review_versus_published(catalogs: dict) -> dict:
 def _timeline_density(catalogs: dict, timed: list[tuple[str, object]]) -> dict:
     intervals = {ident: _interval(span, ident) for ident, span in timed}
     ordered = sorted(timed, key=lambda item: (intervals[item[0]][0], item[0]))
+    starts = [intervals[ident][0] for ident, _span in ordered]
+    active_ends = []
+    active_count = 0
     rows = []
-    for ident, _span in ordered:
+    for index, (ident, _span) in enumerate(ordered):
         start, end = intervals[ident]
-        ids = [ident]
-        for other, other_span in ordered:
-            if other == ident:
-                continue
-            other_start, other_end = intervals[other]
-            if start < other_end and other_start < end:
-                ids.append(other)
-        table = _measured(ids, "count", "spans", catalogs)
-        rows.append({"label": ident, "value": float(table.result), "ids": ids})
+        while active_ends and active_ends[0] <= start:
+            heapq.heappop(active_ends)
+            active_count -= 1
+        if end > start:
+            # Count future intervals beginning before this interval ends
+            # without materializing a quadratic ID matrix.
+            future = bisect.bisect_left(starts, end, lo=index + 1) - index - 1
+            value = active_count + 1 + future
+            heapq.heappush(active_ends, end)
+            active_count += 1
+        else:
+            value = active_count + 1
+        # The row represents this focal span; the value counts all spans
+        # overlapping it. Keeping only the focal ID bounds payload size.
+        _measured([ident], "count", "spans", catalogs)
+        rows.append({"label": ident, "value": float(value), "ids": [ident]})
     return _chart("timeline-density", "Timeline density", "count", rows)
 
 

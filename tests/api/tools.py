@@ -45,6 +45,12 @@ EXPECTED = {
         "destructiveHint": False,
         "required": ["meeting_id", "span_id", "scope", "display_name"],
     },
+    "revise_text": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "required": ["meeting_id", "span_id", "text"],
+    },
     "cancel_meeting": {
         "taskSupport": "forbidden",
         "readOnlyHint": False,

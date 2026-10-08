@@ -18,6 +18,8 @@ from collections.abc import Iterator
 from quotient.auth.context import AuthContext
 
 _BUFFER = 200
+# Bounded so repeated initialize calls cannot grow memory without limit; the oldest idle session goes first.
+MAX_SESSIONS = 500
 
 
 class Session:
@@ -79,8 +81,14 @@ class SessionStore:
 
     def create(self, auth: AuthContext) -> Session:
         session = Session(secrets.token_urlsafe(32), auth)
+        evicted: list[Session] = []
         with self._lock:
             self._items[session.session_id] = session
+            while len(self._items) > MAX_SESSIONS:
+                oldest = next(iter(self._items))
+                evicted.append(self._items.pop(oldest))
+        for old in evicted:
+            old.close()
         return session
 
     def get(self, session_id: str | None) -> Session | None:

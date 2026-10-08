@@ -46,6 +46,13 @@ TEMPLATES = [
         "mimeType": "application/json",
     },
     {
+        "name": "meeting_media",
+        "title": "Meeting media",
+        "uriTemplate": "quotient://meetings/{id}/media",
+        "description": "Short-lived playback URL for the meeting media, scoped to its owner.",
+        "mimeType": "video/mp4",
+    },
+    {
         "name": "meeting_export",
         "title": "Meeting export",
         "uriTemplate": "quotient://meetings/{id}/exports/{name}",
@@ -114,6 +121,7 @@ def meeting_uris(meeting_id: str) -> list[str]:
         f"{_PREFIX}{meeting_id}/graph",
         f"{_PREFIX}{meeting_id}/brief",
         f"{_PREFIX}{meeting_id}/review",
+        f"{_PREFIX}{meeting_id}/media",
     ]
     rows.extend(f"{_PREFIX}{meeting_id}/exports/{name}" for name, _mime in EXPORTS)
     return rows
@@ -149,7 +157,7 @@ def _parse(uri: object) -> tuple[str, str, str | None] | None:
     parts = uri[len(_PREFIX) :].split("/")
     if not parts or not _safe_id(parts[0]):
         return None
-    if len(parts) == 2 and parts[1] in {"graph", "brief", "review"}:
+    if len(parts) == 2 and parts[1] in {"graph", "brief", "review", "media"}:
         return parts[0], parts[1], None
     if len(parts) == 3 and parts[1] == "exports" and mime_for(parts[2]):
         return parts[0], "exports", parts[2]
@@ -175,6 +183,11 @@ def _content(
         return _json_block(uri, projected["brief"])
     if kind == "review":
         return _json_block(uri, projected["review"])
+    if kind == "media":
+        media_url = port.media_url(meeting_id, subject)  # type: ignore[attr-defined]
+        if not isinstance(media_url, str):
+            return None
+        return {"uri": uri, "mimeType": "video/mp4", "text": media_url}
     if name is None:
         return None
     rendered = port.export_bytes(meeting_id, subject, name)  # type: ignore[attr-defined]

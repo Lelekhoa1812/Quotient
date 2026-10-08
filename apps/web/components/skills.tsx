@@ -16,9 +16,9 @@ type Skill = SkillSummary & { text: string; view: "formatted" | "source"; copied
 
 const TIPS = [
   "Start with a recording. Slides and notes can go with it.",
-  "Open the meeting when it is ready. If it needs review, the written brief stays held until the open items are checked.",
-  "Copy a skill into your assistant. Replace {meeting_id} with the meeting it should read.",
-  "Export saves that same text as a file.",
+  "Open the meeting when it is ready. If some points could not be confirmed, the brief only includes what was confirmed.",
+  "Copy a skill into your AI assistant, then tell it which meeting to read.",
+  "Download saves the same text as a file.",
 ];
 
 export function Skills() {

@@ -58,6 +58,7 @@
             ]
           },
           "span_ids": {
+            "description": "Only the supplied spans that support this claim, including the span containing its quote.",
             "type": "array",
             "minItems": 1,
             "uniqueItems": true,

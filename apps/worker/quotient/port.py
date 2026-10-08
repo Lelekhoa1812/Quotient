@@ -9,8 +9,12 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
 import secrets
+import subprocess
 import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +27,9 @@ _ARTIFACT_KEYS = (
     "coverage",
     "exports",
 )
+
+
+MAX_RESUMES = 2
 
 
 class PortError(Exception):
@@ -116,6 +123,17 @@ def _claim_row(claim: object) -> dict:
         "coarse": bool(claim.coarse),
         "overlap": bool(claim.overlap),
         "citations": citations,
+        # Diagnostics for tuning. Ledger only: the API projection does not copy this key.
+        "verdict": {
+            "sol": getattr(claim, "sol_label", None),
+            "luna": getattr(claim, "luna_label", None),
+            "searched": len(getattr(claim, "searched_ids", None) or []),
+            "opened": len(getattr(claim, "opened_ids", None) or []),
+            "search_matches_open": bool(getattr(claim, "searched_ids", None))
+            and set(claim.searched_ids) == set(getattr(claim, "opened_ids", None) or []),
+            "quote_resolved": bool(claim.span_id),
+            "contradiction": bool(getattr(claim, "contradicting_quote", None)),
+        },
     }
 
 
@@ -171,12 +189,36 @@ def _record(item: object, fields: tuple[str, ...]) -> dict:
     return {name: getattr(item, name) for name in fields}
 
 
+# Motivation vs Logic
+# Motivation: failure_message is shown to people and returned to MCP clients. It used to be
+# "<ExceptionType>: <raw message>", which exposed local file paths and ffprobe command
+# lines for an unreadable file, and provider request ids for a rejected call.
+# Logic: Known failures map to one plain sentence. Unknown failures say only that the
+# analysis could not finish. The full exception goes to the server log (stderr), never
+# to the row. The sentences are matched by the portal's friendlyError as well.
 def _public_failure(exc: BaseException) -> str:
+    import subprocess
+
     detail = str(exc).replace("\n", " ").strip()
-    if not detail or "AKIA" in detail or "Bearer " in detail or "AWS_BEDROCK" in detail:
-        detail = ""
-    text = type(exc).__name__ if not detail else f"{type(exc).__name__}: {detail}"
-    return text[:180]
+    print(f"analysis failed: {type(exc).__name__}: {detail[:400]}", file=sys.stderr, flush=True)
+    lowered = detail.lower()
+    if type(exc).__name__ == "NoAudioTrack":
+        return "This recording has no audio, so there is nothing to transcribe."
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "The analysis took too long and was stopped. Please try again."
+    if isinstance(exc, FileNotFoundError):
+        return "The recording could not be found."
+    if isinstance(exc, subprocess.CalledProcessError) and any(
+        str(part).endswith(("ffprobe", "ffmpeg")) or str(part) in {"ffprobe", "ffmpeg"} for part in (exc.cmd or [])[:1]
+    ):
+        return "This file is not a readable audio or video recording."
+    if "http 403" in lowered or "http 401" in lowered or "check the configured aws identity" in lowered:
+        return "The analysis service did not accept this computer's sign-in. Sign in to AWS again, then start the analysis again."
+    if "content filter" in lowered:
+        return "The analysis service declined this recording."
+    if "timed out" in lowered or isinstance(exc, TimeoutError):
+        return "The analysis took too long and was stopped. Please try again."
+    return "The analysis could not be completed. Please try again."
 
 
 def _worker_charts(result, ledger) -> list:
@@ -225,10 +267,33 @@ def _refuse_queued_brief(result: object) -> None:
         raise RuntimeError("a queued claim entered the brief")
 
 
+def _object_exists(bucket: str, key: str, endpoint: str, env: dict | None) -> bool:
+    try:
+        result = subprocess.run(
+            ["aws", "s3api", "head-object", "--bucket", bucket, "--key", key, "--endpoint-url", endpoint, "--no-cli-pager"],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 class Port:
     """Ledger the MCP server calls. Analysis stays in loop.quality.run."""
 
-    def __init__(self, quality_run, checkpoints, classify_file, model_plan) -> None:
+    def __init__(
+        self,
+        quality_run,
+        checkpoints,
+        classify_file,
+        model_plan,
+        state_path: Path | None = None,
+        *,
+        resume_interrupted: bool = False,
+    ) -> None:
         self._quality_run = quality_run
         self._checkpoints = checkpoints
         self._classify_file = classify_file
@@ -237,6 +302,78 @@ class Port:
         self._rows: dict[str, dict] = {}
         self._idempotency: dict[tuple[str, str], str] = {}
         self._exports: dict[tuple[str, str], tuple[str, bytes]] = {}
+        self._state_path = state_path
+        resume_ids = []
+        if state_path is not None and state_path.exists():
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+            rows = payload.get("meetings", []) if isinstance(payload, dict) else []
+            if not isinstance(rows, list):
+                raise ValueError("local meeting state has an invalid meetings collection")
+            for row in rows:
+                if not isinstance(row, dict) or not isinstance(row.get("meeting_id"), str):
+                    raise ValueError("local meeting state contains an invalid row")
+                if row.get("status") in {"queued", "working"}:
+                    # Bugs vs Fixes
+                    # Bug: Every restart re-queued every unfinished row with no limit, so a
+                    # recording that crashed the process was re-run (and re-billed) forever.
+                    # Fix: Count restarts per row; after MAX_RESUMES the row fails with a plain reason.
+                    resumes = int(row.get("resumes") or 0)
+                    if resume_interrupted and resumes >= MAX_RESUMES:
+                        row["status"] = "failed"
+                        row["failure_message"] = "The analysis was interrupted too many times. Please upload the recording again."
+                    elif resume_interrupted:
+                        row["resumes"] = resumes + 1
+                        row["status"] = "queued"
+                        row["failure_message"] = None
+                        row["progress_message"] = "Restarting analysis from the source after the local app restarted"
+                        resume_ids.append(row["meeting_id"])
+                    else:
+                        row["status"] = "failed"
+                        row["failure_message"] = "Local worker restarted before analysis finished; resubmit this meeting."
+                    row["updated_at"] = _now()
+                artifacts = row.get("artifacts")
+                if isinstance(artifacts, dict) and artifacts.get("exports") == "ready":
+                    # Export bytes are intentionally not copied into the meeting
+                    # JSON state file; don't advertise an unavailable render.
+                    artifacts["exports"] = "not_run"
+                self._rows[row["meeting_id"]] = row
+                idem = row.get("idempotency_key")
+                if isinstance(idem, str):
+                    self._idempotency[(str(row.get("subject", "")), idem)] = row["meeting_id"]
+            self._save_locked()
+        for meeting_id in resume_ids:
+            threading.Thread(
+                target=self._analyze,
+                args=(meeting_id,),
+                name="quotient-analysis-resume",
+                daemon=True,
+            ).start()
+
+    def _save_locked(self) -> None:
+        if self._state_path is None:
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        # default=str: one unexpected value (an enum, a Path) must not make every later save raise.
+        encoded = json.dumps({"version": 1, "meetings": list(self._rows.values())}, ensure_ascii=False, default=str)
+        fd, temporary = tempfile.mkstemp(prefix="meetings-", suffix=".json", dir=self._state_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self._state_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _set_progress(self, meeting_id: str, message: str) -> None:
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            if row is None or row.get("status") in {"cancelled", "failed"} or row.get("progress_message") == message:
+                return
+            row["progress_message"] = message
+            row["updated_at"] = _now()
+            self._save_locked()
 
     def submit(
         self,
@@ -265,17 +402,21 @@ class Port:
                 "artifacts": _pending(),
                 "spans": [],
                 "claims": [],
+                "review_queue": [],
                 "findings": [],
                 "synthesis": [],
                 "actions": [],
                 "disagreements": [],
                 "omissions": [],
+                "gaps": [],
                 "none_in_transcript": [],
+                "not_evaluated": [],
                 "observations": [],
                 "revisions": [],
             }
             if idempotency_key:
                 self._idempotency[(subject, idempotency_key)] = meeting_id
+            self._save_locked()
         # Bugs vs Fixes
         # Bug: submit stored a queued row and returned. Nothing called Sonic,
         # Pegasus, or the publish gate, so tasks/get stayed queued.
@@ -302,6 +443,7 @@ class Port:
                 )
                 row["status"] = "working"
                 row["updated_at"] = _now()
+                self._save_locked()
             self._run_meeting(meeting_id, object_key, names)
         except Exception as exc:
             self._fail(meeting_id, _public_failure(exc))
@@ -309,15 +451,29 @@ class Port:
     def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...]) -> None:
         from bedrock.reason import Reasoner
         from bedrock.wire import Transport
-        from loop.ingest import LIVE_CEILING, assemble, resolve_object
+        from loop.ingest import assemble, resolve_object
         from registry.load import Registry
 
+        self._set_progress(meeting_id, "Preparing the media and building the transcript")
         path = resolve_object(object_key)
-        ledger = assemble(path, meeting_id, context=", ".join(names) if names else None)
+        ledger = assemble(
+            path,
+            meeting_id,
+            context=", ".join(names) if names else None,
+            progress_callback=lambda message: self._set_progress(meeting_id, message),
+            should_stop=lambda: self._is_cancelled(meeting_id),
+            cache_scope=self._subject_of(meeting_id),
+        )
         registry = Registry()
         reasoner = Reasoner(registry, Transport())
         print("analysis stage: quality", file=sys.stderr, flush=True)
-        self.run_quality(ledger, reasoner, registry, iteration_ceiling=LIVE_CEILING)
+        self.run_quality(
+            ledger,
+            reasoner,
+            registry,
+            stage_callback=lambda message: self._set_progress(meeting_id, message),
+            should_stop=lambda: self._is_cancelled(meeting_id),
+        )
         for item in reasoner.fallback_log:
             print(
                 "sol fallback: "
@@ -348,12 +504,14 @@ class Port:
                 acceptance = action.get("acceptance")
                 if acceptance == "accepted":
                     row["updated_at"] = _now()
+                    self._save_locked()
                     return copy.deepcopy(row)
                 if acceptance != "proposed":
                     _raise("conflict", "Only a proposed action can be accepted.")
                 action["acceptance"] = "accepted"
                 action["origin"] = action.get("origin") or "model"
                 row["updated_at"] = _now()
+                self._save_locked()
                 return copy.deepcopy(row)
             _raise("not_found", "Action not found.")
 
@@ -392,17 +550,30 @@ class Port:
                     "at": _now(),
                 }
             )
-            row["status"] = "working"
-            for key in ("claims", "counterevidence", "entailment", "coverage", "exports"):
-                row["artifacts"][key] = "pending"
+            # Speaker labels are a presentation edit; no analysis rerun is queued.
             row["updated_at"] = _now()
+            self._save_locked()
+            return copy.deepcopy(row)
+
+    def revise_text(self, meeting_id: str, subject: str, span_id: str, text: str) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            span = next((item for item in row["spans"] if item.get("span_id") == span_id), None)
+            if span is None:
+                _raise("not_found", "Span not found.")
+            span["text"] = text
+            row["revisions"].append({"span_id": span_id, "text": text, "at": _now()})
+            row["updated_at"] = _now()
+            self._save_locked()
             return copy.deepcopy(row)
 
     def cancel(self, meeting_id: str, subject: str) -> dict:
         with self._lock:
             row = self._owned(meeting_id, subject)
             row["status"] = "cancelled"
+            row["progress_message"] = "Stopped before it finished."
             row["updated_at"] = _now()
+            self._save_locked()
             return copy.deepcopy(row)
 
     def export_bytes(self, meeting_id: str, subject: str, name: str) -> tuple[str, bytes] | None:
@@ -416,6 +587,58 @@ class Port:
             mime, body = stored
             return mime, bytes(body)
 
+    def media_url(self, meeting_id: str, subject: str) -> str | None:
+        """Return a short-lived URL for the submitted source, scoped to its owner."""
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            if row is None or row["subject"] != subject:
+                return None
+            key = row.get("object_key")
+            # A client chooses object_key. Sign it only once this meeting has ingested media of its
+            # own; a failed or queued submission naming someone else's key gets no URL.
+            if row.get("status") not in {"ready", "needs_review"} and not row.get("spans"):
+                return None
+        if not isinstance(key, str) or not key.startswith("derivatives/"):
+            return None
+        bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", "").strip()
+        if not bucket:
+            if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
+                return None
+            bucket = "axion-meeting-local"
+        endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
+        env = None
+        if endpoint:
+            env = os.environ.copy()
+            access = env.get("QUOTIENT_S3_ACCESS_KEY_ID", "")
+            secret = env.get("QUOTIENT_S3_SECRET_ACCESS_KEY", "")
+            if bool(access) != bool(secret):
+                return None
+            if access:
+                env["AWS_ACCESS_KEY_ID"] = access
+                env["AWS_SECRET_ACCESS_KEY"] = secret
+                env.pop("AWS_SESSION_TOKEN", None)
+            # Bugs vs Fixes
+            # Bug: In local S3 mode the worker reads the source from disk and uploads a
+            # playback copy to derivatives/<meeting_id>-0.mp4, but this URL was signed for
+            # the submitted object_key, which is not in the bucket. Every recording
+            # processed from disk was unplayable (403/404, MEDIA_ERR_SRC_NOT_SUPPORTED).
+            # Fix: With a local endpoint, sign the per-meeting upload when it exists and
+            # fall back to the submitted key. Without an endpoint (AWS) the key is unchanged.
+            own = f"derivatives/{meeting_id}-0.mp4"
+            if own != key and _object_exists(bucket, own, endpoint, env):
+                key = own
+        command = ["aws", "s3", "presign", f"s3://{bucket}/{key}", "--expires-in", "3600"]
+        if endpoint:
+            command.extend(["--endpoint-url", endpoint])
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        url = result.stdout.strip()
+        if result.returncode or not url.startswith(("http://", "https://")):
+            return None
+        return url
+
     def store_export(self, meeting_id: str, subject: str, name: str, mime: str, body: bytes) -> None:
         """Record bytes a worker renderer already produced. Empty bodies are ignored."""
 
@@ -427,6 +650,7 @@ class Port:
             if name == "burned.mp4":
                 row["artifacts"]["exports"] = "ready"
                 row["updated_at"] = _now()
+            self._save_locked()
 
     def classify_media(self, path: str | Path) -> dict:
         """Media entrypoint: ffprobe kind plus the model plan. Extensions are not used."""
@@ -434,7 +658,17 @@ class Port:
         kind = self._classify_file(path)
         return {"kind": kind, "models": tuple(sorted(self._model_plan(kind)))}
 
-    def run_quality(self, ledger, model, registry, key: str | None = None, *, iteration_ceiling: int = 32):
+    def run_quality(
+        self,
+        ledger,
+        model,
+        registry,
+        key: str | None = None,
+        *,
+        iteration_ceiling: int | None = None,
+        stage_callback=None,
+        should_stop=None,
+    ):
         """Quality entrypoint. Calls loop.quality.run and stores its gate result."""
 
         meeting_id = getattr(ledger, "meeting_id", None)
@@ -443,7 +677,14 @@ class Port:
             if row is not None and row["status"] not in {"cancelled", "failed"}:
                 row["status"] = "working"
                 row["updated_at"] = _now()
-            checkpoint = key or (row or {}).get("idempotency_key") or meeting_id or ""
+                self._save_locked()
+            # Bugs vs Fixes
+            # Bug: The checkpoint store is process-wide and was keyed by the raw client
+            # idempotency key, so two subjects using the same key shared one cached analysis
+            # (one could read the other's claims, findings, and brief).
+            # Fix: Scope the checkpoint by subject. The API already scopes idempotency per subject.
+            subject = (row or {}).get("subject") or ""
+            checkpoint = f"{subject}\u0000{key or (row or {}).get('idempotency_key') or meeting_id or ''}"
         try:
             result = self._quality_run(
                 ledger,
@@ -452,6 +693,8 @@ class Port:
                 self._checkpoints,
                 str(checkpoint),
                 iteration_ceiling=iteration_ceiling,
+                stage_callback=stage_callback,
+                should_stop=should_stop,
             )
         except RuntimeError as exc:
             if "queued claim" in str(exc):
@@ -467,6 +710,16 @@ class Port:
             self._project(result, ledger)
         return result
 
+    def _subject_of(self, meeting_id: str) -> str:
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            return str(row["subject"]) if row and row.get("subject") else ""
+
+    def _is_cancelled(self, meeting_id: str) -> bool:
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            return row is None or row["status"] == "cancelled"
+
     def _fail(self, meeting_id: object, message: str) -> None:
         if not isinstance(meeting_id, str):
             return
@@ -477,6 +730,7 @@ class Port:
             row["status"] = "failed"
             row["failure_message"] = message
             row["updated_at"] = _now()
+            self._save_locked()
 
     def _project(self, result, ledger) -> None:
         meeting_id = getattr(ledger, "meeting_id", None)
@@ -497,6 +751,11 @@ class Port:
                 span["speaker_display"] = display
         anchor = getattr(ledger, "anchor_date", None)
         row["status"] = result.status
+        row["progress_message"] = (
+            "Analysis complete; this meeting needs review."
+            if result.status == "needs_review"
+            else "Analysis complete."
+        )
         row["failure_message"] = None
         row["prompt_release"] = result.prompt_release
         row["spans"] = spans
@@ -507,6 +766,9 @@ class Port:
             _observation_row(item) for item in getattr(ledger, "notes", []) or []
         )
         row["claims"] = [_claim_row(claim) for claim in result.claims]
+        row["review_queue"] = [
+            claim_id for claim_id in getattr(result, "review_queue", []) if isinstance(claim_id, str)
+        ]
         row["findings"] = [_finding_row(finding) for finding in result.findings]
         row["synthesis"] = [_sentence_row(sentence, index) for index, sentence in enumerate(result.synthesis)]
         row["actions"] = [
@@ -517,10 +779,12 @@ class Port:
             _record(item, ("sonic_span_id", "observation_id", "statement")) for item in result.disagreements
         ]
         row["omissions"] = [_record(item, ("span_id", "reason")) for item in result.omissions]
+        row["gaps"] = [_record(item, ("span_ids", "reason")) for item in getattr(result, "gaps", []) or []]
         dimensions = result.dimensions if isinstance(result.dimensions, dict) else {}
         row["none_in_transcript"] = [
             name for name, value in dimensions.items() if value == "none_in_transcript"
         ]
+        row["not_evaluated"] = [name for name, value in dimensions.items() if value == "not_evaluated"]
         row["synthesis_omissions"] = [
             _record(item, ("finding_id", "reason")) for item in getattr(result, "synthesis_omissions", []) or []
         ]
@@ -532,6 +796,7 @@ class Port:
             artifacts["exports"] = "ready"
         row["artifacts"] = artifacts
         row["updated_at"] = _now()
+        self._save_locked()
 
     def _owned(self, meeting_id: str, subject: str) -> dict:
         row = self._rows.get(meeting_id)
@@ -557,4 +822,15 @@ def _load_entrypoints():
 
 def load_port() -> Port:
     quality_run, checkpoints, classify_file, model_plan = _load_entrypoints()
-    return Port(quality_run, checkpoints, classify_file, model_plan)
+    local_state = None
+    if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+        configured = os.environ.get("QUOTIENT_LOCAL_STATE_PATH", "").strip()
+        local_state = Path(configured) if configured else Path(__file__).resolve().parents[3] / ".local" / "run" / "meetings.json"
+    return Port(
+        quality_run,
+        checkpoints,
+        classify_file,
+        model_plan,
+        state_path=local_state,
+        resume_interrupted=local_state is not None,
+    )

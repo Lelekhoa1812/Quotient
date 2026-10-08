@@ -124,3 +124,23 @@ def test_sample_counts_map_through_omitted_silence():
     assert source_ms_of_sample(0, table) == 0
     assert source_ms_of_sample(16000, table) == 2000
     assert source_ms_of_sample(table[-1].sample_end, table) == 5000
+
+
+def test_a_picture_only_file_reports_no_audio_not_unreadable(tmp_path):
+    import shutil
+    import subprocess
+
+    import pytest
+
+    from errors import NoAudioTrack
+    from media.pcm import write_pcm
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    source = tmp_path / "picture-only.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=64x64:r=5:d=1", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
+        check=True,
+    )
+    with pytest.raises(NoAudioTrack):
+        write_pcm(source, tmp_path / "out.pcm")

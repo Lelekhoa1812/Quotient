@@ -63,26 +63,42 @@ def project_meeting(raw: dict) -> dict:
             published.append(view)
         else:
             review_claims.append(view)
+    review_by_id = {claim["claim_id"]: claim for claim in review_claims}
+    queue_order = [
+        claim_id
+        for claim_id in cleaned.get("review_queue") or []
+        if isinstance(claim_id, str) and claim_id in review_by_id
+    ]
+    ordered_ids = set(queue_order)
+    review_claims = [review_by_id[claim_id] for claim_id in queue_order] + [
+        claim for claim in review_claims if claim["claim_id"] not in ordered_ids
+    ]
     published_ids = {claim["claim_id"] for claim in published}
     findings = _findings(cleaned.get("findings") or [], published_ids)
     synthesis = _synthesis(cleaned.get("synthesis") or [], findings, published, meeting_id)
     actions = _actions(cleaned.get("actions") or [], spans_by_id)
     disagreements = [item for item in cleaned.get("disagreements") or [] if isinstance(item, dict)]
     omissions = [item for item in cleaned.get("omissions") or [] if isinstance(item, dict)]
+    gaps = _gaps(cleaned.get("gaps"), spans_by_id)
     counts = _counts(review_claims)
     coverage_gap = _coverage_gap(spans, published, omissions)
     stored_status = str(cleaned.get("status") or "queued")
     status = stored_status
-    if stored_status == "ready" and (sum(counts.values()) > 0 or coverage_gap):
+    not_evaluated = [name for name in cleaned.get("not_evaluated") or [] if name in DIMENSIONS]
+    if stored_status == "ready" and (sum(counts.values()) > 0 or coverage_gap or gaps or not_evaluated):
         status = "needs_review"
     withheld = status != "ready"
-    dimensions = _dimensions(findings)
+    dimensions = _dimensions(findings, cleaned.get("findings") or [], not_evaluated)
     # Bugs vs Fixes
     # Bug: read_graph dropped the worker chart tables and the dissent omission
     # records, so a client had to invent both.
     # Fix: Copy charts and synthesis_omissions from the meeting row. This
     # function does not call the chart renderer.
-    playback = f"meetings/{meeting_id}"
+    playback = (
+        f"quotient://meetings/{meeting_id}/media"
+        if isinstance(raw.get("object_key"), str) and raw.get("object_key")
+        else f"meetings/{meeting_id}"
+    )
     release = _release(cleaned.get("prompt_release"))
     graph = {
         "meeting_id": meeting_id,
@@ -96,6 +112,7 @@ def project_meeting(raw: dict) -> dict:
         "actions": actions,
         "disagreements": disagreements,
         "omissions": omissions,
+        "gaps": gaps,
         "dimensions": dimensions,
         "raw_transcript": _raw_transcript(spans, cleaned.get("observations")),
         "charts": _charts(cleaned.get("charts")),
@@ -130,8 +147,14 @@ def project_meeting(raw: dict) -> dict:
         "artifacts": _artifacts(cleaned.get("artifacts")),
         "review_counts": counts,
         "playback": playback,
+        "progress_message": (
+            cleaned.get("progress_message")
+            if isinstance(cleaned.get("progress_message"), str)
+            else ""
+        ),
         "withheld": withheld,
         "updated_at": cleaned.get("updated_at") if isinstance(cleaned.get("updated_at"), str) else None,
+        "source_name": _source_name(raw.get("object_key")),
         "failure_message": _safe_failure(cleaned.get("failure_message")),
         "graph": graph,
         "brief": brief,
@@ -145,7 +168,7 @@ def project_meeting(raw: dict) -> dict:
 
 
 def summary(projected: dict) -> dict:
-    return {
+    result = {
         "meeting_id": projected["meeting_id"],
         "status": projected["status"],
         "prompt_release": projected["prompt_release"],
@@ -153,22 +176,36 @@ def summary(projected: dict) -> dict:
         "artifacts": projected["artifacts"],
         "playback": projected["playback"],
         "withheld": projected["withheld"],
+        "progress_message": projected.get("progress_message", ""),
     }
+    if projected.get("updated_at"):
+        result["updated_at"] = projected["updated_at"]  # additive: lets a client show real times
+    if projected.get("source_name"):
+        result["source_name"] = projected["source_name"]  # additive: a readable fallback title
+    # Additive: only a failed meeting carries its (already sanitised) reason.
+    if projected["status"] == "failed" and projected.get("failure_message"):
+        result["failure_message"] = projected["failure_message"]
+    return result
 
 
 def page_graph(graph: dict, offset: int, page_size: int) -> tuple[dict, int | None]:
-    keys = ("spans", "claims", "findings", "synthesis", "actions", "disagreements", "omissions")
+    keys = ("spans", "claims", "findings", "synthesis", "actions", "disagreements", "omissions", "gaps")
     paged = {
         "meeting_id": graph["meeting_id"],
         "status": graph["status"],
         "prompt_release": graph["prompt_release"],
         "playback": graph["playback"],
-        "dimensions": graph["dimensions"],
-        "raw_transcript": graph["raw_transcript"],
-        "charts": graph.get("charts") or [],
-        "synthesis_omissions": graph.get("synthesis_omissions") or [],
-        "dissent_omissions": graph.get("dissent_omissions") or [],
     }
+    if offset == 0:
+        paged.update(
+            {
+                "dimensions": graph["dimensions"],
+                "raw_transcript": graph["raw_transcript"],
+                "charts": graph.get("charts") or [],
+                "synthesis_omissions": graph.get("synthesis_omissions") or [],
+                "dissent_omissions": graph.get("dissent_omissions") or [],
+            }
+        )
     more = False
     for key in keys:
         rows = graph.get(key) or []
@@ -177,6 +214,20 @@ def page_graph(graph: dict, offset: int, page_size: int) -> tuple[dict, int | No
             more = True
     next_offset = offset + page_size if more else None
     return paged, next_offset
+
+
+def _gaps(value: object, spans_by_id: dict) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    rows = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        ids = item.get("span_ids")
+        valid_ids = list(dict.fromkeys(span_id for span_id in ids if isinstance(span_id, str) and span_id in spans_by_id)) if isinstance(ids, list) else []
+        if valid_ids:
+            rows.append({"gap_id": f"gap-{index + 1}", "span_ids": valid_ids, "reason": item.get("reason") if isinstance(item.get("reason"), str) else ""})
+    return rows
 
 
 def _charts(value: object) -> list:
@@ -230,17 +281,36 @@ def _action_claims_published(action: dict, published_ids: set[str]) -> bool:
     return bool(claim_ids) and all(item in published_ids for item in claim_ids)
 
 
-def _dimensions(findings: list[dict]) -> list[dict]:
+# Motivation vs Logic
+# Motivation: "none_in_transcript" must mean the lens looked and found nothing. A
+# dimension with no published finding can also be held (findings exist but their
+# claims are unconfirmed) or not evaluated (the lens did not complete).
+# Logic: state stays "findings" or "none_in_transcript" for existing clients.
+# A dimension the lens did not complete is "not_evaluated". A none row also
+# carries held_findings, the count of worker findings for that dimension that the
+# publish rules kept off the page, so a reader can tell "absent" from "unconfirmed".
+def _dimensions(findings: list[dict], raw_findings: list | None = None, not_evaluated: list[str] | None = None) -> list[dict]:
     grouped: dict[str, list[str]] = {name: [] for name in DIMENSIONS}
     for finding in findings:
         grouped[finding["dimension"]].append(finding["finding_id"])
+    held: dict[str, int] = {name: 0 for name in DIMENSIONS}
+    published = {item["finding_id"] for item in findings}
+    for raw in raw_findings or []:
+        if not isinstance(raw, dict) or raw.get("dimension") not in held:
+            continue
+        identifier = raw.get("finding_id") or raw.get("id")
+        if identifier not in published:
+            held[raw["dimension"]] += 1
+    unevaluated = set(not_evaluated or [])
     rows = []
     for name in DIMENSIONS:
         ids = grouped[name]
         if ids:
             rows.append({"dimension": name, "state": "findings", "finding_ids": ids})
+        elif name in unevaluated:
+            rows.append({"dimension": name, "state": "not_evaluated"})
         else:
-            rows.append({"dimension": name, "state": "none_in_transcript"})
+            rows.append({"dimension": name, "state": "none_in_transcript", "held_findings": held[name]})
     return rows
 
 
@@ -529,11 +599,27 @@ def _release(value: object) -> str | None:
     return value
 
 
+_LEAKY = ("/Users/", "/home/", "/private/", "/tmp/", "Command [", "Command '[", "Traceback", "RequestId")
+
+
+def _source_name(object_key: object) -> str | None:
+    """The file's own name without folders or extension; never the per-meeting copy's generated name."""
+    if not isinstance(object_key, str) or not object_key:
+        return None
+    stem = object_key.rsplit("/", 1)[-1].rsplit(".", 1)[0].strip()
+    if not stem or len(stem) > 80 or stem.lower().endswith("-0"):
+        return None
+    return stem.replace("_", " ").replace("-", " ").strip() or None
+
+
 def _safe_failure(value: object) -> str | None:
     if not isinstance(value, str) or not value or len(value) > 200:
         return None
     if any(marker in value for marker in _SECRET_MARKERS):
         return "Meeting failed."
+    # Rows written before failures were sanitised can still hold paths or command lines.
+    if any(marker in value for marker in _LEAKY):
+        return "The analysis could not be completed. Please try again."
     return value
 
 

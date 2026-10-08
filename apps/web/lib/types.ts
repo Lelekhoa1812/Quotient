@@ -183,16 +183,21 @@ export type VideoObservation = {
   start_ms: number | null;
 };
 
+export type TranscriptGap = { id: string; spanIds: string[]; reason: string };
+
 export type GraphPage = {
   spans: Span[];
   claims: Claim[];
   findings: Finding[];
   none_in_transcript: Dimension[];
+  not_evaluated: Dimension[];
+  held: Partial<Record<Dimension, number>>;
   synthesis: SynthesisSentence[];
   synthesis_omissions: SynthesisOmission[];
   actions: ActionItem[];
   disagreements: Disagreement[];
   omissions: SpeechOmission[];
+  gaps: TranscriptGap[];
   review: Claim[];
   review_present: boolean;
   charts: ChartTable[];
@@ -212,6 +217,10 @@ export type MeetingStatus = {
   reviewCount: number | null;
   reviewCounts: ReviewCounts | null;
   artifacts: Record<string, string>;
+  progressMessage: string;
+  failureMessage: string;
+  updatedAt: string;
+  sourceName: string;
 };
 
 export type TaskSnapshot = {

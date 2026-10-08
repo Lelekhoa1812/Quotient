@@ -1,11 +1,13 @@
 import json
 import threading
+from types import SimpleNamespace
 
 from bedrock.turn import ModelTurn, ToolCall
+from graph.claim import finalize_claim
 from graph.lenses import run_lenses
 from graph.span import Span
 from graph.state import Claim
-from loop.quality import Ledger, run
+from loop.quality import Budget, Ledger, _actions, _contest, run
 from loop.store import MemoryStore
 from media.compact import IndexedSpan
 from registry.ids import LENS_ORDER, lens_id
@@ -79,6 +81,59 @@ def test_blind_lenses_run_all_ten_without_seeing_each_other():
         assert secret not in json.dumps(call["payload"])
 
 
+def test_entailment_uses_the_validated_source_span_when_quote_repeats():
+    first = _span("s1", "The budget is capped at $800.", 0, 1000)
+    selected = _span("s2", "The budget is capped at $800.", 1000, 2000)
+    ledger = Ledger(meeting_id="m", duration_ms=2000, kind="audio", spans=[first, selected])
+    claim = Claim(
+        id="c1",
+        meeting_id="m",
+        kind="figure",
+        proposition="The budget is capped at $800.",
+        paraphrase="The budget cap is eight hundred dollars.",
+        quote="The budget is capped at $800.",
+        source_span_ids=["s2"],
+    )
+    responses = [
+        SimpleNamespace(output={}, tool_calls=[ToolCall("open_span", {"span_id": "s2"})]),
+        SimpleNamespace(output={"searched_ids": ["s2"], "contradicting_quote": None}, tool_calls=[]),
+    ]
+    entailment_payloads = []
+
+    def call(prompt_id, payload):
+        if prompt_id == "meeting.counterevidence.v1":
+            return responses.pop(0)
+        entailment_payloads.append((prompt_id, payload))
+        return SimpleNamespace(output={"label": "entails"}, tool_calls=[])
+
+    _contest(ledger, call, claim)
+    assert len(entailment_payloads) == 2
+    assert all(payload["cited_span_texts"] == [selected.text] for _, payload in entailment_payloads)
+    assert finalize_claim(claim, ledger.spans, duration_ms=ledger.duration_ms).status == "supported"
+
+
+def test_supported_commitments_become_conservative_proposed_actions_when_lens_omits_them():
+    span = _span("s-action", "Sam will collect two supplier quotes by Wednesday.", 0, 3000)
+    claim = Claim(
+        id="c-action",
+        meeting_id="m",
+        kind="commitment",
+        proposition="Sam will collect supplier quotes.",
+        paraphrase="Sam will collect two supplier quotes by Wednesday.",
+        quote=span.text,
+        span_id=span.id,
+        status="supported",
+    )
+    ledger = SimpleNamespace(spans=[span], anchor_date=None, previous_actions=[])
+    actions = _actions(ledger, registry(), [], [claim])
+    assert len(actions) == 1
+    assert actions[0].statement == claim.paraphrase
+    assert actions[0].claim_ids == [claim.id]
+    assert actions[0].owner_span_id is None
+    assert actions[0].due_kind == "none"
+    assert actions[0].acceptance == "proposed"
+
+
 def test_publish_loop_keeps_overlap_and_excludes_unanchored_due_dates():
     model = Scripted()
     model.push("meeting.compaction.v1", {"omit_ids": ["sil", "ov"]})
@@ -92,6 +147,7 @@ def test_publish_loop_keeps_overlap_and_excludes_unanchored_due_dates():
                     "proposition": "The team will ship the notes.",
                     "paraphrase": "Shipping the notes is planned.",
                     "quote": "ship the notes",
+                    "span_ids": ["s1"],
                     "decision_status": None,
                 }
             ],
@@ -168,7 +224,8 @@ def test_publish_loop_keeps_overlap_and_excludes_unanchored_due_dates():
         ],
     )
     store = MemoryStore()
-    result = run(ledger, model, registry(), store, "job-1")
+    stages = []
+    result = run(ledger, model, registry(), store, "job-1", stage_callback=stages.append)
     sol = next(call for call in model.calls if call["prompt_id"] == "meeting.entailment.v1")
     assert "The team will ship the notes." not in json.dumps(sol["payload"])
     synthesis = next(call for call in model.calls if call["prompt_id"] == "meeting.synthesis.v1")
@@ -185,6 +242,16 @@ def test_publish_loop_keeps_overlap_and_excludes_unanchored_due_dates():
     assert result.actions[0].acceptance == "proposed"
     assert result.actions[0].due_surface == "by next Friday"
     assert result.chart["result"] == 1
+    assert stages == [
+        "Compacting transcript spans",
+        "Checking audio against visual evidence",
+        "Extracting claims from the transcript",
+        "Checking transcript coverage",
+        "Analyzing all ten evidence lenses",
+        "Building the evidence-backed brief",
+        "Extracting and grounding follow-up actions",
+        "Building charts and checking publish readiness",
+    ]
     calls = len(model.calls)
     replay = run(ledger, model, registry(), store, "job-1")
     assert replay is result
@@ -239,6 +306,7 @@ def test_second_dissent_drop_stays_on_the_graph():
                     "proposition": "The dates conflict in the notes.",
                     "paraphrase": "The notes contain a date conflict.",
                     "quote": "dates conflict",
+                    "span_ids": ["s1"],
                     "decision_status": None,
                 }
             ],
@@ -256,6 +324,7 @@ def test_second_dissent_drop_stays_on_the_graph():
                         "proposition": "The dates conflict in the notes.",
                         "paraphrase": "The notes contain a date conflict.",
                         "quote": "dates conflict",
+                        "span_ids": ["s1"],
                         "decision_status": None,
                     }
                 ],
@@ -299,6 +368,13 @@ def test_iteration_ceiling_withholds_the_brief():
     assert model.calls == []
 
 
+def test_default_quality_budget_does_not_stop_large_analyses_early():
+    budget = Budget()
+    assert all(budget.allow() for _ in range(1000))
+    assert budget.used == 1000
+    assert budget.hit is False
+
+
 def test_resolved_owner_is_accepted_during_the_run_and_human_rows_remain():
     from graph.actions import ground_action
     from graph.state import Action, Finding
@@ -316,6 +392,12 @@ def test_resolved_owner_is_accepted_during_the_run_and_human_rows_remain():
         "origin": "model",
         "acceptance": "proposed",
     }
+    # An owner alone is not agreement: the commitment lens contract keeps such a row proposed.
+    owner_only = ground_action(draft, loaded, [span], quote="send the notes", anchor_date=None)
+    assert owner_only.owner_span_id == "s1" and owner_only.acceptance == "proposed"
+    unknown_agreement = ground_action({**draft, "agreement_span_id": "nowhere"}, loaded, [span], quote="send the notes", anchor_date=None)
+    assert unknown_agreement.acceptance == "proposed"
+    draft = {**draft, "agreement_span_id": "s1"}
     accepted = ground_action(draft, loaded, [span], quote="send the notes", anchor_date=None)
     assert accepted.acceptance == "accepted"
     assert accepted.owner_span_id == "s1"
@@ -437,3 +519,315 @@ def test_missing_decision_status_finishes_in_the_review_queue():
     assert result.status == "needs_review"
     assert "c1" in result.review_queue
     assert "c1" not in result.brief["claim_ids"]
+
+
+def test_fallback_action_validates_against_the_shipped_contracts():
+    from pathlib import Path
+
+    from registry.load import Registry
+
+    shipped = Registry(Path(__file__).resolve().parents[2] / "contracts")
+    span = _span("s-action", "Sam will collect two supplier quotes by Wednesday.", 0, 3000)
+    claim = Claim(
+        id="c-action",
+        meeting_id="m",
+        kind="commitment",
+        proposition="Sam will collect supplier quotes.",
+        paraphrase="Sam will collect two supplier quotes by Wednesday.",
+        quote=span.text,
+        span_id=span.id,
+        status="supported",
+    )
+    ledger = SimpleNamespace(spans=[span], anchor_date=None, previous_actions=[])
+    actions = _actions(ledger, shipped, [], [claim])
+    assert [item.claim_ids for item in actions] == [[claim.id]]
+    assert actions[0].origin == "model"
+
+
+def test_coverage_and_supplement_payloads_match_their_contracts():
+    from pathlib import Path
+
+    import yaml
+
+    from loop.quality import _coverage
+
+    root = Path(__file__).resolve().parents[2] / "contracts" / "prompts"
+
+    def allowed(name):
+        return set(yaml.safe_load((root / f"{name}.yaml").read_text())["input"]["include"])
+
+    seen = []
+
+    def call(prompt_id, payload):
+        seen.append((prompt_id, payload))
+        if prompt_id == "meeting.coverage.v1":
+            return SimpleNamespace(output={"uncovered_span_ids": []}, tool_calls=[])
+        items = [
+            {"span_id": row["span_id"], "outcome": "omission", "reason": "pleasantry"}
+            for row in payload["uncovered_spans"]
+        ]
+        return SimpleNamespace(output={"items": items}, tool_calls=[])
+
+    spans = [_span(f"s{n}", f"line {n}", n * 1000, n * 1000 + 900) for n in range(45)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=45000)
+    claims, gaps, omissions = [], [], []
+    _coverage(ledger, call, claims, gaps, omissions)
+
+    for prompt_id, payload in seen:
+        name = prompt_id
+        assert set(payload) <= allowed(name), (name, set(payload) - allowed(name))
+        assert set(payload) == allowed(name), (name, allowed(name) - set(payload))
+    batches = [payload for prompt_id, payload in seen if prompt_id == "meeting.supplement.v1"]
+    assert [len(item["uncovered_spans"]) for item in batches] == [20, 20, 5]
+    assert all(row["text"] for item in batches for row in item["uncovered_spans"])
+    assert len(omissions) == 45
+    # A derived uncovered set is authoritative even if the auditor reports none.
+    assert {item.span_id for item in omissions} == {span.id for span in spans}
+
+
+def test_a_failed_lens_is_not_evaluated_not_absent_and_blocks_ready():
+    from errors import SchemaRejected
+    from graph.lenses import run_lenses
+    from loop.quality import Budget, _BudgetModel
+    from registry.ids import LENS_ORDER
+
+    class Failing:
+        def complete(self, **_):
+            raise SchemaRejected("bad")
+
+    claim = Claim(id="c", meeting_id="m", kind="decision", proposition="p", paraphrase="p", quote="q", status="supported")
+    wrapped = _BudgetModel(Failing(), Budget(), registry())
+    result = run_lenses(wrapped, registry(), [claim])
+    assert set(result["dimensions"].values()) == {"not_evaluated"}
+    assert list(result["dimensions"]) == list(LENS_ORDER)
+
+    from graph.publish import gate
+
+    from graph.state import Omission
+
+    span = _span("s1", "text", 0, 1000)
+    covered = dict(
+        meeting_id="m", duration_ms=1000, spans=[span], claims=[], findings=[], sentences=[],
+        synthesis_omissions=[], actions=[], disagreements=[], omissions=[Omission(span_id="s1", reason="x")], gaps=[],
+        ceiling_hit=False,
+    )
+    clean = gate(dimensions={name: "none_in_transcript" for name in LENS_ORDER}, **covered)
+    assert clean.status == "ready"  # everything covered: only the lens state can change this
+    outcome = gate(dimensions=result["dimensions"], **covered)
+    assert outcome.status == "needs_review"
+
+
+def test_one_failed_extraction_window_does_not_drop_later_windows():
+    from loop.quality import _extract
+
+    spans = [_span(f"s{n}", f"statement number {n} is here", n * 1000, n * 1000 + 900) for n in range(45)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=45000)
+    seen = []
+
+    def call(prompt_id, payload):
+        seen.append(payload["spans"][0]["id"])
+        if len(seen) == 1:
+            return None
+        return SimpleNamespace(output={"claims": [], "gaps": []}, tool_calls=[])
+
+    _extract(ledger, call, [], [])
+    assert seen == ["s0", "s20", "s40"]
+
+
+def test_extraction_stops_after_three_consecutive_window_failures():
+    from loop.quality import _extract
+
+    spans = [_span(f"s{n}", f"statement number {n} is here", n * 1000, n * 1000 + 900) for n in range(120)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=120000)
+    seen = []
+
+    def call(prompt_id, payload):
+        seen.append(payload["spans"][0]["id"])
+        return None
+
+    _extract(ledger, call, [], [])
+    assert len(seen) == 3
+
+
+def _tool_then_answer(first_calls, answer):
+    """A model that first asks to open spans, then answers once it sees tool results."""
+    from bedrock.turn import ModelTurn
+
+    seen = []
+
+    class Model:
+        def complete(self, *, prompt_id, role, payload):
+            seen.append(payload)
+            if "tool_results" not in payload:
+                return ModelTurn(output={}, tool_calls=first_calls)
+            return ModelTurn(output=answer, tool_calls=[])
+
+    return Model(), seen
+
+
+def test_a_lens_that_opens_a_span_first_still_returns_its_findings():
+    from bedrock.turn import ToolCall
+    from graph.lenses import run_lenses
+    from loop.quality import Budget, _BudgetModel
+    from registry.ids import LENS_ORDER
+
+    span = _span("s1", "Sam will send the budget by Friday.", 0, 2000)
+    findings = {
+        "result": "findings",
+        "findings": [{"id": "f1", "stance": "supports", "claim_ids": ["c1"], "text": "Sam owns the budget", "decision_status": None}],
+    }
+    model, seen = _tool_then_answer([ToolCall("open_span", {"span_id": "s1"})], findings)
+    claim = Claim(id="c1", meeting_id="m", kind="commitment", proposition="p", paraphrase="p", quote="q", status="supported")
+    wrapped = _BudgetModel(model, Budget(), registry(), spans=[span], meeting_id="m")
+    result = run_lenses(wrapped, registry(), [claim])
+    assert all(isinstance(value, list) for value in result["dimensions"].values())
+    assert len(result["findings"]) == len(LENS_ORDER)
+    fill = [payload for payload in seen if "tool_results" in payload][0]
+    assert fill["_fill"] is True
+    assert fill["tool_results"][0]["text"] == span.text
+    assert fill["claims"]  # the original input travels with the fill request
+
+
+def test_a_lens_whose_tool_call_cannot_be_answered_is_not_evaluated_not_empty():
+    from bedrock.turn import ToolCall
+    from graph.lenses import run_lenses
+    from loop.quality import Budget, _BudgetModel
+
+    model, _ = _tool_then_answer([ToolCall("open_span", {"span_id": "does-not-exist"})], {"result": "none_in_transcript"})
+    claim = Claim(id="c1", meeting_id="m", kind="commitment", proposition="p", paraphrase="p", quote="q", status="supported")
+    wrapped = _BudgetModel(model, Budget(), registry(), spans=[_span("s1", "x", 0, 1)], meeting_id="m")
+    result = run_lenses(wrapped, registry(), [claim])
+    assert set(result["dimensions"].values()) == {"not_evaluated"}
+
+
+def test_the_coverage_supplement_runs_its_open_span_tool_before_answering():
+    from bedrock.turn import ModelTurn, ToolCall
+    from loop.quality import _coverage
+
+    spans = [_span(f"s{n}", f"filler line {n}", n * 1000, n * 1000 + 900) for n in range(3)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=3000)
+    omit = {"items": [{"span_id": span.id, "outcome": "omission", "reason": "filler"} for span in spans]}
+
+    def call(prompt_id, payload):
+        if prompt_id == "meeting.coverage.v1":
+            return ModelTurn(output={"uncovered_span_ids": [span.id for span in spans]}, tool_calls=[])
+        if "tool_results" not in payload:
+            return ModelTurn(output={}, tool_calls=[ToolCall("open_span", {"span_id": "s0"})])
+        assert payload["uncovered_spans"]
+        return ModelTurn(output=omit, tool_calls=[])
+
+    omissions = []
+    _coverage(ledger, call, [], [], omissions)
+    assert {item.span_id for item in omissions} == {"s0", "s1", "s2"}
+
+
+def test_lens_payload_shows_the_span_each_claim_cites_and_claim_ids_resolve_to_spans():
+    from bedrock.turn import ToolCall
+    from loop.quality import Budget, _BudgetModel
+
+    span = _span("s1", "Sam will send the budget by Friday.", 0, 2000)
+    claim = Claim(id="c1", meeting_id="m", kind="commitment", proposition="p", paraphrase="p", quote="q", status="supported", span_id="s1")
+    seen = []
+
+    class Model:
+        def complete(self, *, prompt_id, role, payload):
+            seen.append(payload)
+            if "tool_results" not in payload:
+                return ModelTurn(output={}, tool_calls=[ToolCall("open_span", {"span_id": "c1"})])  # a claim id
+            return ModelTurn(output={"result": "none_in_transcript"}, tool_calls=[])
+
+    wrapped = _BudgetModel(Model(), Budget(), registry(), spans=[span], meeting_id="m", aliases={"c1": "s1"})
+    result = run_lenses(wrapped, registry(), [claim])
+    assert seen[0]["claims"][0]["span_id"] == "s1"
+    assert set(result["dimensions"].values()) == {"none_in_transcript"}  # answered, not "not evaluated"
+    fill = [p for p in seen if "tool_results" in p][0]
+    assert fill["tool_results"][0]["span_id"] == "s1"
+
+
+def test_a_cancelled_meeting_stops_spending_model_calls():
+    stopped = {"now": False}
+    budget = Budget(should_stop=lambda: stopped["now"])
+    assert budget.allow() is True
+    stopped["now"] = True
+    assert budget.allow() is False
+    assert budget.hit is True
+
+
+def test_a_lens_that_errors_at_the_provider_is_not_evaluated_but_missing_model_access_fails_loudly():
+    import pytest
+
+    from errors import NotInvocable
+    from loop.quality import Budget, _BudgetModel
+
+    claim = Claim(id="c1", meeting_id="m", kind="decision", proposition="p", paraphrase="p", quote="q", status="supported")
+
+    class Flaky:
+        def complete(self, **_):
+            raise RuntimeError("internal_server_error")
+
+    result = run_lenses(_BudgetModel(Flaky(), Budget(), registry()), registry(), [claim])
+    assert set(result["dimensions"].values()) == {"not_evaluated"}
+
+    class Denied:
+        def complete(self, **_):
+            raise NotInvocable("model", "ResourceNotFoundException")
+
+    with pytest.raises(NotInvocable):
+        run_lenses(_BudgetModel(Denied(), Budget(), registry()), registry(), [claim])
+
+
+def test_coverage_counts_only_the_span_a_quote_resolved_to_like_the_gate_does():
+    from loop.quality import _coverage
+
+    spans = [_span("s1", "first", 0, 1000), _span("s2", "second", 1000, 2000)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=2000)
+    claim = Claim(id="c", meeting_id="m", kind="decision", proposition="p", paraphrase="p", quote="first", status="supported", span_id="s1", source_span_ids=["s1", "s2"])
+    asked = []
+
+    def call(prompt_id, payload):
+        if prompt_id == "meeting.supplement.v1":
+            asked.append([row["span_id"] for row in payload["uncovered_spans"]])
+            return ModelTurn(output={"items": [{"span_id": "s2", "outcome": "omission", "reason": "x"}]}, tool_calls=[])
+        return ModelTurn(output={"uncovered_span_ids": ["s2"]}, tool_calls=[])
+
+    omissions = []
+    _coverage(ledger, call, [claim], [], omissions)
+    assert asked == [["s2"]]  # s2 was only a candidate source, so it still needs closing
+    assert [item.span_id for item in omissions] == ["s2"]
+
+
+def test_a_failed_auditor_call_does_not_skip_the_supplement():
+    from loop.quality import _coverage
+
+    spans = [_span("s1", "only line", 0, 1000)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=1000)
+    supplement_calls = []
+
+    def call(prompt_id, payload):
+        if prompt_id == "meeting.coverage.v1":
+            return None
+        supplement_calls.append(payload)
+        return ModelTurn(output={"items": [{"span_id": "s1", "outcome": "omission", "reason": "x"}]}, tool_calls=[])
+
+    omissions = []
+    _coverage(ledger, call, [], [], omissions)
+    assert len(supplement_calls) == 1 and len(omissions) == 1
+
+
+def test_a_contradiction_that_actually_agrees_with_the_claim_is_dropped():
+    from loop.quality import _verified_contradiction
+
+    spans = [_span("s1", "i've tacked on this extra column", 0, 1000), _span("s2", "the pilot starts monday", 1000, 2000)]
+    ledger = SimpleNamespace(spans=spans, meeting_id="m", duration_ms=2000)
+    claim = Claim(id="c", meeting_id="m", kind="observation", proposition="p", paraphrase="An extra column has been added.", quote="q")
+
+    def call(label):
+        return lambda prompt_id, payload: SimpleNamespace(output={"label": label}, tool_calls=[])
+
+    claim.contradicting_quote = "i've tacked on this extra column"
+    assert _verified_contradiction(ledger, call("entails"), claim) is None  # it supports the claim
+    assert _verified_contradiction(ledger, call("contradicts"), claim) == "i've tacked on this extra column"
+    claim.contradicting_quote = "a sentence nobody said"
+    assert _verified_contradiction(ledger, call("contradicts"), claim) is None  # not in the recording
+    claim.contradicting_quote = None
+    assert _verified_contradiction(ledger, call("contradicts"), claim) is None

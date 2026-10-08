@@ -8,6 +8,7 @@
  */
 
 import type { ActionItem, Citation, Span } from "@/lib/types";
+import { speakerName } from "@/lib/present";
 
 export function formatMs(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -20,7 +21,7 @@ export function formatMs(ms: number): string {
 }
 
 export function formatTableNumber(value: number): string {
-  return JSON.stringify(value);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
 export function ownerText(action: ActionItem, spans: Span[]): string {
@@ -35,9 +36,7 @@ export function isProposed(action: ActionItem): boolean {
 }
 
 export function speakerText(span: Span): string {
-  if (span.speaker_label && span.speaker_label.trim().length > 0) return span.speaker_label;
-  if (span.speaker_hypothesis_id) return span.speaker_hypothesis_id;
-  return "Speaker not named";
+  return speakerName(span.speaker_label, span.speaker_hypothesis_id);
 }
 
 export function quoteParts(
@@ -69,28 +68,29 @@ const STATUS_LABEL: Record<string, string> = {
   queued: "Queued",
   working: "Working",
   ready: "Ready",
-  needs_review: "Needs review",
+  needs_review: "Needs a check",
   failed: "Could not finish",
   cancelled: "Cancelled",
   completed: "Finished",
   input_required: "Needs a file",
+  unavailable: "Status unavailable",
   pending: "Queued",
   incomplete: "Incomplete",
-  unresolved: "Unresolved",
+  unresolved: "Not yet confirmed",
   contradicted: "Contradicted",
-  numeric_failed: "Numbers to check",
-  supported: "Supported",
-  supports: "Supports",
-  conflicts: "Conflicts",
+  numeric_failed: "Numbers need checking",
+  supported: "Confirmed",
+  supports: "Supported",
+  conflicts: "Conflicting",
   unknown: "Not settled",
 };
 
 const ARTIFACT_LABEL: Record<string, string> = {
-  ledger: "Record",
-  claims: "Claims",
-  counterevidence: "Opposing points",
-  entailment: "Support",
-  coverage: "Coverage",
+  ledger: "Transcript",
+  claims: "Statements found",
+  counterevidence: "Looking for contradictions",
+  entailment: "Checking against the recording",
+  coverage: "Anything missed",
   exports: "Downloads",
 };
 
@@ -121,7 +121,7 @@ export function meetingTitle(title: string, filename: string, meetingId: string 
   const file = filename.trim();
   if (name && name !== meetingId) return name;
   if (file) return file;
-  return "Meeting";
+  return "Untitled meeting";
 }
 
 export function formatWhen(iso: string): string {

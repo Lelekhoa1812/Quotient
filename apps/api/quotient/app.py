@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from starlette.applications import Starlette
 
-from quotient.auth.context import RejectingVerifier, TokenVerifier
+from quotient.auth.context import CognitoVerifier, RejectingVerifier, TokenVerifier
 from quotient.auth.metadata import load_auth_settings
 from quotient.mcp.server import mcp_routes
 from quotient.worker.port import WorkerPort, load_worker_port
@@ -34,7 +34,7 @@ def create_app(
     runtime = _Runtime(
         settings=settings,
         port=port if port is not None else load_worker_port(),
-        verifier=verifier if verifier is not None else RejectingVerifier(),
+        verifier=verifier if verifier is not None else _load_verifier(env, settings),
     )
 
     @asynccontextmanager
@@ -77,3 +77,21 @@ def __getattr__(name: str):
 
 
 _app = None
+
+
+def _load_verifier(env: Mapping[str, str], settings) -> TokenVerifier:
+    issuer = settings.authorization_server.rstrip("/")
+    if not issuer.startswith("https://") or issuer.endswith("/unconfigured"):
+        return RejectingVerifier()
+    clients = frozenset(
+        value.strip()
+        for value in (
+            env.get("QUOTIENT_OAUTH_CLIENT_IDS", "") or env.get("COGNITO_CLIENT_ID", "")
+        ).split(",")
+        if value.strip()
+    )
+    return CognitoVerifier(
+        issuer=issuer,
+        resource_url=settings.resource_url,
+        client_ids=clients,
+    )

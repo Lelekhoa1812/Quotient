@@ -39,7 +39,6 @@ export function TaskScreen({ taskId }: { taskId: string }) {
         task={task}
         onCancelTask={() => void mcp.cancelTask(taskId)}
         onCancelMeeting={() => undefined}
-        onRestore={() => undefined}
       />
       {task?.status === "input_required" ? (
         <section className="q-panel">

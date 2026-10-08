@@ -45,6 +45,7 @@ def _blank_meeting(*, meeting_id: str, subject: str, object_key: str, context_na
         "disagreements": [],
         "omissions": [],
         "none_in_transcript": [],
+        "not_evaluated": [],
         "observations": [],
         "revisions": [],
     }
@@ -86,6 +87,10 @@ class MemoryPort:
             if row is None or row["subject"] != subject:
                 return None
             return copy.deepcopy(row)
+
+    def media_url(self, meeting_id: str, subject: str) -> str | None:
+        # The fallback ledger has no media storage backend.
+        return None
 
     def list_meetings(self, subject: str) -> list[dict]:
         with self._lock:
@@ -146,9 +151,17 @@ class MemoryPort:
                     "at": _now(),
                 }
             )
-            row["status"] = "working"
-            for key in ("claims", "counterevidence", "entailment", "coverage", "exports"):
-                row["artifacts"][key] = "pending"
+            row["updated_at"] = _now()
+            return copy.deepcopy(row)
+
+    def revise_text(self, meeting_id: str, subject: str, span_id: str, text: str) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            span = next((item for item in row["spans"] if item.get("span_id") == span_id), None)
+            if span is None:
+                raise PortError("not_found", "Span not found.")
+            span["text"] = text
+            row["revisions"].append({"span_id": span_id, "text": text, "at": _now()})
             row["updated_at"] = _now()
             return copy.deepcopy(row)
 
@@ -194,6 +207,7 @@ class MemoryPort:
                     "disagreements",
                     "omissions",
                     "none_in_transcript",
+                    "not_evaluated",
                     "observations",
                 ):
                     if key in graph:

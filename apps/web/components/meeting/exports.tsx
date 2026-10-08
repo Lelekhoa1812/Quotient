@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { mcp } from "@/lib/mcp/client";
+import { exportLabel, friendlyError } from "@/lib/present";
 import type { ExportArtifact } from "@/lib/types";
 
 const CANONICAL: ExportArtifact[] = [
@@ -22,7 +23,7 @@ const CANONICAL: ExportArtifact[] = [
   ["graph.json", "JSON graph"],
 ].map(([name, label]) => ({ name, label, mime_type: "", uri: "" }));
 
-export function Exports({ meetingId, artifacts }: { meetingId: string; artifacts: ExportArtifact[] }) {
+export function Exports({ meetingId, artifacts, renderedReady }: { meetingId: string; artifacts: ExportArtifact[]; renderedReady: boolean }) {
   const supplied = new Map(artifacts.map((item) => [item.name, item]));
   const rows = CANONICAL.map((item) => supplied.get(item.name) ?? {
     ...item,
@@ -53,9 +54,9 @@ export function Exports({ meetingId, artifacts }: { meetingId: string; artifacts
         anchor.click();
         URL.revokeObjectURL(url);
       }
-      setMessage(`${artifact.label} ready`);
+      setMessage(`${exportLabel(artifact.name, artifact.label)} downloaded`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The export did not download");
+      setMessage(friendlyError(error instanceof Error ? error.message : null, "That file isn't ready yet. Try again in a moment."));
     } finally {
       setBusy("");
     }
@@ -64,14 +65,26 @@ export function Exports({ meetingId, artifacts }: { meetingId: string; artifacts
   return (
     <section>
       <h2>Downloads</h2>
+      <p className="q-lede">Take the brief, actions, captions or the full data with you.</p>
       <div className="q-exports">
-        {rows.map((artifact) => (
-          <button key={artifact.name} className="q-btn" type="button" disabled={busy === artifact.name} onClick={() => void download(artifact)}>
-            <Download size={16} aria-hidden="true" />
-            {artifact.label}
-          </button>
-        ))}
+        {rows.map((artifact) => {
+          // The captioned video is rendered separately; until it exists a button could only fail.
+          if (artifact.name === "burned.mp4" && !renderedReady) return null;
+          return (
+            <button
+              key={artifact.name}
+              className="q-btn"
+              type="button"
+              disabled={busy === artifact.name}
+              onClick={() => void download(artifact)}
+            >
+              <Download size={16} aria-hidden="true" />
+              {exportLabel(artifact.name, artifact.label)}
+            </button>
+          );
+        })}
       </div>
+      {!renderedReady ? <p className="q-muted">A video with captions burned in is not available for this meeting yet.</p> : null}
       {message ? <p role="status">{message}</p> : null}
     </section>
   );

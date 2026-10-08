@@ -13,6 +13,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, Pencil, Search, Trash2, Upload, X } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatClock, formatWhen, meetingTitle, reviewLine, statusLabel, statusTone } from "@/lib/format";
 import { hideLibrary, isHidden, readLibrary, upsertLibrary, type LibraryRecord } from "@/lib/library";
 import { McpDisconnected, mcp } from "@/lib/mcp/client";
@@ -45,10 +46,16 @@ function matchesFilter(status: string, filter: FilterId): boolean {
   return statusTone(status) === filter;
 }
 
+// Same rule as sameRow in lib/library.ts: meeting id when present, otherwise task id.
+function isSameRow(item: LibraryRecord, row: LibraryRecord): boolean {
+  return row.meetingId ? item.meetingId === row.meetingId : item.taskId === row.taskId;
+}
+
 export function Home() {
   const router = useRouter();
   const [rows, setRows] = useState<LibraryRecord[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const [name, setName] = useState("");
   const [over, setOver] = useState(false);
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -57,7 +64,9 @@ export function Home() {
   const [filter, setFilter] = useState<FilterId>("all");
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [removing, setRemoving] = useState<LibraryRecord | null>(null);
   const discardEdit = useRef(false);
+  const [enriching, setEnriching] = useState(true);
 
   useEffect(() => {
     let cancel = false;
@@ -84,16 +93,37 @@ export function Home() {
             updatedAt: new Date().toISOString(),
           });
         }
-        const enriched = await Promise.all(next.slice(0, 20).map(async (row) => {
-          if (!row.meetingId) return row;
-          try {
-            const status = await mcp.getMeeting(row.meetingId);
-            return { ...row, status: status.status, reviewCount: status.reviewCount, title: row.title || status.meetingId };
-          } catch {
-            return row;
-          }
-        }));
-        if (!cancel) setRows(enriched.filter((row) => !isHidden(row.meetingId, row.taskId)));
+        // Bugs vs Fixes
+        // Bug: Only the 20 most recent rows were looked up; the rest showed a placeholder status for
+        // ever. Fix: Look up every row, newest first, six at a time, updating the list as each batch
+        // lands. A row whose lookup fails is marked unknown rather than left pending.
+        let rowsNow = [...next].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
+        for (let start = 0; start < rowsNow.length && !cancel; start += 6) {
+          const batch = rowsNow.slice(start, start + 6);
+          const done = await Promise.all(batch.map(async (row) => {
+            if (!row.meetingId) return row;
+            try {
+              const status = await mcp.getMeeting(row.meetingId);
+              // A meeting this browser did not create has no known creation time; use the server's.
+              const known = Boolean(row.taskId);
+              const when = status.updatedAt || "";
+              return {
+                ...row,
+                status: status.status,
+                reviewCount: status.reviewCount,
+                title: row.title && row.title !== row.meetingId ? row.title : status.sourceName || row.title || status.meetingId,
+                updatedAt: when || row.updatedAt,
+                createdAt: known ? row.createdAt : when || row.createdAt,
+              };
+            } catch {
+              return { ...row, status: "unavailable" };
+            }
+          }));
+          rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 6)];
+          if (!cancel) setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
+        }
+        if (!cancel) setEnriching(false);
       } catch (error) {
         if (!cancel && !(error instanceof McpDisconnected)) {
           setLoadError("Meetings could not be loaded.");
@@ -143,28 +173,41 @@ export function Home() {
     if (!name || !key) return;
     const current = meetingTitle(row.title, row.filename, row.meetingId);
     if (name === current) return;
-    const next = upsertLibrary({
+    upsertLibrary({
       ...row,
       title: name,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
-    setRows(next);
+    // Bug vs Fix
+    // Bug: Replacing rows with the stored copy dropped each row's looked-up status, so every row showed Unknown.
+    // Fix: Change only the matching row in state; the stored copy never holds the looked-up status.
+    setRows((prev) => prev.map((item) => (isSameRow(item, row) ? { ...item, title: name } : item)));
   }
 
   function removeRow(row: LibraryRecord) {
     discardEdit.current = false;
+    setRemoving(row);
+  }
+
+  function confirmRemove() {
+    const row = removing;
+    setRemoving(null);
+    if (!row) return;
     setEditingKey(null);
-    setRows(hideLibrary(row));
+    hideLibrary(row);
+    // Same fix as saveEdit: keep the looked-up status on the rows that remain.
+    setRows((prev) => prev.filter((item) => !isSameRow(item, row)));
   }
 
   async function onSubmit() {
     const primary = files[0] ? primaryFile(files) : null;
-    if (!primary) return;
+    const title = name.trim();
+    if (!primary || !title) return;
     setBusy(true);
     setMessage("");
     try {
-      const task = await mcp.submitMeeting(primary, files.filter((file) => file !== primary));
+      const task = await mcp.submitMeeting(primary, files.filter((file) => file !== primary), title);
       router.push(`/tasks/${task.taskId}`);
     } catch (error) {
       if (!(error instanceof McpDisconnected)) setMessage("The meeting could not be started.");
@@ -200,7 +243,17 @@ export function Home() {
       >
         <div className="q-start-copy">
           <h1 id="start-heading">Start a meeting</h1>
-          <p className="q-lede">Add a recording. Slides and notes are optional.</p>
+          <p className="q-lede">Name the meeting and add a recording. Slides and notes are optional.</p>
+          <label className="q-start-name">
+            <span>Meeting name</span>
+            <input
+              value={name}
+              placeholder="e.g. Q3 planning review"
+              required
+              aria-required="true"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
           <div className="q-start-actions">
             <label className="q-btn-ghost">
               <Upload size={16} aria-hidden="true" />
@@ -213,7 +266,12 @@ export function Home() {
                 onChange={(event) => setFiles([...(event.target.files ?? [])])}
               />
             </label>
-            <button className="q-btn" type="button" disabled={files.length === 0 || busy} onClick={() => void onSubmit()}>
+            <button
+              className="q-btn"
+              type="button"
+              disabled={files.length === 0 || !name.trim() || busy}
+              onClick={() => void onSubmit()}
+            >
               {busy ? "Starting" : "Start analysis"}
             </button>
           </div>
@@ -286,7 +344,7 @@ export function Home() {
             const stamp = [formatWhen(created), formatClock(created)].filter(Boolean).join(" ");
             const review = reviewLine(row.reviewCount);
             const meta = [stamp, review].filter(Boolean).join(" · ");
-            const label = statusLabel(row.status) || (row.taskId ? "Working" : "Queued");
+            const label = statusLabel(row.status) || (row.taskId ? "Working" : "");
             const editing = editingKey === key;
             return (
               <div key={key} className="q-meeting">
@@ -336,7 +394,7 @@ export function Home() {
                   <button
                     className="q-icon-btn"
                     type="button"
-                    aria-label={`Delete ${title}`}
+                    aria-label={`Remove ${title} from the list`}
                     onMouseDown={() => {
                       discardEdit.current = true;
                     }}
@@ -345,12 +403,21 @@ export function Home() {
                     <Trash2 size={14} aria-hidden="true" />
                   </button>
                 </span>
-                <span className="q-status" data-tone={statusTone(row.status)}>{label}</span>
+                {label ? <span className="q-status" data-tone={statusTone(row.status)}>{label}</span> : <span className="q-status" data-tone="quiet">{enriching ? "…" : "Unknown"}</span>}
               </div>
             );
           })}
         </div>
       </section>
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove this meeting from your list?"
+        message="The recording and its analysis are not deleted."
+        confirmLabel="Remove from list"
+        cancelLabel="Keep it"
+        onConfirm={confirmRemove}
+        onCancel={() => setRemoving(null)}
+      />
     </main>
   );
 }

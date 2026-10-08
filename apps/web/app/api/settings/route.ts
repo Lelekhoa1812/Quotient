@@ -8,7 +8,8 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { applyEnv, isSettingKey, readEnvValues, safeSettingValue, SETTINGS, settingField } from "@/lib/settings";
+import { safeToMutate } from "@/lib/guard";
+import { applyEnv, isEditableKey, isSettingKey, readEnvValues, safeSettingValue, SETTINGS, settingField } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
         label: field.label,
         secret: field.secret,
         group: field.group,
+        editable: field.editable,
         set: Boolean(values[field.key]),
         value: field.secret ? "" : (values[field.key] ?? ""),
       })),
@@ -56,6 +58,9 @@ export async function POST(request: Request) {
   if (!localRequest(request)) {
     return NextResponse.json({ error: "Settings can be changed on this computer only." }, { status: 403 });
   }
+  if (!safeToMutate(request.headers)) {
+    return NextResponse.json({ error: "This request did not come from the Quotient settings page." }, { status: 403 });
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -68,7 +73,7 @@ export async function POST(request: Request) {
   }
   const updates: Record<string, string> = {};
   for (const [key, raw] of Object.entries(values)) {
-    if (!isSettingKey(key) || typeof raw !== "string") {
+    if (!isSettingKey(key) || !isEditableKey(key) || typeof raw !== "string") {
       return NextResponse.json({ error: "One of the fields is not recognised." }, { status: 400 });
     }
     const field = settingField(key);
