@@ -31,13 +31,15 @@ These limits come from the code and from the recorded evaluations in [docs/quali
 
 | Area | Limitation |
 | --- | --- |
-| Media ingestion | The worker reads media only from `derivatives/` on its own disk. There is no code that downloads from object storage. Browser uploads do not reach the worker: the API never sends the portal an upload destination, so the portal's upload step ends as failed. Meetings are currently run from files placed in `derivatives/`. |
+| Media ingestion | Browser uploads work: the API issues a signed upload URL for `uploads/{task_id}/...`, the portal PUTs the file, and the worker downloads it before analysis. Files placed in `derivatives/` still work for command-line use. Each file is one recording; slides and notes picked alongside it are not yet analysed. |
 | Deployment | The AWS staging stack synthesises but has not been deployed. It creates DynamoDB tables that no application code uses. |
 | Meeting state | Locally, meetings are kept in `.local/run/meetings.json`. Outside local mode they are kept only in process memory and are lost on restart. |
-| Brief completeness | In evaluation, the published brief captured few of the substantive points in the recordings tested (see [Quality evidence](#quality-evidence)). Many statements stay unconfirmed, so the brief is usually partial. |
-| Speakers | Speaker attribution was absent in every run, so transcript lines read "Unnamed speaker". |
+| Completeness | Independent evaluators scored the walkaway's completeness 3 of 5 on the recordings tested (see [Quality evidence](#quality-evidence)): the main threads are covered, detail and some positions are missed. Every meeting still ends `needs_review`, because the unanimity rule leaves roughly half of all statements unconfirmed. |
+| Speakers | Voices are separated automatically (pyannote 3.1, local) and shown as "Speaker N" until a name is given in the recording or typed by a person. The diarizer can merge two people or split one (it split one congressman into two voices on a hearing), and a voice is named only when the transcript itself names it. |
+| Context | **+ Context** on the Start-a-meeting card opens a panel where a person pastes text or adds files (PDF, Word, PowerPoint, Excel, CSV, JSON, HTML, XML, EPUB, Markdown, text; 20 items, 25 MB each, 100 MB in all) and says what the meeting is about. Files are converted to Markdown locally with Microsoft MarkItDown in its own environment (`scripts/setup-context.sh`; without it only text, Markdown, CSV and JSON are read). The walkaway agents see an index and can open a document on demand. It is reference only: never cited as evidence and never treated as what was said, and instructions inside it are ignored. Bad or unreadable files are skipped with a reason and never stop the meeting. |
+| Portal views | Overview (the walkaway), **Insights** (charts: who carried the conversation, talk time and pace over time, topic length by speaker, outcomes on a timeline, running totals of questions, answers, decisions and actions, how well statements held up, who answered whom; every chart plays that moment and a legend click focuses one voice), Transcript, and Evidence. A person can rename a voice (pencil) from "Who spoke" or "Who argued what"; the name is stored on the meeting, reapplied if it is analysed again, and used in every view and in exported briefs. A name is keyed to the diarizer's voice id, so it stays correct only while re-analysis produces the same voices. |
 | Long recordings | Transcription runs in real time (about six minutes of audio per segment) and needs valid AWS credentials for the whole run. An 84-minute recording failed at 54 minutes because the local AWS session expired. A full long-recording run has not completed. |
-| Content types | The analysis is built for meetings. Lectures and teaching content are not summarised by concept, and teaching statements can be mistaken for commitments. |
+| Content types | The walkaway adapts to the kind of recording (meeting, presentation, lecture, discussion, interview, other): lectures get explained concepts and worked examples, hearings and panels get who-argued-what, and outside an ordinary meeting an action needs a named owner who agreed it or said it themselves. The evidence lenses (decisions, commitments, risks) are still meeting-shaped. |
 | Provider filtering | Amazon Bedrock's content filter rejects some audio. Quotient keeps the rest of the meeting and names the rejected part as "Not transcribed". |
 | Licence | No licence has been granted. See [Ownership and licence](#ownership-and-licence). |
 
@@ -59,14 +61,19 @@ Principles that the code enforces:
 
 ```mermaid
 flowchart LR
-    A["Recording in derivatives/"] --> B["Probe and extract 16 kHz PCM"]
+    A["Recording: upload or derivatives/"] --> B["Probe and extract 16 kHz PCM"]
     B --> C["Speech and silence timeline"]
     C --> D["Transcribe with Amazon Nova Sonic"]
+    C --> D2["Separate voices (local pyannote)"]
     D --> E["Compact and extract statements"]
+    D2 --> E
     E --> F["Check each statement: quote, counter-search, two entailment checks"]
     F --> G["Coverage audit: every speech span accounted for"]
     G --> H["Ten evidence lenses"]
-    H --> I["Brief, actions and charts"]
+    H --> I2["Walkaway: summary, decisions, actions, topics, figures"]
+    I2 --> R2["Reviewer pass re-reads the transcript against the draft"]
+    R2 --> Q2["Answer check on every question"]
+    Q2 --> I["Brief, actions and charts"]
     I --> J{"Publish gate"}
     J -->|"all checks pass"| K["ready"]
     J -->|"anything held"| L["needs_review"]
@@ -180,7 +187,8 @@ Add `--logs` to `start-local.sh` to append one JSON line per model and API call 
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `AWS_BEDROCK_API_KEY` | Yes | Bearer token for Amazon Bedrock HTTP calls. Also editable in Settings. |
-| `JEV_TYPESAFE_API_KEY` | No | Key for the review-sorting service. Without it, or if the service fails, review order keeps the gate's order. Also editable in Settings. |
+| `HF_TOKEN` | For speaker separation | Hugging Face token the diarizer uses every time it loads the pyannote models (the account must have accepted the terms of `pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1`). Without it, or without `scripts/setup-diarizer.sh`, meetings are analysed with no speaker labels. |
+| `JEV_TYPESAFE_API_KEY` | No | Key for the scoring service that orders the review queue and the walkaway's decisions, actions, figures and risks by importance. Without it, or if the service fails, the original order is kept. Also editable in Settings. |
 | `AWS_BEDROCK_TRANSCRIBE` | Yes | Checked by the start script only. The worker uses the model pinned in `apps/worker/bedrock/limits.py`. |
 | `AWS_BEDROCK_TRANSCRIBE_REGION` | Yes | Checked by the start script only. Region is pinned in `limits.py`. |
 | `AWS_BEDROCK_MEETING`, `AWS_BEDROCK_LLM`, `AWS_BEDROCK_SLM` | Yes | Checked by the start script only. Models are pinned in `limits.py`. |
@@ -190,10 +198,13 @@ Add `--logs` to `start-local.sh` to append one JSON line per model and API call 
 | Name | Default | Purpose |
 | --- | --- | --- |
 | `QUOTIENT_ENVIRONMENT` | unset | `local` enables local state, local playback and the local auth bypass. `staging` and `production` lock the bypass off. |
-| `QUOTIENT_AUTH_BYPASS` | unset | `1` makes every caller the subject `local-dev`. Honoured only when `QUOTIENT_ENVIRONMENT=local`. |
+| `QUOTIENT_AUTH_BYPASS` | unset | `1`, `true` or `yes` makes every caller the subject `local-dev`. Honoured only when `QUOTIENT_ENVIRONMENT=local`. |
 | `QUOTIENT_LOCAL_STATE_PATH` | `.local/run/meetings.json` | Where local meeting state is saved. |
 | `QUOTIENT_MEDIA_BUCKET` | `axion-meeting-local` in local mode | Bucket used for playback URLs. |
 | `QUOTIENT_S3_ENDPOINT_URL` | unset (AWS) | Set to `http://127.0.0.1:9000` for MinIO. |
+| `QUOTIENT_PEGASUS_BUCKET` | unset | AWS S3 bucket in the Bedrock account (ap-southeast-2) for Pegasus visual input. Needed with MinIO, because Bedrock cannot read a local endpoint. Without it, visual analysis is skipped on MinIO. |
+| `QUOTIENT_DIARIZER_PYTHON`, `QUOTIENT_DIARIZER_THRESHOLD` | `.local/diarizer-venv`, `0.5` | Interpreter for the isolated diarizer (build it with `scripts/setup-diarizer.sh`; it needs Python 3.12) and its clustering threshold. 0.5 was tuned on three recordings: 0.6 merges multi-person audio, 0.45 starts splitting one speaker. |
+| `QUOTIENT_CONTEXT_PYTHON`, `QUOTIENT_CONTEXT_CACHE_DIR` | `.local/context-venv`, `.local/run/context` in local mode | Interpreter for the isolated document converter (build it with `scripts/setup-context.sh`; about 320 MB) and the cache of converted Markdown, keyed by file content. |
 | `QUOTIENT_S3_ACCESS_KEY_ID`, `QUOTIENT_S3_SECRET_ACCESS_KEY` | from MinIO container | Credentials for the endpoint above. |
 | `QUOTIENT_MINIO_CONTAINER` | `engine-minio-1` | Container the MinIO launcher reads credentials from. |
 | `QUOTIENT_WORKERS` | `10` | Parallel width for independent model calls: the blind lenses, the two entailment votes and visual parts. Transcription sessions run outside it. |
@@ -202,7 +213,7 @@ Add `--logs` to `start-local.sh` to append one JSON line per model and API call 
 | `QUOTIENT_TRANSCRIPT_CACHE_DIR` | `.local/run/transcripts` in local mode | Directory for finished transcription segments. Any path enables the cache in every environment; `off` disables it. |
 | `QUOTIENT_AUDIT_LOG` | unset | File that receives the audit log when set. |
 | `QUOTIENT_RESOURCE_URL` | `http://127.0.0.1:8080/mcp` | Canonical MCP URL, used as the OAuth resource indicator. |
-| `QUOTIENT_AUTHORIZATION_SERVER` | Cognito issuer, if set | OAuth 2.1 authorization server. Also accepts `COGNITO_ISSUER`. |
+| `QUOTIENT_AUTHORIZATION_SERVER` | unset: a fail-closed placeholder, so no token validates | OAuth 2.1 authorization server. Also accepts `COGNITO_ISSUER`. |
 | `QUOTIENT_OAUTH_CLIENT_IDS` | unset | Comma-separated client IDs accepted for tokens without an audience. Also accepts `COGNITO_CLIENT_ID`. |
 | `QUOTIENT_ALLOWED_ORIGINS` | the local portal and API origins | Browser origins allowed to call the MCP server. |
 | `QUOTIENT_NEXT_DIST_DIR` | `.next` (or `.next-dev` in development) | Next.js build directory. |
@@ -279,7 +290,8 @@ Poll the task with `tasks/get`, then read `tasks/result`.
 | `read_span` | One transcript span with its text and timing. |
 | `accept_action` | Move one proposed action to accepted. |
 | `revise_text` | Correct a span's text. |
-| `revise_speaker` | Set a speaker's display name for a span or hypothesis. |
+| `revise_speaker` | Set a speaker's display name for a span or a whole voice. A voice name is locked: it is reapplied if the recording is analysed again. |
+| `merge_speakers` | Fold two voices into one everywhere (only when a person confirms they are the same speaker). |
 | `cancel_meeting` | Stop a meeting. Model calls stop. |
 
 Resources: `quotient://meetings/{id}/graph`, `/brief`, `/review` and `/exports/{name}`. Exports are `graph.json`, `brief.html`, `brief.pdf`, `actions.csv`, `actions.xlsx`, `captions.vtt`, `captions.srt`, and `burned.mp4` (the last is produced by the worker only).
@@ -298,8 +310,10 @@ Meeting content leaves the machine in these cases. Plan for them before connecti
 | --- | --- | --- |
 | Amazon Bedrock, `ap-northeast-1` | Audio, in real time | Speech transcription (Nova Sonic). |
 | Amazon Bedrock, `ap-southeast-2` | Transcript excerpts, claims, quotes | Statement extraction, checking, lenses, brief. |
-| Amazon Bedrock, `ap-southeast-2` | Video, where visual analysis runs | Visual analysis (Pegasus). Skipped when media sits on a local MinIO endpoint. |
-| `api.typesafe.ai` (only with `JEV_TYPESAFE_API_KEY`) | Each review item's proposition and quote | Ordering the review queue. |
+| Amazon Bedrock, `ap-southeast-2` | Video, where visual analysis runs | Visual analysis (Pegasus). On a local MinIO endpoint, parts go to the AWS bucket in `QUOTIENT_PEGASUS_BUCKET`, or visual analysis is skipped if it is unset. |
+| `huggingface.co` (with `HF_TOKEN`, when the diarizer loads its models) | Nothing from a meeting; model files are downloaded | Fetch the speaker-separation models. Diarization itself runs locally and no audio is sent for it. |
+| `api.typesafe.ai` (only with `JEV_TYPESAFE_API_KEY`) | Each review item's proposition and quote; each walkaway decision, action, figure and risk (its short text) and the recording's title | Ordering the review queue and the walkaway by importance. Never used to include or exclude anything. |
+| Amazon Bedrock (context) | Reference documents a person adds with **+ Context**: the purpose, an index of each document (names, headings, a short opening passage) and any passage an agent opens while writing the walkaway | Let the analysis know the product, the problem and the terms. Uploaded files are stored in the media bucket under `context/` and converted locally. |
 | `cdn.jsdelivr.net` | Nothing from the meeting; the browser loads a script | Exported HTML pages load Mermaid from a CDN without an integrity hash. |
 
 Stored locally, in git-ignored paths:
@@ -341,7 +355,7 @@ There is no automatic deletion of meetings or recordings. Treat `.local/` and `d
 
 **Logs.** `.local/run/api.log` (MCP server and worker), `.local/run/web.log` (portal). With `--logs`, `.local/run/audit.log`. Analysis failures also write the full exception to the API log, on a line starting `analysis failed:`.
 
-**Restarts.** Unfinished meetings resume from their source on restart, at most twice. A third interruption fails the meeting with "interrupted too many times". Finished transcription segments are reused, so a resumed run streams only the missing segments.
+**Restarts.** Unfinished meetings resume from their source on restart, at most twice. A third interruption fails the meeting with "interrupted too many times". Finished transcription segments are reused only while the transcript cache is enabled (on by default in local mode; see `QUOTIENT_TRANSCRIPT_CACHE_DIR`), so a resumed run then streams only the missing segments.
 
 **Cancellation.** Cancelling stops audio streaming and later model calls. Calls already in flight finish.
 
@@ -362,7 +376,7 @@ There is no automatic deletion of meetings or recordings. Treat `.local/` and `d
 
 ## Deployment
 
-The AWS staging stack in `infra/cdk/` synthesises an account-pinned template: a VPC, an application load balancer, Fargate services, DynamoDB tables, S3 buckets, Cognito and billing alarms. It has **not** been deployed. Before deploying, read [docs/staging.md](docs/staging.md) and the limits in [Known limitations](#known-limitations). The main gaps are media ingestion from S3 and the state store, neither of which is implemented.
+The AWS staging stack in `infra/cdk/` synthesises an account-pinned template: a VPC, an application load balancer, Fargate services, DynamoDB tables, S3 buckets, Cognito and billing alarms. It has **not** been deployed. Before deploying, read [docs/staging.md](docs/staging.md) and the limits in [Known limitations](#known-limitations). The main gap is the durable state store, which is not implemented (uploaded recordings are downloaded from object storage, but meeting state is only a local file).
 
 ```bash
 cd infra/cdk
@@ -382,8 +396,8 @@ Synthesis does not deploy anything. The availability zones are cached in `cdk.co
 Current position, from that ledger:
 
 - Citation integrity held in every run: every cited quote appears verbatim in its span.
-- Most statements are not confirmed in evaluation. The unanimity rule for confirmation is the main reason, and changing it is a threshold decision that has not been made.
-- The brief captured few of the substantive points in the two recordings evaluated.
+- Independent blind evaluators (each writes its own key points from the full transcript before reading the walkaway) moved the scores from Completeness 1 and Usefulness 1 to 3-4 on both across four recordings by round 11. The latest measurements are round 12 (four stored meetings re-scored) and round 13 (the SBC meeting and the sales call re-run through the pipeline with a revised action-recall prompt). In both, **Completeness is 3 and Usefulness is 3-4, with no 5 anywhere**; Actions are 2-3. The one measured gain in round 13 is action recall on the working meeting (7 to 14 actions listed, 11 of 14 valid, none wrong); the sales call did not change. Each evaluation is one pass per recording, so single-run noise is real. **No recording meets a bar of 4 on all of faithfulness, completeness, usefulness and attribution.** The lecture, the hearing and the 84-minute soak have not been re-run since round 11, and the 84-minute soak has never completed. The weak points are named in the ledger: missed soft offers and follow-ups, attribution when the diarizer errs, over-generous answered flags, silent guesses at ambiguous dates, and missed detail.
+- Roughly half of all statements are still not confirmed. The unanimity rule is the main reason, and changing it is a threshold decision that has not been made. A second tier, "likely", is shown with a marker.
 - No long-recording run has completed.
 
 Benchmark runs are reproducible with `.venv/bin/python scripts/bench_meeting.py <object_key> <label>`, which writes results to `.local/run/bench/`.
@@ -398,6 +412,7 @@ Benchmark runs are reproducible with `.venv/bin/python scripts/bench_meeting.py 
 | [docs/local-development.md](docs/local-development.md) | Local services, playback, failures, resume, timeouts, sign-in. |
 | [docs/staging.md](docs/staging.md) | The AWS staging stack, network and compute layout. |
 | [docs/quality-ledger.md](docs/quality-ledger.md) | Defects, fixes, evaluations and open items, with dates. |
+| [docs/next-steps.md](docs/next-steps.md) | Hand-over: current walkaway status, what is blocking, the exact confirming-run and scoring steps, revert criteria and open defects in priority order. |
 
 ---
 

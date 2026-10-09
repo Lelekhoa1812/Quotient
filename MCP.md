@@ -33,7 +33,7 @@ Protected resource metadata, unauthenticated:
 
 ## Authorization
 
-Quotient is an OAuth 2.1 resource server. Amazon Cognito, in `ap-southeast-2`, is the authorization server. The API process does not read Bedrock credentials and does not accept a client secret.
+Quotient is an OAuth 2.1 resource server. Amazon Cognito, in `ap-southeast-2`, is the authorization server. The API's own request handling never reads Bedrock credentials and does not accept a client secret; in the local build the worker runs in-process and uses the machine's AWS credentials for model calls.
 
 Partners:
 
@@ -132,7 +132,7 @@ sequenceDiagram
 
 ## Tools
 
-`tools/list` returns the eight tools below. Each description is safe to show before consent. `execution.taskSupport` is `required` or `forbidden`. Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
+`tools/list` returns the ten tools below. Each description is safe to show before consent. `execution.taskSupport` is `required` or `forbidden`. Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
 
 A `forbidden` tool invoked with `params.task` returns `-32601`. `submit_meeting` invoked without `params.task` returns `-32601`.
 
@@ -150,10 +150,15 @@ Starts analysis of one object already stored in the Quotient media bucket.
 | `upload_complete` | no | `false` while the multipart upload is still open. |
 | `context_names` | no | Up to 32 short strings (64 characters each) forwarded to the worker as context. They are not written onto the transcript. |
 | `idempotency_key` | no | Same key and same authorization subject return the same meeting. |
+| `filename`, `media_type`, `byte_size` | no | Describe the file when `object_key` is empty. `media_type` must be `audio/*` or `video/*`; `byte_size` is capped at 5 GB. |
+| `context_batch` | no | Batch id from `prepare_context` whose files were uploaded. Only the caller's own batch is accepted; an unknown or foreign batch fails the task before anything starts. |
+| `purpose` | no | At most 2000 characters: what the meeting is about, in the person's words. |
 
-The call returns a task, not the finished graph. Poll `tasks/get`, then read `tasks/result`. While the task is running, `statusMessage` is `Meeting {meeting_id} is {status}.` after the object is accepted. An empty `object_key` or `upload_complete: false` moves the task to `input_required`. The server sends `elicitation/create` (`mode: form`) asking for `object_key` and `upload_complete`. Respond on `POST /mcp` with the matching JSON-RPC id. Declining, cancelling, or leaving the upload incomplete ends the task as `failed`.
+The call returns a task, not the finished graph. Poll `tasks/get`, then read `tasks/result`. While the task is running, `statusMessage` is `Meeting {meeting_id} is {status}.` after the object is accepted. An empty `object_key` or `upload_complete: false` moves the task to `input_required`. The server sends `elicitation/create` (`mode: form`) asking for `object_key` and `upload_complete`. When object storage is configured the elicitation also carries `params.upload` = `{upload_url, method: "PUT", headers, object_key}`: a short-lived (15 minute) signed PUT for a key the server chose (`uploads/{task_id}/{file name}`). Upload the file to `upload_url` with those headers, then answer the elicitation with `upload_complete: true`. The server analyses the key it issued, not one echoed back, and only after the stored object exists and is not empty; otherwise it asks again (three times, then the task fails). Without object storage (command-line use) the previous contract holds: name a completed `derivatives/` key. Keys outside `uploads/{task_id}/` and `derivatives/` are not issued to browsers. Respond on `POST /mcp` with the matching JSON-RPC id. Declining, cancelling, or leaving the upload incomplete ends the task as `failed`.
 
 `tasks/result` for a finished submission is a tool result. `structuredContent` contains `meeting_id`, `status`, `prompt_release`, `review_counts`, `artifacts`, `playback`, and `withheld`. It does not contain claim text. The client does not upload a raw transcript, and `submit_meeting` has no transcript argument. `raw_transcript` is not in this task result. The worker produces it. `read_graph` and the graph resource return it.
+
+**Context.** Reference material (the `purpose` and the files of `context_batch`) is converted to Markdown by the worker before analysis, and the digest and reviewer passes receive an index of it (document names, headings, a short opening gist) and can open a document on demand with an internal `read_context` tool. It is reference only: it is never cited as evidence, never counts as something said in the meeting, and an instruction written inside it is ignored. `get_meeting` and the meeting resource report it additively as `context`: `{purpose, items: [{name, status (pending | ready | skipped | failed), reason, chars, summary}]}`. Storage keys and batch ids are never returned. A file that cannot be read is reported with a plain reason and the meeting carries on without it.
 
 ### `get_meeting`
 
@@ -161,7 +166,7 @@ The call returns a task, not the finished graph. Poll `tasks/get`, then read `ta
 
 Arguments: `meeting_id`.
 
-Returns `status`, `prompt_release`, `review_counts` (`unresolved`, `contradicted`, `numeric_failed`), `artifacts` (`ledger`, `claims`, `counterevidence`, `entailment`, `coverage`, `exports`), `playback`, and `withheld`. No transcript and no claim wording.
+Returns `status`, `prompt_release`, `review_counts` (`unresolved`, `contradicted`, `numeric_failed`), `artifacts` (`ledger`, `claims`, `counterevidence`, `entailment`, `coverage`, `exports`), `playback`, and `withheld`, plus additive `progress_message`, `updated_at`, `source_name`, `headline` and `failure_message` when present. No transcript and no claim wording.
 
 Meeting status is `queued`, `working`, `ready`, `needs_review`, `cancelled`, or `failed`. A stored `ready` job that still has review items or a speech span with neither a published citation nor an omission is reported as `needs_review`.
 
@@ -171,7 +176,14 @@ Meeting status is `queued`, `working`, `ready`, `needs_review`, `cancelled`, or 
 
 Arguments: `meeting_id`, optional opaque `cursor`.
 
-Returns one page of `spans`, `claims`, `findings`, `synthesis`, `actions`, `disagreements`, and `omissions` (50 rows per collection). Shared metadata (`raw_transcript`, `dimensions`, and `charts`) appears on the first page only. `raw_transcript.audio` joins span `raw_text` with newlines in `start_ms` order. `raw_transcript.video` joins Pegasus observation statements the same way. Each span includes `raw_text` (audio transcription) and `text` (synthesized transcript). Citations that resolve include `start_ms`, `end_ms`, and `playback`.
+Returns one page of `spans`, `claims`, `findings`, `synthesis`, `actions`, `disagreements`, `omissions` and `gaps` (50 rows per collection). Shared metadata (`raw_transcript`, `dimensions`, `charts`, `synthesis_omissions`, `dissent_omissions`, `digest`, and `captions`) appears on the first page only. `playback` points at the resource `quotient://meetings/{id}/media`.
+
+Additive fields (existing clients can ignore them):
+
+- Each claim carries `confidence`: `confirmed` (both checks agree; the same set as `status: supported`), `likely` (the quote is verbatim in one span, at least one check says it follows, and none says it does not), `contradicted`, or `unverified`. `status` and the brief are unchanged: only `confirmed` claims reach the brief resource.
+- `dimensions` rows have `state` `findings`, `none_in_transcript` (a lens looked and found nothing), or `not_evaluated` (the lens did not complete; a meeting with one cannot be `ready`). `none_in_transcript` rows carry `held_findings`, the number of findings for that topic left out because their claims were not confirmed.
+- `digest` is the walkaway for a person who did not attend, or `null` for a meeting analysed before it existed. Shape: `content_type`, `title`, `summary[]`, `outcome`, `speakers[]` (only names the transcript itself gives), `chapters[]` (time ranges), `decisions[]`, `actions[]` (`assignee` is a voice id), `open_questions[]` (with `answered`, `answer`, `answer_ms`), `disagreements[]`, `perspectives[]`, `key_figures[]`, `risks[]`, `concepts[]`, and an optional `diagram` (a sanitised Mermaid flowchart or sequence). Every item cites span ids and has a `start_ms` taken from those spans; items that rest on claims have `basis` `confirmed` or `likely`. Free text can mention a voice by its id (for example `spk_2`); `speakers[]` maps an id to a name only when the transcript itself names that voice, so an unmapped id means an unnamed speaker, never a guessed name. The server also removes clauses that describe the transcript's own lines and any decision that only recounts the past. The server re-checks every citation against this graph before returning it. It is also what the `brief.html` and `brief.pdf` downloads render.
+- `captions` is a `quotient://meetings/{id}/exports/captions.vtt` URI when the meeting has speech. Cues are at most two lines of 42 characters; a long span is split and its time shared by length; a cue falls back to `raw_text` when an edited `text` is empty. `raw_transcript.audio` joins span `raw_text` with newlines in `start_ms` order. `raw_transcript.video` joins Pegasus observation statements the same way. Each span includes `raw_text` (audio transcription) and `text` (synthesized transcript). Citations that resolve include `start_ms`, `end_ms`, and `playback`.
 
 This graph is the system of record. It may contain unpublished claims. The brief is the published projection.
 
@@ -202,7 +214,30 @@ Moves `acceptance` from `proposed` to `accepted`. Does not set an owner. The ret
 | `scope` | yes | `span` or `hypothesis` |
 | `display_name` | yes | Human label, at most 128 characters |
 
-`span` updates the anchor and detaches it onto a new hypothesis id. `hypothesis` updates every span that shares the anchor's hypothesis id. This is a transcript presentation edit; it does not rerun analysis, change meeting status, or alter `raw_text`.
+`span` updates the anchor and detaches it onto a new hypothesis id. `hypothesis` updates every span that shares the anchor's hypothesis id. This is a transcript presentation edit; it does not rerun analysis, change meeting status, or alter `raw_text`. A `hypothesis` rename is also stored as a lock on that voice (`speaker_names` on the meeting), so the name is reapplied if the recording is analysed again.
+
+### `prepare_context`
+
+`taskSupport`: `forbidden`. Not read-only. Not destructive. Not idempotent (each call reserves a new batch).
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `files` | yes | 1 to 20 entries: `filename` (required, with extension, at most 200 characters), `media_type`, `byte_size` |
+
+Reserves one signed upload target per file for reference material the analysis may read (design documents, slides, spreadsheets, notes). Returns `batch_id` and `uploads`, each with `index`, `filename`, `upload_url`, `method` (`PUT`), `headers` (send exactly these) and `object_key` (`context/<batch>/<n>-<name>`, minted by the server). Supported extensions: `.pdf .docx .pptx .xlsx .xls .csv .json .xml .html .htm .md .markdown .txt .epub`. Limits: 25 MB per file, 100 MB in all. Images, audio, video and archives are refused. After uploading, pass `batch_id` to `submit_meeting` as `context_batch`. A batch belongs to the caller and expires after six hours. Without object storage the tool returns an error.
+
+### `merge_speakers`
+
+`taskSupport`: `forbidden`. Not read-only. Not destructive. Idempotent.
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `meeting_id` | yes | Meeting id |
+| `span_id` | yes | Anchor span; its voice is kept |
+| `other_span_id` | yes | A span of the voice to fold into the anchor's voice |
+| `display_name` | yes | Name for the merged voice |
+
+Use only when a person confirms the two voices are one speaker. It updates the transcript presentation immediately; it does not rerun analysis or alter `raw_text`.
 
 ### `revise_text`
 
@@ -250,7 +285,7 @@ Export `name` is one of:
 | `captions.srt` | `application/x-subrip` | API, from speech spans on the source clock |
 | `burned.mp4` | `video/mp4` | Worker only |
 
-Captions use each speech span's `text` and its `start_ms` / `end_ms`, including spans omitted from model payloads. `burned.mp4` reads as JSON-RPC `-32002` (`Export is not ready`) until the worker supplies bytes. A withheld brief still has HTML and PDF artifacts; those artifacts state that the brief is withheld and do not include unpublished claim text.
+Captions use each speech span's `text` and its `start_ms` / `end_ms`, including spans omitted from model payloads. `burned.mp4` reads as JSON-RPC `-32002` (`Export is not ready`) until the worker supplies bytes. Captions are split into cues of at most two 42-character lines (see `read_graph`). `brief.html` and `brief.pdf` render the digest when the meeting has one (confirmed and likely items, each with its time); otherwise a withheld brief still has HTML and PDF artifacts that state the brief is withheld, or a partial brief of confirmed sentences, and never include unpublished claim text. The `brief` resource itself is unchanged: it is withheld until the meeting is `ready`.
 
 Action exports use `owner_display`. They do not have an owner-name column. A relative due date with no `anchor_date` has an empty ISO date.
 
@@ -260,9 +295,9 @@ These three MCP prompts are the skills an external assistant should load with `p
 
 | Name | Purpose |
 | --- | --- |
-| `brief_this_meeting` | Read `get_meeting` and the brief resource. Stop when the brief is withheld. |
-| `open_questions` | Answer from question findings and supported question claims. A dimension with nothing to say is `none_in_transcript`. |
-| `proposed_actions` | List actions whose `acceptance` is `proposed`. Keep that label. Use `owner_display`. |
+| `brief_this_meeting` | Read `get_meeting`, then start from the `read_graph` `digest`. Stop when the brief is withheld. Mark `likely` items as likely. |
+| `open_questions` | List the `digest.open_questions` that are unanswered. Fall back to question findings when the digest is null. |
+| `proposed_actions` | List `digest.actions` and graph actions whose `acceptance` is `proposed`. Keep that label. Use `owner_display`. |
 
 Each prompt takes `meeting_id`. Each one tells the client to leave unresolved, contradicted, and numeric-failed claims out of the answer. The review resource is a queue, not the brief.
 
@@ -332,7 +367,7 @@ The graph resource remains the system of record and can show unpublished claims 
 | Limit | Value |
 | --- | --- |
 | Protocol | `2025-11-25` only on requests after initialize |
-| Request body | 1 MiB |
+| Request body | 1,000,000 bytes |
 | Task TTL | 1 second to 24 hours, default 1 hour |
 | Concurrent tasks | 8 per authorization subject |
 | Graph page | 50 rows per collection |

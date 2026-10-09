@@ -1,0 +1,56 @@
+# Next steps (hand-over, 2026-10-09)
+
+Read this first. [quality-ledger.md](quality-ledger.md) holds the full evidence; this file says what to do next.
+
+## Where the walkaway stands
+- **Not enterprise-grade yet.** Latest blind scores (Round 13, SBC meeting and sales call): completeness 3, usefulness 3, no 5. Actions improved on the SBC meeting (7 to 14 listed, 11 of 14 valid, none wrong); the sales call did not change.
+- **Never completed:** the 84-minute soak. **Not re-run since round 11:** the lecture and the hearing.
+- **Two prompt changes are in place and untested on the production model** (both digest prompts, `contracts/prompts/meeting.digest.v1.yaml` and `meeting.digest_review.v1.yaml`, bodies kept identical):
+  1. The action-recall wording (a second pass for follow-ups plus precision guards). Measured live in Round 13.
+  2. The "Claim check" paragraph. Only Haiku-proxy tested: faulty clauses with against without the check were 0 against 6 and 1 against 7 on the hearing (two independent pairs; the first count had a year my own prompt supplied), 2 against 4 on the sales call and 2 against 4 on the SBC meeting, with completeness level; on the lecture it was neutral to slightly negative (2 minor faults against 0 clear), after a first wording that over-hedged a confirmed result was fixed. **Its live effect is unmeasured.**
+
+## What is blocking
+The AWS account's budget hard cap is active. `BedrockBudgetHardCapDeny` is attached to the group `bedrockbudgetcap` (the IAM user is a member) and denies every Bedrock invoke action. Every pipeline run fails at the first model call with `sonic HTTP 403` (the portal text, "did not accept this computer's sign-in", is misleading). **Lifting it is the owner's decision** (raise the budget, or wait for the reset). Check it with:
+
+```bash
+aws iam list-attached-group-policies --group-name bedrockbudgetcap --no-cli-pager
+```
+
+When that returns no `BedrockBudgetHardCapDeny`, model calls work again.
+
+## The confirming run (about 90 minutes, both recordings concurrently)
+```bash
+cd /Users/liamle/Downloads/Axion/meeting
+# the stack must be up: ./scripts/stop-local.sh && ./scripts/start-local-minio.sh
+nohup .venv/bin/python scripts/bench_meeting.py derivatives/meeting-20m.mp4 r15-sales > .local/run/bench-r15-sales.log 2>&1 &
+nohup .venv/bin/python scripts/bench_meeting.py derivatives/sbc-checkpoint.mp4 r15-sbc  > .local/run/bench-r15-sbc.log 2>&1 &
+```
+Prompts are read per run, so no restart is needed after a prompt edit. `derivatives/sbc-checkpoint.mp4` is a scratch copy of the owner's SBC upload from local MinIO and can be deleted.
+
+## How to score it (same method as Rounds 12 and 13, so numbers compare)
+1. Build each recording's transcript and walkaway text from the API projection, mapping `spk_N` to the names in `digest.speakers` or "Speaker N+1". **Print an empty decider or owner as nothing, not "unknown"**: my first formatter printed "unknown", the evaluator scored that, and Round 13's attribution result was partly my error (see the correction in the ledger).
+2. One blind Haiku evaluator per recording: it writes its own eight key points and an exhaustive action list from the transcript before opening the walkaway, classifies every listed action as valid, questionable or wrong, and scores faithfulness, completeness, usefulness, actions, attribution and noise from 1 to 5.
+3. Compare with the Round 13 table in the ledger.
+
+## Revert criteria for the claim-check paragraph
+Remove it (the old text is in git history) if the confirming run shows summaries that are vaguer or shorter in a way that lowers completeness, or fewer valid actions than Round 13 (SBC 14 listed, 11 valid; sales 2).
+
+## Open defects, in the order worth fixing
+1. **Missed follow-ups on the sales call.** Soft vendor offers are excluded by design (running the demo is not an action); decide whether that is right for sales calls.
+2. **Completeness stays at 3** on every recording: detail and some positions are missed. The lever is probably chapter and perspective coverage, not grounding.
+3. **Diarizer errors** (one person split across ids, or two people merged) drive attribution and the empty "decided by" lines.
+4. **A proposal nobody confirmed can show as a "tentative" decision** (1 to 2 per meeting). A stricter prompt rule and a code-side cap were both measured and rejected: each made recall or labels worse.
+5. **Security and operations still open:** no per-user rate limit or upload quota, no script/connect CSP (needs the production hosts and a report-only trial), the converter has no memory limit, prompt-injection defence for context documents is soft, the ledger is one JSON file.
+6. **Accessibility:** axe (full WCAG 2.2 and best-practice set) passes on every audited screen in light and dark, and a real-key keyboard pass is done on every screen and dialog (ledger: "Real keyboard traversal ..." onward; five focus-loss defects and a missing skip link were found and fixed). **Not done:** a screen-reader pass, the native file picker by keyboard, and saving a Settings value by keyboard; they need a person or an irreversible action.
+
+## Do not do
+- Do not detach or edit `BedrockBudgetHardCapDeny` from this machine without the owner saying so.
+- Do not adopt the stricter decisions wording or the code-side decision cap; both were tested and rejected (ledger, "Fourth proxy experiment" and the code-side note).
+- Do not add a general "coverage pass" instruction to the digest prompts: tested on the SBC meeting, it added one detail and three faulty clauses (ledger, "Sixth proxy experiment").
+- Do not add a "signal only" or anti-padding rule to the digest prompts: it cut padding by two thirds but lost a must-know item and three actions (ledger, "Seventh proxy experiment"). If noise must fall, do it in the display (collapse answered or near-duplicate questions), not by removing content.
+
+## State of the working tree (2026-10-09 20:15 AEDT)
+- **Nothing from this session is committed.** `git status` shows 111 paths (65 modified, 46 new) and about 4,900 lines added. The new files are all source, tests, contracts and docs; `.local/`, `derivatives/` and `.env` are git-ignored, so a commit would not include recordings, the local ledger or secrets. Compiled `__pycache__/*.pyc` files are tracked and show as modified; untrack them with `git rm --cached` and a `.gitignore` entry if you want a clean diff.
+- **Suites on the current tree:** worker 233, API 60, contracts 11, Jev 22, web 72, typecheck clean.
+- **Product behaviour changed on purpose** (each is in the ledger with its revert): clicking a moment now plays it (a `?t=` link still does not); the "Promised" label for an owner's own first-person commitment; owner and decision filters at read time; the claim-check and action-recall prompt wording; security headers on the portal.
+- **The API and portal were restarted** several times from `scripts/stop-local.sh` and `scripts/start-local-minio.sh`; the running stack is the current code. Two failed meeting rows (`r14-sales`, `r14-sbc`) sit in the list from the run the budget cap refused.

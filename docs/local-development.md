@@ -14,9 +14,11 @@ credential variable names can be overridden through the corresponding
 `QUOTIENT_*` environment variables.
 
 With `QUOTIENT_S3_ENDPOINT_URL` set, the worker uploads the media to that local
-endpoint and runs audio transcription. It records a note that visual analysis
-was skipped, because Bedrock cannot fetch media from a developer's MinIO
-instance. Sonic streaming also needs an AWS identity authorized for the Sonic
+endpoint and runs audio transcription. Bedrock cannot fetch media from a
+developer's MinIO instance, so visual analysis needs `QUOTIENT_PEGASUS_BUCKET`:
+the worker copies the Pegasus parts to that AWS bucket (using the normal AWS
+credential chain, never the MinIO credentials). Without it, the worker records
+a note that visual analysis was skipped. Sonic streaming also needs an AWS identity authorized for the Sonic
 model; a Bedrock API key alone is not sufficient for the bidirectional stream.
 
 In local mode, meeting projections are saved atomically in
