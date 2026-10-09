@@ -66,6 +66,13 @@ test("a due phrase is shown only when it names a time", () => {
   assert.equal(dueText(null), null);
 });
 
+test("only a flowchart or a sequence diagram is kept", () => {
+  const withDiagram = (mermaid: string) => parseDigest({ title: "T", diagram: { kind: "flowchart", title: "d", mermaid, span_ids: ["s1"], start_ms: 0 } })?.diagram ?? null;
+  assert.ok(withDiagram("flowchart TD\n A --> B"));
+  assert.ok(withDiagram("  sequenceDiagram\n A->>B: hi"));
+  for (const refused of ["xychart-beta\n bar [1]", "gantt\n x", "radar-beta\n axis a", "classDiagram\n A <|-- B", ""]) assert.equal(withDiagram(refused), null, refused);
+});
+
 test("an action is a promise only when its owner said they would do it in a line it cites", () => {
   const line = (id: string, speaker: string | null, text: string) => ({ id, speaker_hypothesis_id: speaker, text, raw_text: text });
   const spans = [line("a", "spk_1", "i will send you a video"), line("b", "spk_0", "maddy can you send the notes"), line("c", "spk_2", "sure thing")];

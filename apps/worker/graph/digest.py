@@ -35,6 +35,7 @@ _EVIDENCE = {"confirmed": 2, "likely": 1}
 GAP_MS = 60_000
 
 
+_DIAGRAMS = frozenset({"flowchart", "graph", "sequenceDiagram"})
 _STRINGS = ("id", "start_span_id", "end_span_id", "asked_span_id", "answer_span_id", "span_id", "action_id",
             "asked_by", "decided_by", "owner", "speaker")
 _LISTS = ("summary", "chapters", "decisions", "actions", "open_questions", "disagreements", "key_figures",
@@ -436,7 +437,9 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
     if diagram:
         ids = cite(diagram.get("span_ids"))
         source = _scrub(text(diagram.get("mermaid")))
-        if ids and source and source.count("\n") <= 40:
+        # The contract is a flowchart or a sequence diagram. Other mermaid types (gantt, xychart, radar, architecture, state diagrams with
+        # classDef) are where the renderer's published denial-of-service and CSS-injection flaws sit, and a recording can steer what the model draws.
+        if ids and source and source.split(None, 1)[0] in _DIAGRAMS and source.count("\n") <= 40:
             out["diagram"] = {"kind": diagram.get("kind") if diagram.get("kind") in {"flowchart", "sequence"} else "flowchart",
                               "title": text(diagram.get("title")), "mermaid": source, "span_ids": ids, "start_ms": when(ids)}
     # The same point written twice (or once per window) is one item: keep the first of each.

@@ -863,5 +863,8 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
         if not _unleak_row(out["outcome"], names):
             out["outcome"] = None
     diagram = value.get("diagram")
-    out["diagram"] = diagram if isinstance(diagram, dict) and cited(diagram) and isinstance(diagram.get("mermaid"), str) else None
+    source = diagram.get("mermaid") if isinstance(diagram, dict) else None
+    # Only the two diagram types the contract allows reach a reader, whatever an older stored digest holds.
+    allowed = isinstance(source, str) and bool(source.strip()) and source.split(None, 1)[0] in {"flowchart", "graph", "sequenceDiagram"}
+    out["diagram"] = diagram if isinstance(diagram, dict) and cited(diagram) and allowed else None
     return out

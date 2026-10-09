@@ -537,3 +537,16 @@ def test_a_weekday_in_a_due_phrase_must_have_been_said_near_the_lines_it_came_fr
     ])
     actions = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["actions"]
     assert [(a["task"], a["due"]) for a in actions] == [("Confirm the order", None), ("Confirm the order now", "by Monday"), ("Confirm the order soon", "in two weeks")]
+
+
+def test_only_a_flowchart_or_sequence_diagram_survives_whatever_else_the_model_draws():
+    def kept(source):
+        raw = {"title": "T", "summary": [{"text": "We pick orders.", "span_ids": ["s1"]}],
+               "diagram": {"kind": "flowchart", "title": "d", "mermaid": source, "span_ids": ["s1"]}}
+        return ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["diagram"] is not None
+
+    for fine in ("flowchart TD\n  A --> B", "graph LR\n  A --> B", "sequenceDiagram\n  A->>B: hi"):
+        assert kept(fine), fine
+    for refused in ("xychart-beta\n  x-axis [a,b]\n  bar [1,2]", "gantt\n  dateFormat X", "radar-beta\n  axis a", "architecture-beta\n  group g(cloud)[G]",
+                    "stateDiagram-v2\n  [*] --> A", "classDiagram\n  A <|-- B", "pie\n  \"a\": 1", "mindmap\n  root"):
+        assert not kept(refused), refused

@@ -14,6 +14,8 @@ export type ContentType = "meeting" | "presentation" | "lecture" | "discussion" 
 export type DigestLine = { text: string; spanIds: string[]; basis: Basis; startMs: number | null };
 export type Chapter = { title: string; gist: string; startMs: number; endMs: number; startSpanId: string };
 export type Decision = { statement: string; status: "agreed" | "tentative" | "deferred"; by: string | null; spanIds: string[]; basis: Basis; startMs: number | null };
+const DIAGRAM_TYPES = new Set(["flowchart", "graph", "sequenceDiagram"]);
+
 /** A due phrase is worth showing only when it names a time; "next" or "later" alone tells the reader nothing. */
 const TIME_CUE = /\p{Nd}|\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|weeks?|weekends?|months?|years?|quarters?|morning|afternoon|evening|hours?|minutes?|days?|eod|eow|end of|sprints?|noon|midnight|midday|overnight|fortnights?|asap|immediately|right away|mon|tue|tues|wed|thu|thur|thurs|fri)\b/iu;
 export function dueText(value: string | null): string | null {
@@ -171,7 +173,8 @@ export function parseDigest(value: unknown): Digest | null {
     diagram: (() => {
       const row = asRecord(record.diagram);
       const mermaid = row ? asString(row.mermaid) : null;
-      if (!row || !mermaid) return null;
+      // Only a flowchart or a sequence diagram is drawn; any other mermaid type is refused here as well as upstream.
+      if (!row || !mermaid || !DIAGRAM_TYPES.has(mermaid.trim().split(/\s+/, 1)[0])) return null;
       return { kind: row.kind === "sequence" ? "sequence" : "flowchart", title: asString(row.title) ?? "", mermaid, startMs: asFinite(row.start_ms) };
     })(),
   };

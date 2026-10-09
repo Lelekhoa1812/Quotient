@@ -647,3 +647,12 @@ def test_read_time_cleaning_keeps_what_is_left_and_never_leaves_an_empty_answer_
     assert (question["answered"], question["answer"], question["answer_span_id"]) == (False, None, None)
     assert [d["topic"] for d in out["disagreements"]] == ["u"]  # one side left is not a disagreement
     assert [r["risk"] for r in out["risks"]] == ["The vendor may slip."] and out["concepts"] == []
+
+
+def test_a_stored_digest_diagram_of_any_other_type_is_not_shown():
+    from quotient.graph.gate import _digest
+
+    spans = {"s1": {"kind": "speech", "start_ms": 0, "end_ms": 4000}}
+    for source, shown in (("flowchart TD\n A --> B", True), ("sequenceDiagram\n A->>B: hi", True), ("xychart-beta\n bar [1]", False), ("gantt\n x", False), ("", False), ("   ", False)):
+        out = _digest({"diagram": {"kind": "flowchart", "mermaid": source, "span_ids": ["s1"]}}, spans)
+        assert (out["diagram"] is not None) is shown, source
