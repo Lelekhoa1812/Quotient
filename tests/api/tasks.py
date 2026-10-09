@@ -441,3 +441,24 @@ def test_a_task_past_its_ttl_is_dropped_only_once_it_has_finished():
         store._items[status] = make(status)
     store._drop_expired_locked()
     assert sorted(store._items) == ["input_required", "working"]  # the live ones stay, however old
+
+
+def test_a_context_file_name_loses_hidden_and_direction_override_characters():
+    from quotient.mcp.tools import _prepare_context
+
+    seen = []
+
+    class Port:
+        def prepare_context(self, subject, files):
+            seen.extend(files)
+            return {"batch_id": "b1", "uploads": []}
+
+    hidden = "".join(chr(0xE0000 + ord(c)) for c in "x")
+    _prepare_context({"files": [{"filename": f"notes‮gpj.md{hidden}\x00"}]}, "s", Port())
+    assert seen[0]["filename"] == "notesgpj.md"
+    try:
+        _prepare_context({"files": [{"filename": "‮‭"}]}, "s", Port())
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a name that is only hidden characters must be refused")

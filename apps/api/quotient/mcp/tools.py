@@ -9,6 +9,7 @@ is started by jobs.run_submit so this module does not contain a model loop.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from quotient.graph.gate import page_graph, project_meeting, summary
@@ -363,6 +364,10 @@ def _owned(port: object, meeting_id: str, subject: str) -> dict:
     return raw
 
 
+# A file name is shown to people; a right-to-left override or a hidden Tags-block character makes "notes\u202egpj.md" read as another type.
+_HIDDEN = re.compile("[\U000e0000-\U000e007f\u202a-\u202e\u2066-\u2069\x00-\x1f\x7f]")
+
+
 def _prepare_context(arguments: dict, subject: str, port: object) -> dict:
     files = arguments.get("files")
     if not isinstance(files, list) or not 1 <= len(files) <= 20:
@@ -377,7 +382,10 @@ def _prepare_context(arguments: dict, subject: str, port: object) -> dict:
             raise ValueError("media_type must be a short string")
         if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
             raise ValueError("byte_size must be a non-negative integer")
-        clean.append({"filename": entry["filename"].strip(), "media_type": media, "byte_size": size})
+        name = _HIDDEN.sub("", entry["filename"]).strip()
+        if not name:
+            raise ValueError("each file needs a filename of at most 200 characters")
+        clean.append({"filename": name, "media_type": media, "byte_size": size})
     prepare = getattr(port, "prepare_context", None)
     if not callable(prepare):
         raise PortError("unavailable", "Context uploads need object storage, which is not configured.")

@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from context.convert import ConversionFailed, ConverterUnavailable, to_markdown
+from context.convert import ConversionFailed, ConverterUnavailable, clean, to_markdown
 from context.library import ContextDoc, ContextLibrary, gist_of, headings_of
 from media import storage
 
@@ -85,7 +85,7 @@ def load_library(items: list[dict], purpose: str = "", *, cache_dir: Path | None
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             cached = _cache_path(cache_dir, scope, digest)
             if cached is not None and cached.is_file():
-                text = cached.read_text(encoding="utf-8")
+                text = clean(cached.read_text(encoding="utf-8"))[0]  # a conversion cached before a cleaning rule existed is cleaned on the way out
                 truncated = cached.with_suffix(".cut").is_file()
             else:
                 text, truncated = to_markdown(path)

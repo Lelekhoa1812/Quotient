@@ -25,6 +25,9 @@ MAX_DOC_CHARS = 400_000
 TIMEOUT_SECONDS = 120.0
 _PLAIN = {".txt", ".md", ".markdown"}
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Text a person cannot see but a model reads: the Unicode Tags block (used to smuggle hidden instructions) and the bidirectional
+# overrides and isolates (which reorder what is shown). Joiners and the left/right marks stay: Arabic, Persian, Indic and emoji need them.
+_INVISIBLE = re.compile("[\U000e0000-\U000e007f\u202a-\u202e\u2066-\u2069]")
 
 
 class ConverterUnavailable(RuntimeError):
@@ -44,7 +47,7 @@ def _python() -> Path | None:
 
 def clean(text: str) -> tuple[str, bool]:
     """Printable text with tidy spacing, capped; the flag says whether it was cut."""
-    text = _CONTROL.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
+    text = _INVISIBLE.sub("", _CONTROL.sub("", text.replace("\r\n", "\n").replace("\r", "\n")))
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if len(text) > MAX_DOC_CHARS:
