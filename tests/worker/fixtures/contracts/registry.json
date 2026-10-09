@@ -119,6 +119,24 @@
       "version": 1,
       "file": "prompts/meeting.lens_question.v1.yaml",
       "model_role": "slm"
+    },
+    "meeting.digest.v1": {
+      "version": 1,
+      "file": "prompts/meeting.digest.v1.yaml",
+      "model_role": "llm",
+      "schema": "meeting.digest.v1"
+    },
+    "meeting.digest_review.v1": {
+      "version": 1,
+      "file": "prompts/meeting.digest_review.v1.yaml",
+      "model_role": "llm",
+      "schema": "meeting.digest_review.v1"
+    },
+    "meeting.answer_check.v1": {
+      "version": 1,
+      "file": "prompts/meeting.answer_check.v1.yaml",
+      "model_role": "slm",
+      "schema": "meeting.answer_check.v1"
     }
   },
   "schemas": {
@@ -133,6 +151,18 @@
     "meeting.pegasus.v1": {
       "version": 1,
       "file": "schemas/meeting.pegasus.v1.json"
+    },
+    "meeting.digest.v1": {
+      "version": 1,
+      "file": "schemas/meeting.digest.v1.json"
+    },
+    "meeting.digest_review.v1": {
+      "version": 1,
+      "file": "schemas/meeting.digest_review.v1.json"
+    },
+    "meeting.answer_check.v1": {
+      "version": 1,
+      "file": "schemas/meeting.answer_check.v1.json"
     }
   }
 }

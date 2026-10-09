@@ -31,6 +31,8 @@ class Claim:
     evidence_kind: str = "span"
     # Extractor-provided evidence candidates, validated against its input window.
     source_span_ids: list[str] | None = None
+    # confirmed | likely | contradicted | unverified (see graph/claim.py confidence_of).
+    confidence: str = "unverified"
 
 
 @dataclass

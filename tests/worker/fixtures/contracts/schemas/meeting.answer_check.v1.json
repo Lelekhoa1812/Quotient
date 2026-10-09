@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.answer_check.v1.json",
+  "title": "AnswerCheck",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answered",
+    "answer_span_id",
+    "answer"
+  ],
+  "properties": {
+    "answered": {
+      "type": "boolean"
+    },
+    "answer_span_id": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "answer": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    }
+  }
+}

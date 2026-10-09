@@ -241,6 +241,42 @@
       "schema": "schemas/meeting.synthesis.v1.json"
     },
     {
+      "route": "digest",
+      "pass": "digest",
+      "prompt_id": "meeting.digest.v1",
+      "schema_id": "meeting.digest.v1",
+      "version": 1,
+      "active": true,
+      "model_role": "llm",
+      "dimension": null,
+      "prompt": "prompts/meeting.digest.v1.yaml",
+      "schema": "schemas/meeting.digest.v1.json"
+    },
+    {
+      "route": "digest_review",
+      "pass": "digest_review",
+      "prompt_id": "meeting.digest_review.v1",
+      "schema_id": "meeting.digest_review.v1",
+      "version": 1,
+      "active": true,
+      "model_role": "llm",
+      "dimension": null,
+      "prompt": "prompts/meeting.digest_review.v1.yaml",
+      "schema": "schemas/meeting.digest_review.v1.json"
+    },
+    {
+      "route": "answer_check",
+      "pass": "answer_check",
+      "prompt_id": "meeting.answer_check.v1",
+      "schema_id": "meeting.answer_check.v1",
+      "version": 1,
+      "active": true,
+      "model_role": "slm",
+      "dimension": null,
+      "prompt": "prompts/meeting.answer_check.v1.yaml",
+      "schema": "schemas/meeting.answer_check.v1.json"
+    },
+    {
       "route": "dissent",
       "pass": "dissent",
       "prompt_id": "meeting.dissent.v1",

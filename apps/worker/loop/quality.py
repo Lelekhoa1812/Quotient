@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from errors import RegistryMissing, SchemaRejected
-from loop.tools import complete_with_open_span
+from loop.tools import complete_with_open_span, complete_with_tools
 from graph.actions import action_schema, ground_action, merge_actions, retain_durable
 from graph.chart import compute, render
 from graph.claim import finalize_claim
@@ -21,6 +21,9 @@ from loop.pool import map_ordered
 from media.compact import apply_omissions
 from registry.ids import (
     CHART,
+    DIGEST,
+    DIGEST_REVIEW,
+    ANSWER_CHECK,
     CLAIM,
     COMPACTION,
     COUNTEREVIDENCE,
@@ -47,6 +50,8 @@ class Ledger:
     notes: list = field(default_factory=list)
     anchor_date: str | None = None
     previous_actions: list = field(default_factory=list)
+    # Reference material the person supplied (context.library.ContextLibrary), or None. It is never evidence.
+    context: object | None = None
 
 
 class Budget:
@@ -82,6 +87,7 @@ def run(
     stage_callback: Callable[[str], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
 ):
+    _require_speech(ledger)
     cached = store.get(key)
     if cached is not None:
         return cached
@@ -168,6 +174,11 @@ def run(
             ), registry, claims)
         findings = lensed["findings"]
         dimensions = lensed["dimensions"]
+        # Visual lenses cannot say "nothing shown" about a video nobody looked at.
+        if any(VISUAL_SKIPPED in str(getattr(note, "statement", "")) for note in ledger.notes):
+            for name in ("cross_modal", "documentary"):
+                if dimensions.get(name) == "none_in_transcript":
+                    dimensions[name] = "not_evaluated"
         _apply_decisions(registry, claims, findings)
     sentences = []
     synth_omissions = []
@@ -189,11 +200,20 @@ def run(
         if stage_callback:
             stage_callback("Extracting and grounding follow-up actions")
         actions = _actions(ledger, registry, findings, claims)
+    digest = None
+    if not budget.hit:
+        if stage_callback:
+            stage_callback("Writing the walkaway: summary, decisions, actions and topics")
+        digest = _digest(ledger, call, claims, actions)
     chart = None
     if not budget.hit:
         if stage_callback:
             stage_callback("Building charts and checking publish readiness")
-        chart = _chart(ledger, call)
+        try:
+            chart = _chart(ledger, call)
+        except Exception as exc:  # the chart is an extra; a rejected one must not fail the meeting
+            print(f"chart skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+            chart = None
     result = gate(
         meeting_id=ledger.meeting_id,
         duration_ms=ledger.duration_ms,
@@ -212,6 +232,7 @@ def run(
         versions=registry.versions(),
         idempotency_key=key,
         chart=chart,
+        digest=digest,
     )
     # Motivation vs Logic
     # Motivation: Review urgency is a closed sort of ids the gate already queued.
@@ -372,10 +393,16 @@ def _verified_contradiction(ledger: Ledger, call, claim: Claim) -> str | None:
     resolution = resolve_quote(quote, ledger.spans, meeting_id=ledger.meeting_id, duration_ms=ledger.duration_ms)
     if resolution.status != "resolved" or not resolution.span_id:
         return None
+    # Bugs vs Fixes
+    # Bug: Any counter-quote that did not "entail" the claim counted as a contradiction, including
+    # an unrelated ("neutral") one. On the panel recording 15 of 16 "contradicted" claims had both
+    # entailment checks saying the claim was supported ("It was technically feasible to connect
+    # networks together" was marked contradicted by its own supporting sentence).
+    # Fix: A contradiction needs the verification to say the quote contradicts the claim.
     turn = call(ENTAILMENT_SOL, {"paraphrase": claim.paraphrase, "cited_span_texts": [quote]})
-    if turn is not None and turn.output.get("label") == "entails":
-        return None
-    return quote
+    if turn is not None and turn.output.get("label") == "contradicts":
+        return quote
+    return None
 
 
 def _contest(ledger: Ledger, call, claim: Claim) -> None:
@@ -404,9 +431,7 @@ def _contest(ledger: Ledger, call, claim: Claim) -> None:
         results = []
         for tool_call in turn.tool_calls:
             if tool_call.name != "open_span":
-                from errors import SchemaRejected
-
-                raise SchemaRejected("counterevidence tools are dispatched by name open_span")
+                continue  # an unknown tool is ignored, not a reason to fail the meeting
             span_id = tool_call.arguments.get("span_id")
             if not isinstance(span_id, str) or not span_id:
                 continue
@@ -714,6 +739,192 @@ def _actions(ledger, registry, findings, claims):
         except SchemaRejected as error:
             print(f"fallback action skipped for {claim.id}: {error}", file=sys.stderr)
     return retain_durable(ledger.previous_actions, merge_actions(built))
+
+
+MIN_SPEECH_CHECK_MS = 30_000
+VISUAL_SKIPPED = "Visual analysis was skipped"
+
+
+def _require_speech(ledger) -> None:
+    """A recording with nothing transcribed must fail, not publish as ready with every dimension reading
+    "not mentioned": silence in the transcript is not evidence that nothing was said. A recording whose
+    segments were all rejected by the provider is a different case (named gaps) and is left to the gate."""
+    if getattr(ledger, "duration_ms", 0) <= MIN_SPEECH_CHECK_MS:
+        return
+    spans = getattr(ledger, "spans", None) or []
+    if any(span.kind == "untranscribed" or (span.kind == "speech" and (span.text or span.raw_text or "").strip()) for span in spans):
+        return
+    from errors import NoSpeech
+
+    raise NoSpeech("no speech was transcribed")
+
+
+def _digest(ledger, call, claims, actions):
+    """Walkaway pass. Never fails the analysis: any error leaves the meeting without a digest."""
+    from graph.digest import claim_rows, ground_digest, transcript_lines
+
+    def speaker_of(span) -> str:
+        return span.speaker_hypothesis_id or "unknown"
+
+    try:
+        lines = transcript_lines(ledger.spans, speaker_of)
+        if not lines:
+            return None
+        payload = {
+            "transcript": lines,
+            "claims": claim_rows(claims),
+            "actions": [
+                {"id": f"a{index}", "statement": action.statement, "due_said": action.due_surface}
+                for index, action in enumerate(actions)
+            ],
+        }
+        # Reference material the person supplied: an index in the prompt, the documents on demand.
+        library = getattr(ledger, "context", None)
+        handlers = {}
+        if library is not None and library.payload():
+            from context.library import tool_handler
+
+            payload["context"] = library.payload()
+            handlers = {"read_context": tool_handler(library)}
+        from errors import InputTooLarge
+
+        try:
+            turn = complete_with_tools(lambda body: call(DIGEST, body), handlers, payload)
+        except InputTooLarge:
+            # Reference material pushed the prompt over the budget: write the walkaway without it
+            # rather than lose the walkaway.
+            if "context" not in payload:
+                raise
+            print("digest: context left out (over the input budget)", file=sys.stderr, flush=True)
+            payload = {key: value for key, value in payload.items() if key != "context"}
+            handlers = {}
+            turn = complete_with_tools(lambda body: call(DIGEST, body), handlers, payload)
+        if turn is None:
+            print("digest skipped: no answer", file=sys.stderr, flush=True)
+            return None
+        speakers = {row["speaker"] for row in lines if row.get("speaker") not in (None, "unknown")}
+        digest = ground_digest(turn.output, ledger.spans, claims, actions, speakers)
+        digest = _reviewed(call, payload, turn.output, digest, lambda raw: ground_digest(raw, ledger.spans, claims, actions, speakers), handlers)
+        digest = _verify_questions(ledger, call, digest)
+        from jev.rank import rank_digest
+
+        return rank_digest(digest)
+    except Exception as exc:  # the walkaway is optional; the evidence graph is not
+        print(f"digest skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+        return None
+
+
+# Motivation vs Logic
+# Motivation: A single writing pass cannot see its own omissions or misreadings; blind evaluation found
+# the same classes of defect on every recording (reversed readings, a missing dispute or next step,
+# generous "answered" flags).
+# Logic: A second pass reads the transcript and the draft and returns a corrected walkaway. It is
+# grounded by the same code as the draft, so it cannot add what the transcript does not support. It
+# replaces the draft only when it is a sound walkaway of at least 70% of the draft's size; a failed,
+# empty or much thinner review keeps the draft.
+REVIEW_KEEP = 0.7
+_SECTIONS = ("chapters", "decisions", "actions", "open_questions", "disagreements", "perspectives", "key_figures", "risks", "concepts", "speakers", "summary")
+
+
+def _size(digest) -> int:
+    return sum(len(digest.get(name) or []) for name in _SECTIONS) if isinstance(digest, dict) else 0
+
+
+def _reviewed(call, payload, draft_output, draft, ground, handlers=None):
+    if not isinstance(draft, dict) or not isinstance(draft_output, dict):
+        return draft
+    try:
+        body = {**payload, "draft": draft_output}
+        turn = complete_with_tools(lambda request: call(DIGEST_REVIEW, request), handlers or {}, body)
+        if turn is None:
+            print("digest review skipped: no answer", file=sys.stderr, flush=True)
+            return draft
+        review = ground(turn.output)
+    except Exception as exc:  # the draft is already a valid walkaway
+        print(f"digest review skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+        return draft
+    if not isinstance(review, dict) or _size(review) < REVIEW_KEEP * _size(draft) or not review.get("summary"):
+        print("digest review kept the draft: the review was thinner", file=sys.stderr, flush=True)
+        return draft
+    return review
+
+
+# Motivation vs Logic
+# Motivation: In every evaluated recording the walkaway called a question unanswered although a later
+# line answered it (a reply from another voice, minutes later, or a partial answer).
+# Logic: Every question the digest lists is checked by a narrow pass that sees only the question and the
+# next ANSWER_WINDOW_MS of speech, and may reply only by naming one of those lines; code checks that the
+# line was one of those shown and comes after the question. The check can promote an unanswered
+# question, or demote an answered one it does not confirm (keeping the cited reply as a partial one).
+# If the check fails, returns nothing usable, or cites a line it was not shown, the writing pass's own
+# answer stands: verification never removes a walkaway or a question.
+ANSWER_WINDOW_MS = 8 * 60_000
+ANSWER_LINES = 160
+
+
+def _verify_questions(ledger, call, digest):
+    if not isinstance(digest, dict):
+        return digest
+    speech = sorted(
+        (span for span in ledger.spans if span.kind == "speech" and (span.text or "").strip() and span.start_ms is not None),
+        key=lambda span: span.start_ms,
+    )
+    by_id = {span.id: span for span in speech}
+    # Every question is checked, not only the unanswered ones: blind evaluation found the writing pass
+    # marking questions answered on a partial or off-subject reply. A question the check does not
+    # confirm is demoted to unanswered, keeping the reply it cited as a partial one.
+    pending = list(digest.get("open_questions") or [])
+
+    def check(row):
+        asked = by_id.get(row.get("asked_span_id"))
+        if asked is None:
+            return
+        after = [span for span in speech if span.start_ms > asked.start_ms and span.start_ms - asked.start_ms <= ANSWER_WINDOW_MS][:ANSWER_LINES]
+        if not after:
+            return
+        turn = call(
+            ANSWER_CHECK,
+            {
+                "question": row["question"],
+                "lines_after": [
+                    {"id": span.id, "t": f"{int(span.start_ms // 60000)}:{int(span.start_ms // 1000) % 60:02d}",
+                     "speaker": span.speaker_hypothesis_id or "unknown", "text": span.text.strip()}
+                    for span in after
+                ],
+            },
+        )
+        output = getattr(turn, "output", None) if turn is not None else None
+        if not isinstance(output, dict):
+            return
+        if row.get("answered") and output.get("answered") is False:
+            row["answered"] = False
+            return
+        if row.get("answered"):
+            return  # confirmed: keep the writing pass's answer as it is
+        shown = {span.id for span in after}
+        answer_id = output.get("answer_span_id")
+        answer = by_id.get(answer_id) if isinstance(answer_id, str) and answer_id in shown else None
+        if answer is None or answer.start_ms <= asked.start_ms:
+            return  # a reply may only be one of the lines the check was shown
+        if output.get("answered") is not True:
+            if asked.speaker_hypothesis_id and answer.speaker_hypothesis_id == asked.speaker_hypothesis_id:
+                return  # the asker carrying on is the question continuing, not a partial reply
+            # A reply that only partly addresses the question is kept, marked as partial.
+            if not row.get("answer") and (output.get("answer") or "").strip():
+                row["answer"] = output["answer"].strip()
+                row["answer_span_id"] = answer.id
+                row["answer_ms"] = answer.start_ms
+            return
+        row["answered"] = True
+        row["answer"] = (output.get("answer") or answer.text).strip()
+        row["answer_span_id"] = answer.id
+        row["answer_ms"] = answer.start_ms
+
+    try:
+        map_ordered(check, pending)
+    except Exception as exc:  # verification is an improvement, never a reason to lose the walkaway
+        print(f"answer check skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+    return digest
 
 
 def _chart(ledger, call):

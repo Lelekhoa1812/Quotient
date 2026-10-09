@@ -326,3 +326,29 @@ def test_run_sorts_after_the_gate(monkeypatch):
     assert {call["role"] for call in calls} <= {"llm", "slm"}
     assert REVIEW_SORT not in {call["prompt_id"] for call in calls}
     assert client.payloads
+
+
+def test_walkaway_items_are_ordered_by_importance_and_fail_open():
+    from jev.client import Client
+    from jev.rank import rank_digest
+
+    def transport(payload):
+        scores = {"i0": 1.0, "i1": 3.6, "i2": 2.2}
+        answers = {key: {"type": "score", "score": scores[key]} for key in payload["questions"]}
+        return 200, {}, __import__("json").dumps({"answers": answers})
+
+    digest = {
+        "title": "Pilot",
+        "decisions": [{"statement": "Minor"}, {"statement": "Critical"}, {"statement": "Useful"}],
+        "actions": [{"task": "only one"}],
+    }
+    ranked = rank_digest(dict(digest), client=Client("key", transport=transport))
+    assert [row["statement"] for row in ranked["decisions"]] == ["Critical", "Useful", "Minor"]
+    assert ranked["actions"] == [{"task": "only one"}]
+
+    def broken(payload):
+        return 500, {}, "{}"
+
+    kept = rank_digest(dict(digest), client=Client("key", transport=broken, sleep=lambda _s: None))
+    assert [row["statement"] for row in kept["decisions"]] == ["Minor", "Critical", "Useful"]
+    assert rank_digest(dict(digest), env={}) == digest  # no key: unchanged

@@ -8,8 +8,13 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+# Bugs vs Fixes
+# Bug: A grouped number without a currency sign ("1,000") lexed as two numbers, 1 and 0, so a claim
+# of "1,000 orders" never matched a span saying "one thousand orders", and "1,000" vs "1,000,000"
+# could look alike.
+# Fix: Grouped digits (with or without a sign or currency) are one token; _digit removes the commas.
 _TOKEN = re.compile(
-    r"\d{1,2}:\d{2}(?::\d{2})?|[$€£]-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?[$€£]?\d+(?:\.\d+)?%?|[A-Za-z]+(?:-[A-Za-z]+)?(?:'[A-Za-z]+)?|%"
+    r"\d{1,2}:\d{2}(?::\d{2})?|[$€£]-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?[$€£]?\d+(?:\.\d+)?%?|[A-Za-z]+(?:-[A-Za-z]+)?(?:'[A-Za-z]+)?|%"
 )
 
 _ONES = {
@@ -40,7 +45,18 @@ class NumberScan:
     unsettled: bool
 
 
+# Bugs vs Fixes
+# Bug: Speaker labels such as "spk_0" reached claim text (the extractor copies the voice id it is
+# shown), and the digit in the label was read as a quantity (0) that is not in the cited span. A
+# correct, fully entailed claim ("spk_0 will put a box around the pivot") then failed numeric
+# grounding and was demoted to unresolved: about half of all entailed claims on two test
+# recordings.
+# Fix: A voice label is not a number. Remove labels before lexing.
+_VOICE = re.compile(r"\bspk_\d+\b", re.IGNORECASE)
+
+
 def scan(text: str) -> NumberScan:
+    text = _VOICE.sub(" ", text)
     tokens = _TOKEN.findall(text)
     quantities: list[Quantity] = []
     unsettled = False

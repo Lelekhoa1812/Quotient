@@ -129,8 +129,10 @@ def _assemble(
     registry = Registry()
     transport = Transport()
     table = build_table(duration_ms, [])
+    pegasus_bucket = os.environ.get("QUOTIENT_PEGASUS_BUCKET", "").strip()
+    local_endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
     if progress_callback:
-        if kind == "video" and os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip():
+        if kind == "video" and local_endpoint and not pegasus_bucket:
             progress_callback("Streaming audio transcription; visual analysis is unavailable on local MinIO")
         elif kind == "video":
             progress_callback("Transcribing audio and analyzing video in parallel")
@@ -153,9 +155,9 @@ def _assemble(
 
     def run_pegasus():
         # AWS Bedrock cannot read objects from a developer's local S3-compatible
-        # endpoint. Keep the local upload path exercised, but do not hand a
-        # MinIO URI to Pegasus as if it were an AWS-owned bucket.
-        if os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip():
+        # endpoint, so never hand a MinIO URI to Pegasus. With QUOTIENT_PEGASUS_BUCKET
+        # set, the parts go to that AWS bucket instead; otherwise visual analysis is skipped.
+        if local_endpoint and not pegasus_bucket:
             _stage("pegasus_skipped_local_s3")
             note = VisualNote(
                 id=f"{meeting_id}-note-local-s3",
@@ -170,10 +172,11 @@ def _assemble(
         parts = pack_scenes(scenes)
 
         def upload(part):
-            if uploaded and part.index == 0 and part.source_start_ms == 0:
+            # The playback copy on MinIO is not readable by Bedrock, so it is only reused for AWS input.
+            if uploaded and part.index == 0 and part.source_start_ms == 0 and not pegasus_bucket:
                 return uploaded
             piece = _cut(path, part)
-            return _put_object(piece, f"derivatives/{meeting_id}-{part.index}.mp4")
+            return _put_object(piece, f"derivatives/{meeting_id}-{part.index}.mp4", aws_bucket=pegasus_bucket or None)
 
         client = PegasusClient(registry, transport)
         observed = client.analyze(parts, upload, meeting_id)
@@ -186,15 +189,26 @@ def _assemble(
         # still uses only the timed observations.
         return list(observed.observations), list(observed.notes)
 
+    def run_diarization():
+        _stage("diarization")
+        from media.diarize import diarize_pcm
+
+        return diarize_pcm(pcm, should_stop=should_stop)
+
+    # Diarization runs beside transcription (seconds versus real-time streaming) and is optional.
     if kind == "video":
-        spoken_pack, pegasus_pack = map_ordered(lambda fn: fn(), (run_sonic, run_pegasus))
+        spoken_pack, pegasus_pack, turns = map_ordered(lambda fn: fn(), (run_sonic, run_pegasus, run_diarization))
         spoken, _seams = spoken_pack
         observations, notes = pegasus_pack
     else:
-        spoken, _seams = run_sonic()
+        spoken_pack, turns = map_ordered(lambda fn: fn(), (run_sonic, run_diarization))
+        spoken, _seams = spoken_pack
         observations = []
         notes = []
     _clamp(spoken, duration_ms)
+    from media.diarize import attach_speakers
+
+    attach_speakers(spoken, turns)
     spans = list(spoken) + silence
     return Ledger(
         meeting_id=meeting_id,
@@ -349,18 +363,23 @@ def _cut(path: Path, part) -> Path:
     return dest
 
 
-def _put_object(path: Path, key: str) -> str:
+def _put_object(path: Path, key: str, *, aws_bucket: str | None = None) -> str:
     # Bugs vs Fixes
     # Bug: The object went up without a video content type, and Pegasus
     # answered that the video was unprocessable.
     # Fix: Set the object content type to video/mp4 on the upload.
-    bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", "").strip()
-    if not bucket:
-        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
-            raise RuntimeError("QUOTIENT_MEDIA_BUCKET must be configured outside local development")
-        bucket = _BUCKET
+    if aws_bucket:
+        # Pegasus input goes to a real AWS bucket with the normal AWS credential chain, never MinIO.
+        bucket = aws_bucket
+        endpoint = ""
+    else:
+        bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", "").strip()
+        if not bucket:
+            if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
+                raise RuntimeError("QUOTIENT_MEDIA_BUCKET must be configured outside local development")
+            bucket = _BUCKET
+        endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
     uri = f"s3://{bucket}/{key}"
-    endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
     command = [
         "aws",
         "s3",

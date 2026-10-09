@@ -14,6 +14,9 @@ from registry.ids import (
     ENTAILMENT_LUNA,
     ENTAILMENT_SOL,
     SYNTHESIS,
+    DIGEST,
+    DIGEST_REVIEW,
+    ANSWER_CHECK,
     lens_id,
 )
 
@@ -41,6 +44,9 @@ PROMPT_ROLE = {
     SUPPLEMENT: "llm",
     CROSSMODAL: "llm",
     SYNTHESIS: "llm",
+    DIGEST: "llm",
+    DIGEST_REVIEW: "llm",
+    ANSWER_CHECK: "slm",
     DISSENT: "slm",
     CHART: "slm",
 }

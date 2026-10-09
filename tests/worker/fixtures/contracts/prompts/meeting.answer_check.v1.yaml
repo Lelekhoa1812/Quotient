@@ -1,0 +1,45 @@
+# Motivation vs Logic
+# Motivation: A walkaway that calls a question unanswered when a later line answers it misleads the
+# reader, and it happened in every evaluated recording. The digest pass reads a whole transcript and
+# can miss a reply minutes later; a narrow check over the lines that follow the question does not.
+# Logic: One small pass per question the digest marked unanswered. It sees only the question and the
+# lines after it, and may answer only by pointing at one of those lines. Code verifies the line exists
+# and comes after the question, so a model cannot invent an answer.
+id: meeting.answer_check.v1
+version: 1
+model_role: slm
+schema: meeting.answer_check.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - question
+    - lines_after
+  exclude:
+    - draft_brief
+    - synthesis
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.answer_check.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  Decide whether the question was answered. question is a question someone asked in a recording. lines_after are the lines spoken after it, each with a span id, a time and a speaker id.
+
+  answered is true only when a line after the question states an answer to what was asked, even if it comes minutes later or from a different speaker. If the replies address only part of the question, or the speaker says they are not sure they answered, or the answer is only implied, answered is false. A line that only repeats or rephrases the question, changes the subject, or says the question will be handled later is not an answer.
+  The answer must be about the same subject as the question: a line about a different company, project or time (for example the customer's current system when the question asks about earlier discussions) does not answer it, even if it uses similar words.
+  When answered is true, answer_span_id is the span id of the line that answers it and answer is that line's own wording shortened to one sentence. When answered is false but a line does address part of the question, still give that line's span id and its wording shortened to one sentence, so a reader can see what was said; when no line addresses it, both are null.
+  Use only the lines given. Do not use outside knowledge. Do not invent a span id.
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

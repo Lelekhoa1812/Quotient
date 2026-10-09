@@ -250,8 +250,11 @@ def test_publish_loop_keeps_overlap_and_excludes_unanchored_due_dates():
         "Analyzing all ten evidence lenses",
         "Building the evidence-backed brief",
         "Extracting and grounding follow-up actions",
+        "Writing the walkaway: summary, decisions, actions and topics",
         "Building charts and checking publish readiness",
     ]
+    # The scripted model has no digest answer: the walkaway is skipped, the analysis still completes.
+    assert result.digest is None
     calls = len(model.calls)
     replay = run(ledger, model, registry(), store, "job-1")
     assert replay is result
@@ -831,3 +834,52 @@ def test_a_contradiction_that_actually_agrees_with_the_claim_is_dropped():
     assert _verified_contradiction(ledger, call("contradicts"), claim) is None  # not in the recording
     claim.contradicting_quote = None
     assert _verified_contradiction(ledger, call("contradicts"), claim) is None
+
+
+def test_the_answer_check_can_answer_only_with_a_later_line_and_fails_soft():
+    from loop.quality import _verify_questions
+
+    spans = [_span("s1", "How does weighing work?", 0, 2000), _span("s2", "We integrate the scale and scanner.", 60_000, 64_000), _span("s3", "Unrelated aside.", 70_000, 72_000)]
+    ledger = SimpleNamespace(spans=spans)
+    digest = {"open_questions": [
+        {"question": "How does weighing work?", "asked_span_id": "s1", "answered": False, "answer": None, "answer_span_id": None},
+        {"question": "Will it rain?", "asked_span_id": "s1", "answered": False, "answer": None, "answer_span_id": None},
+        {"question": "Already known", "asked_span_id": "s1", "answered": True, "answer": "yes", "answer_span_id": "s2"},
+    ]}
+    seen = []
+
+    def call(prompt_id, payload):
+        seen.append((prompt_id, payload["question"], [row["id"] for row in payload["lines_after"]]))
+        if payload["question"] == "How does weighing work?":
+            return ModelTurn(output={"answered": True, "answer_span_id": "s2", "answer": "Scale and scanner are integrated."}, tool_calls=[])
+        return ModelTurn(output={"answered": True, "answer_span_id": "invented", "answer": "It will."}, tool_calls=[])
+
+    out = _verify_questions(ledger, call, digest)
+    first, second, third = out["open_questions"]
+    assert (first["answered"], first["answer_span_id"], first["answer_ms"]) == (True, "s2", 60_000)
+    assert second["answered"] is False and second["answer_span_id"] is None  # an invented line id is rejected
+    assert third["answered"] is True  # the check confirmed it ("answered" with an unusable line id keeps the writer's answer)
+    assert [item[0] for item in seen] == ["meeting.answer_check.v1"] * 3  # answered questions are checked too
+    assert seen[0][2] == ["s2", "s3"]
+
+    def failing(prompt_id, payload):
+        return None
+
+    again = _verify_questions(ledger, failing, {"open_questions": [{"question": "x", "asked_span_id": "s1", "answered": False}]})
+    assert again["open_questions"][0]["answered"] is False
+
+
+def test_a_neutral_counter_quote_is_not_a_contradiction():
+    from loop.quality import _verified_contradiction
+
+    span = _span("s1", "so it was technically feasible to connect networks together", 0, 3000)
+    ledger = SimpleNamespace(spans=[span], meeting_id="m", duration_ms=3000)
+    claim = Claim(id="c", meeting_id="m", kind="observation", proposition="p", paraphrase="It was technically feasible to connect networks.", quote="q", contradicting_quote="technically feasible to connect networks together")
+
+    def verdict(label):
+        return lambda prompt_id, payload: ModelTurn(output={"label": label}, tool_calls=[])
+
+    assert _verified_contradiction(ledger, verdict("neutral"), claim) is None
+    assert _verified_contradiction(ledger, verdict("entails"), claim) is None
+    assert _verified_contradiction(ledger, verdict("contradicts"), claim) == "technically feasible to connect networks together"
+    assert _verified_contradiction(ledger, verdict("contradicts"), Claim(id="d", meeting_id="m", kind="x", proposition="p", paraphrase="p", quote="q", contradicting_quote="words that are nowhere in the recording")) is None

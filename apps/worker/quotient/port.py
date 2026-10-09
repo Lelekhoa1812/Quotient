@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import shutil
 import json
 import os
 import secrets
@@ -16,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,11 +35,19 @@ _ARTIFACT_KEYS = (
 MAX_RESUMES = 2
 
 
+CONTEXT_BATCH_SECONDS = 6 * 3600
+CONTEXT_BATCHES_PER_SUBJECT = 20
+
+
 class PortError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+# Portal uploads are stored under this prefix; the key is minted by upload_target, never the client.
+UPLOAD_PREFIX = "uploads/"
 
 
 def _raise(code: str, message: str) -> None:
@@ -117,6 +128,7 @@ def _claim_row(claim: object) -> dict:
         "claim_id": claim.id,
         "kind": claim.kind,
         "status": claim.status,
+        "confidence": getattr(claim, "confidence", None) or ("confirmed" if claim.status == "supported" else "unverified"),
         "text": claim.proposition,
         "decision_status": claim.decision_status,
         "origin": origin,
@@ -202,6 +214,8 @@ def _public_failure(exc: BaseException) -> str:
     detail = str(exc).replace("\n", " ").strip()
     print(f"analysis failed: {type(exc).__name__}: {detail[:400]}", file=sys.stderr, flush=True)
     lowered = detail.lower()
+    if type(exc).__name__ == "NoSpeech":
+        return "No speech could be transcribed from this recording. Check that it has clear audio and try again."
     if type(exc).__name__ == "NoAudioTrack":
         return "This recording has no audio, so there is nothing to transcribe."
     if isinstance(exc, subprocess.TimeoutExpired):
@@ -301,8 +315,10 @@ class Port:
         self._lock = threading.Lock()
         self._rows: dict[str, dict] = {}
         self._idempotency: dict[tuple[str, str], str] = {}
+        self._context_batches: dict[str, dict] = {}
         self._exports: dict[tuple[str, str], tuple[str, bytes]] = {}
         self._state_path = state_path
+        self._lock_file = self._claim_store(state_path)
         resume_ids = []
         if state_path is not None and state_path.exists():
             payload = json.loads(state_path.read_text(encoding="utf-8"))
@@ -349,6 +365,23 @@ class Port:
                 daemon=True,
             ).start()
 
+    @staticmethod
+    def _claim_store(state_path: Path | None):
+        """One process owns the meeting store. Two writers would each rewrite the whole file from their own
+        memory, and both would re-run the same interrupted meetings. The lock goes when the process does."""
+        if state_path is None:
+            return None
+        import fcntl
+
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(state_path.with_name(state_path.name + ".lock"), "w")
+        try:
+            fcntl.lockf(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # per process: a restart in the same process is fine
+        except OSError:
+            handle.close()
+            raise RuntimeError("Another Quotient process is already using this meeting store. Stop it first.") from None
+        return handle
+
     def _save_locked(self) -> None:
         if self._state_path is None:
             return
@@ -382,12 +415,22 @@ class Port:
         object_key: str,
         context_names: tuple[str, ...],
         idempotency_key: str | None,
+        context_batch: str | None = None,
+        purpose: str | None = None,
     ) -> str:
         with self._lock:
             if idempotency_key:
                 existing = self._idempotency.get((subject, idempotency_key))
-                if existing:
+                # A retry after a failure or a cancellation is a new attempt, not a request for the dead one.
+                if existing and self._rows.get(existing, {}).get("status") not in {"failed", "cancelled"}:
                     return existing
+            if context_batch:
+                self._prune_batches()
+                record = self._context_batches.get(context_batch)
+                if not record or record["subject"] != subject:
+                    # Starting without the documents the person added would be a silent downgrade.
+                    _raise("not_found", "The context you added was not found. Add it again and start the analysis.")
+            context = self._context_for(subject, context_batch, purpose)
             meeting_id = secrets.token_urlsafe(12)
             self._rows[meeting_id] = {
                 "meeting_id": meeting_id,
@@ -411,12 +454,20 @@ class Port:
                 "gaps": [],
                 "none_in_transcript": [],
                 "not_evaluated": [],
+                "digest": None,
                 "observations": [],
                 "revisions": [],
             }
+            if context:
+                self._rows[meeting_id]["context"] = context
+            try:
+                self._save_locked()
+            except Exception:
+                # Not stored means not submitted: a retry must start fresh, not be handed an id that never ran.
+                del self._rows[meeting_id]
+                raise
             if idempotency_key:
                 self._idempotency[(subject, idempotency_key)] = meeting_id
-            self._save_locked()
         # Bugs vs Fixes
         # Bug: submit stored a queued row and returned. Nothing called Sonic,
         # Pegasus, or the publish gate, so tasks/get stayed queued.
@@ -430,6 +481,113 @@ class Port:
             daemon=True,
         ).start()
         return meeting_id
+
+    def prepare_context(self, subject: str, files: list[dict]) -> dict | None:
+        """Signed upload targets for reference files. The keys are minted here under context/<batch>/."""
+        from media import storage
+
+        if len(files) > storage.CONTEXT_MAX_FILES:
+            _raise("invalid", f"At most {storage.CONTEXT_MAX_FILES} context files can be added.")
+        total = 0
+        for entry in files:
+            if not storage.context_allowed(entry.get("filename")):
+                _raise("invalid", f"{str(entry.get('filename'))[:60]} is not a supported type. Use PDF, Word, PowerPoint, Excel, CSV, JSON, HTML, XML, EPUB, Markdown or text.")
+            size = entry.get("byte_size")
+            if isinstance(size, int):
+                if size > storage.CONTEXT_MAX_FILE_BYTES:
+                    _raise("invalid", f"{str(entry.get('filename'))[:60]} is larger than 25 MB.")
+                total += size
+        if total > storage.CONTEXT_MAX_TOTAL_BYTES:
+            _raise("invalid", "The context is over 100 MB in total.")
+        batch_id = secrets.token_urlsafe(12)
+        uploads, items = [], []
+        try:
+            for index, entry in enumerate(files):
+                key = storage.context_key(batch_id, index, entry.get("filename"))
+                content_type = storage.base_media_type(entry.get("media_type")) or "application/octet-stream"
+                url = storage.presign_put(key, content_type)
+                uploads.append({"index": index, "filename": entry["filename"], "upload_url": url, "method": "PUT",
+                                "headers": {"Content-Type": content_type}, "object_key": key})
+                items.append({"name": str(entry["filename"])[:160], "key": key, "bytes": size if isinstance((size := entry.get("byte_size")), int) else None})
+        except storage.StorageUnavailable:
+            return None
+        with self._lock:
+            self._prune_batches()
+            mine = sorted((rec["at"], key) for key, rec in self._context_batches.items() if rec["subject"] == subject)
+            for _at, key in mine[: max(0, len(mine) - (CONTEXT_BATCHES_PER_SUBJECT - 1))]:
+                del self._context_batches[key]  # the oldest unused batches make room: they are only reservations
+            self._context_batches[batch_id] = {"subject": subject, "items": items, "at": time.time()}
+        return {"batch_id": batch_id, "uploads": uploads}
+
+    def _prune_batches(self) -> None:
+        now = time.time()
+        for stale in [key for key, rec in self._context_batches.items() if now - rec["at"] > CONTEXT_BATCH_SECONDS]:
+            del self._context_batches[stale]
+
+    def context_items(self, subject: str, batch_id: str) -> list[dict] | None:
+        with self._lock:
+            self._prune_batches()
+            record = self._context_batches.get(batch_id)
+            return copy.deepcopy(record["items"]) if record and record["subject"] == subject else None
+
+    def _context_for(self, subject: str, batch_id: str | None, purpose: str | None) -> dict | None:
+        """The context block a new meeting row carries; called with the lock held."""
+        record = self._context_batches.get(batch_id) if batch_id else None
+        items = []
+        if record and record["subject"] == subject:
+            del self._context_batches[batch_id]  # one batch belongs to one meeting; a second submit must upload again
+            for position, item in enumerate(record["items"], start=1):
+                items.append({"id": f"i{position}", "name": item["name"], "key": item["key"], "bytes": item.get("bytes"),
+                              "status": "pending", "reason": None, "chars": None, "summary": None})
+        text = (purpose or "").strip()[:2000]
+        return {"purpose": text or None, "items": items} if (items or text) else None
+
+    def _load_context(self, meeting_id: str):
+        """Turn the meeting's uploaded reference files into a library the agents can read. Never raises."""
+        try:
+            from context.loader import load_library
+
+            with self._lock:
+                row = self._rows.get(meeting_id)
+                block = copy.deepcopy(row.get("context")) if row else None
+            if not block:
+                return None
+            self._set_progress(meeting_id, "Reading the context documents")
+            cache = os.environ.get("QUOTIENT_CONTEXT_CACHE_DIR", "").strip()
+            if not cache and os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+                cache = str(Path(__file__).resolve().parents[3] / ".local" / "run" / "context")
+            library, items = load_library(
+                block.get("items") or [],
+                block.get("purpose") or "",
+                cache_dir=Path(cache) if cache else None,
+                scope=hashlib.sha256(str(self._subject_of(meeting_id) or "").encode()).hexdigest()[:16],
+            )
+            with self._lock:
+                row = self._rows.get(meeting_id)
+                if row is not None:
+                    row["context"] = {**block, "items": items}
+                    self._save_locked()
+            print(f"context: {len(library.docs)} of {len(items)} documents ready", file=sys.stderr, flush=True)
+            return library if library else None
+        except Exception as exc:  # reference material is an aid; the analysis does not depend on it
+            print(f"context skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+            self._mark_context_unread(meeting_id)
+            return None
+
+    def _mark_context_unread(self, meeting_id: str) -> None:
+        """Say on the row that the documents were not read, so nobody assumes the analysis used them."""
+        try:
+            with self._lock:
+                row = self._rows.get(meeting_id)
+                block = row.get("context") if row else None
+                if not isinstance(block, dict):
+                    return
+                for item in block.get("items") or []:
+                    if isinstance(item, dict) and item.get("status") != "ready":
+                        item["status"], item["reason"] = "failed", "The documents could not be read, so this analysis ran without them."
+                self._save_locked()
+        except Exception:
+            pass
 
     def _analyze(self, meeting_id: str) -> None:
         try:
@@ -455,15 +613,30 @@ class Port:
         from registry.load import Registry
 
         self._set_progress(meeting_id, "Preparing the media and building the transcript")
-        path = resolve_object(object_key)
-        ledger = assemble(
-            path,
-            meeting_id,
-            context=", ".join(names) if names else None,
-            progress_callback=lambda message: self._set_progress(meeting_id, message),
-            should_stop=lambda: self._is_cancelled(meeting_id),
-            cache_scope=self._subject_of(meeting_id),
-        )
+        # A portal upload lives in object storage under uploads/; read it into a private
+        # temporary directory that is removed whatever happens next.
+        scratch = None
+        if object_key.startswith(UPLOAD_PREFIX):
+            from media.storage import download
+
+            self._set_progress(meeting_id, "Fetching the uploaded recording")
+            path = download(object_key)
+            scratch = path.parent
+        else:
+            path = resolve_object(object_key)
+        try:
+            ledger = assemble(
+                path,
+                meeting_id,
+                context=", ".join(names) if names else None,
+                progress_callback=lambda message: self._set_progress(meeting_id, message),
+                should_stop=lambda: self._is_cancelled(meeting_id),
+                cache_scope=self._subject_of(meeting_id),
+            )
+        finally:
+            if scratch is not None:
+                shutil.rmtree(scratch, ignore_errors=True)
+        ledger.context = self._load_context(meeting_id)
         registry = Registry()
         reasoner = Reasoner(registry, Transport())
         print("analysis stage: quality", file=sys.stderr, flush=True)
@@ -542,6 +715,9 @@ class Port:
                 anchor["speaker_hypothesis_id"] = "hyp_" + secrets.token_urlsafe(8)
             for span in targets:
                 span["speaker_display"] = display_name
+            if scope == "hypothesis" and hypothesis:
+                # Locked: a name a person gave a voice survives any later analysis of the recording.
+                row.setdefault("speaker_names", {})[hypothesis] = display_name
             row["revisions"].append(
                 {
                     "span_id": span_id,
@@ -551,6 +727,46 @@ class Port:
                 }
             )
             # Speaker labels are a presentation edit; no analysis rerun is queued.
+            row["updated_at"] = _now()
+            self._save_locked()
+            return copy.deepcopy(row)
+
+    def merge_speakers(
+        self,
+        meeting_id: str,
+        subject: str,
+        span_id: str,
+        other_span_id: str,
+        display_name: str,
+    ) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            anchor = next((span for span in row["spans"] if span.get("span_id") == span_id), None)
+            other = next((span for span in row["spans"] if span.get("span_id") == other_span_id), None)
+            if anchor is None or other is None:
+                _raise("not_found", "Span not found.")
+            keep = anchor.get("speaker_hypothesis_id")
+            gone = other.get("speaker_hypothesis_id")
+            if not keep or not gone:
+                _raise("conflict", "Both lines need a speaker to be merged.")
+            # One voice from here on: every line of the other voice moves to the anchor's voice and takes its name.
+            for span in row["spans"]:
+                if span.get("speaker_hypothesis_id") == gone:
+                    span["speaker_hypothesis_id"] = keep
+                if span.get("speaker_hypothesis_id") == keep:
+                    span["speaker_display"] = display_name
+            names = row.setdefault("speaker_names", {})
+            names.pop(gone, None)
+            names[keep] = display_name
+            row["revisions"].append(
+                {
+                    "span_id": span_id,
+                    "scope": "merge",
+                    "display_name": display_name,
+                    "merged_from": gone,
+                    "at": _now(),
+                }
+            )
             row["updated_at"] = _now()
             self._save_locked()
             return copy.deepcopy(row)
@@ -570,6 +786,9 @@ class Port:
     def cancel(self, meeting_id: str, subject: str) -> dict:
         with self._lock:
             row = self._owned(meeting_id, subject)
+            if row["status"] in {"ready", "needs_review", "failed"}:
+                # A finished meeting is not "stopped": cancelling it would hide the brief it already produced.
+                _raise("conflict", "This meeting has already finished.")
             row["status"] = "cancelled"
             row["progress_message"] = "Stopped before it finished."
             row["updated_at"] = _now()
@@ -587,6 +806,30 @@ class Port:
             mime, body = stored
             return mime, bytes(body)
 
+    def upload_target(self, task_id: str, filename: str | None, media_type: str | None, byte_size: object) -> dict | None:
+        """A signed PUT for one browser upload, or None when object storage is not configured."""
+        from media import storage
+
+        if not storage.media_type_allowed(media_type):
+            _raise("invalid", "Only audio or video recordings can be uploaded.")
+        if isinstance(byte_size, str) and byte_size.strip().isdigit():
+            byte_size = int(byte_size)
+        if isinstance(byte_size, int) and not isinstance(byte_size, bool) and byte_size > storage.MAX_UPLOAD_BYTES:
+            _raise("invalid", "The recording is larger than 5 GB.")
+        key = storage.upload_key(task_id, filename)
+        content_type = storage.base_media_type(media_type)  # the signed header and the browser's PUT must agree
+        try:
+            url = storage.presign_put(key, content_type)
+        except storage.StorageUnavailable:
+            return None
+        return {"upload_url": url, "method": "PUT", "headers": {"Content-Type": content_type}, "object_key": key}
+
+    def uploaded_object(self, key: str) -> dict | None:
+        """Size and type of an uploaded object (None when it is missing)."""
+        from media import storage
+
+        return storage.head(key)
+
     def media_url(self, meeting_id: str, subject: str) -> str | None:
         """Return a short-lived URL for the submitted source, scoped to its owner."""
         with self._lock:
@@ -598,7 +841,7 @@ class Port:
             # own; a failed or queued submission naming someone else's key gets no URL.
             if row.get("status") not in {"ready", "needs_review"} and not row.get("spans"):
                 return None
-        if not isinstance(key, str) or not key.startswith("derivatives/"):
+        if not isinstance(key, str) or not key.startswith(("derivatives/", UPLOAD_PREFIX)):
             return None
         bucket = os.environ.get("QUOTIENT_MEDIA_BUCKET", "").strip()
         if not bucket:
@@ -749,6 +992,8 @@ class Port:
             display = displays.get(span.get("span_id"))
             if display and not span.get("speaker_display"):
                 span["speaker_display"] = display
+        apply_locked_names(row, spans)
+        apply_text_edits(row, spans)
         anchor = getattr(ledger, "anchor_date", None)
         row["status"] = result.status
         row["progress_message"] = (
@@ -789,6 +1034,8 @@ class Port:
             _record(item, ("finding_id", "reason")) for item in getattr(result, "synthesis_omissions", []) or []
         ]
         row["charts"] = _worker_charts(result, ledger)
+        digest = getattr(result, "digest", None)
+        row["digest"] = digest if isinstance(digest, dict) else None
         artifacts = dict(result.artifacts) if isinstance(result.artifacts, dict) else {}
         for key in _ARTIFACT_KEYS:
             artifacts.setdefault(key, "pending")
@@ -803,6 +1050,27 @@ class Port:
         if row is None or row["subject"] != subject:
             _raise("not_found", "Meeting not found.")
         return row
+
+
+def apply_text_edits(row: dict, spans: list[dict]) -> None:
+    """Text a person corrected survives a re-analysis: the newest correction for a span wins over what the
+    model transcribed this time. Only spans that still exist are touched."""
+    latest: dict[str, str] = {}
+    for revision in row.get("revisions") or []:
+        if isinstance(revision, dict) and isinstance(revision.get("span_id"), str) and isinstance(revision.get("text"), str):
+            latest[revision["span_id"]] = revision["text"]
+    for span in spans:
+        if span.get("span_id") in latest:
+            span["text"] = latest[span["span_id"]]
+
+
+def apply_locked_names(row: dict, spans: list[dict]) -> None:
+    """A name a person gave a voice outranks anything a later analysis produced for it."""
+    locked = row.get("speaker_names") or {}
+    for span in spans:
+        name = locked.get(span.get("speaker_hypothesis_id"))
+        if name:
+            span["speaker_display"] = name
 
 
 def _load_entrypoints():

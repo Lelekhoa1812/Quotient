@@ -31,6 +31,7 @@ class GateResult:
     ceiling_hit: bool = False
     idempotency_key: str | None = None
     chart: dict | None = None
+    digest: dict | None = None
 
 
 def keep_findings(findings: list[Finding], claims_by_id: dict) -> list[Finding]:
@@ -81,6 +82,7 @@ def gate(
     versions: dict | None = None,
     idempotency_key: str | None = None,
     chart: dict | None = None,
+    digest: dict | None = None,
 ) -> GateResult:
     if ceiling_hit:
         published_dimensions = dict(dimensions)
@@ -151,4 +153,5 @@ def gate(
         ceiling_hit=ceiling_hit,
         idempotency_key=idempotency_key,
         chart=chart,
+        digest=digest,
     )

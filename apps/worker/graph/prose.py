@@ -42,7 +42,12 @@ _HEADERS = frozenset(
 )
 
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})[ \t]*([^`~\n]*)$")
-_TAG = re.compile(r"<[^>]*>")
+# An HTML tag or comment, not a comparison: "<200ms" and "x < y" are labels, and `A --> B` is an arrow.
+_TAG = re.compile(r"<(?:/?[A-Za-z][A-Za-z0-9]*(?:\s[^<>]*?)?(?<!-)/?|!--.*?--)>")
+# Mermaid directives that attach behaviour or styling. A node that happens to be called "Link" or "Click"
+# (`Link --> Gateway`) is a node, not a directive.
+_DIRECTIVE = re.compile(r"^(?:click|link|callback)\s+[\w-]+\s*(?:$|href\b|call\b|callback\b|[\"'])", re.I)
+_STYLING = re.compile(r"^(?:style|classdef|linkstyle|class)\s+[\w,.-]+\s", re.I)
 
 
 def normalize(text: str) -> str:
@@ -104,7 +109,7 @@ def _scrub(body: str) -> str | None:
 def _line(line: str) -> str | None:
     stripped = line.strip()
     lowered = stripped.lower()
-    if lowered.startswith(("click ", "link ", "callback ", "%%{init")):
+    if lowered.startswith("%%{init") or _DIRECTIVE.match(stripped) or _STYLING.match(stripped):
         return None
     if "javascript:" in lowered or "data:text/html" in lowered:
         return None

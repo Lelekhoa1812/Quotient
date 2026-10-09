@@ -34,6 +34,7 @@ body: |
   For each claim, span_ids must contain only supplied span ids that support that claim, including the span containing its quote. Do not list the whole window or unrelated spans.
   Attach the verbatim quote as it appears in span text. The quote must be a contiguous slice of one cited span. If you cannot do that, emit a gap instead of a claim.
   An ambiguous sentence is a gap. A gap lists the span ids that were read and why it is ambiguous.
+  Prefer fewer, more specific claims over many near-identical ones. If two spans say the same thing, emit one claim and cite both.
   kind is one of decision, action, commitment, question, figure, or observation.
   decision_status is aligned, needs_discussion, disagreed, shelved, or null. Null means the spans do not state a status. Do not invent a status.
   A proper-noun list, when present, is short names only. It is not evidence and it is not a find-and-replace on the transcript.

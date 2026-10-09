@@ -42,6 +42,10 @@ class NotInvocable(RuntimeError):
         super().__init__(f"{model_id} rejected the call ({code})")
 
 
+class NoSpeech(RuntimeError):
+    """The recording is long enough to hold speech but nothing was transcribed."""
+
+
 class AnalysisCancelled(Exception):
     """The meeting was cancelled while its analysis was running. Not a failure."""
 

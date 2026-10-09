@@ -16,7 +16,39 @@ def dual(luna_label: str | None, sol_label: str | None) -> str:
     return "gap"
 
 
+# Motivation vs Logic
+# Motivation: "supported" needs both models to agree, which kept most substantive,
+# verbatim-quoted statements (figures, procedures, positions) out of everything a reader
+# sees. The owner chose to admit a second, visibly marked tier.
+# Logic: status keeps its meaning (the gate, review queue and MCP brief are unchanged).
+# confidence adds: confirmed = supported; likely = the quote sits verbatim in exactly one
+# span, at least one model says entails, neither says contradicts, no verified
+# contradicting quote, and the numbers in the claim appear in that span; contradicted;
+# otherwise unverified. A failed counter-search bookkeeping check alone does not demote a
+# claim below likely, because it is not evidence against it.
+def confidence_of(claim: Claim, spans: list[Span]) -> str:
+    if claim.status == "supported":
+        return "confirmed"
+    if claim.status == "contradicted" or claim.contradicting_quote:
+        return "contradicted"
+    labels = {claim.luna_label, claim.sol_label}
+    if "contradicts" in labels:
+        return "contradicted"
+    if not claim.span_id or "entails" not in labels:
+        return "unverified"
+    span = next((item for item in spans if item.id == claim.span_id), None)
+    if span is None or not grounded(claim.proposition, span.text):
+        return "unverified"
+    return "likely"
+
+
 def finalize_claim(claim: Claim, spans: list[Span], *, duration_ms: int) -> Claim:
+    _finalize(claim, spans, duration_ms=duration_ms)
+    claim.confidence = confidence_of(claim, spans)
+    return claim
+
+
+def _finalize(claim: Claim, spans: list[Span], *, duration_ms: int) -> Claim:
     if claim.evidence_kind == "uncited_note":
         claim.status = "unresolved"
         return claim

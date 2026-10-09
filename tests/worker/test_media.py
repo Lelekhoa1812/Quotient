@@ -144,3 +144,26 @@ def test_a_picture_only_file_reports_no_audio_not_unreadable(tmp_path):
     )
     with pytest.raises(NoAudioTrack):
         write_pcm(source, tmp_path / "out.pcm")
+
+
+def test_speakers_attach_by_largest_overlap_and_mark_shared_spans():
+    from graph.span import Span
+    from media.diarize import attach_speakers
+
+    spans = [
+        Span(id="a", meeting_id="m", kind="speech", start_ms=0, end_ms=10_000, raw_text="x"),
+        Span(id="b", meeting_id="m", kind="speech", start_ms=10_000, end_ms=20_000, raw_text="y"),
+        Span(id="c", meeting_id="m", kind="silence", start_ms=20_000, end_ms=21_000, raw_text=""),
+    ]
+    turns = [(0, 9_000, "spk_0"), (9_000, 14_000, "spk_1"), (14_000, 20_000, "spk_0")]
+    attach_speakers(spans, turns)
+    assert [span.speaker_hypothesis_id for span in spans] == ["spk_0", "spk_0", None]
+    assert spans[0].overlap is False and spans[1].overlap is True  # spk_1 spoke 40% of b
+
+
+def test_diarization_is_skipped_cleanly_without_an_interpreter(monkeypatch):
+    from media import diarize
+
+    monkeypatch.setattr(diarize, "_python", lambda: None)
+    assert diarize.diarize_pcm(b"\\x00\\x00" * 16000) is None
+    diarize.attach_speakers([], None)

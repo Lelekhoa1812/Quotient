@@ -41,6 +41,9 @@ PINS = {
     "lens_dependency": "llm",
     "lens_question": "slm",
     "synthesis": "llm",
+    "digest": "llm",
+    "digest_review": "llm",
+    "answer_check": "slm",
     "dissent": "slm",
     "chart": "slm",
     # Motivation vs Logic
@@ -255,6 +258,9 @@ def test_skipped_dimension_fails() -> None:
         raise AssertionError("a missing dimension was not detected")
 
 
+TOOL_NAMES = {"open_span", "read_context"}
+
+
 def test_prompt_files_match_registry() -> None:
     routes = routes_by_id(load_registry())
     expected = {f"{entry['prompt_id']}.yaml" for entry in routes.values()}
@@ -284,8 +290,11 @@ def test_prompt_files_match_registry() -> None:
         if not isinstance(prompt["tools"], list):
             raise AssertionError(entry["route"])
         for tool in prompt["tools"]:
-            if tool["name"] != "open_span":
+            if tool["name"] not in TOOL_NAMES:
                 raise AssertionError(tool["name"])
+            # read_context is reference-document access; only the two walkaway passes may declare it.
+            if tool["name"] == "read_context" and entry["route"] not in {"digest", "digest_review"}:
+                raise AssertionError((entry["route"], tool["name"]))
             parameters = dict(tool["parameters"])
             parameters["$schema"] = DRAFT
             compile_schema(parameters)
