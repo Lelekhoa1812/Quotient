@@ -28,7 +28,7 @@ nohup .venv/bin/python scripts/bench_meeting.py derivatives/sbc-checkpoint.mp4 r
 Prompts are read per run, so no restart is needed after a prompt edit. `derivatives/sbc-checkpoint.mp4` is a scratch copy of the owner's SBC upload from local MinIO and can be deleted.
 
 ## How to score it (same method as Rounds 12 and 13, so numbers compare)
-1. Build each recording's transcript and walkaway text from the API projection, mapping `spk_N` to the names in `digest.speakers` or "Speaker N+1". **Print an empty decider or owner as nothing, not "unknown"**: my first formatter printed "unknown", the evaluator scored that, and Round 13's attribution result was partly my error (see the correction in the ledger).
+1. Build each recording's transcript and walkaway text with `scripts/build_eval_inputs.py` (it reads the API projection, so read-time filters are included, and prints an empty owner or decider as "(not stated)", the portal's meaning). Example: `/tmp/quotient-worker-venv/bin/python scripts/build_eval_inputs.py /tmp/eval sbc=<meeting id> sales=<meeting id>`. **Do not print an empty owner or decider as "unknown"**: my first formatter did, an evaluator scored that, and Round 13's attribution result was partly my error (see the correction in the ledger).
 2. One blind Haiku evaluator per recording: it writes its own eight key points and an exhaustive action list from the transcript before opening the walkaway, classifies every listed action as valid, questionable or wrong, and scores faithfulness, completeness, usefulness, actions, attribution and noise from 1 to 5.
 3. Compare with the Round 13 table in the ledger.
 
