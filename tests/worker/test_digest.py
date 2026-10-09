@@ -444,3 +444,12 @@ def test_an_action_owner_must_have_spoken_a_cited_line_or_be_the_one_promising()
         ("Send the notes", "spk_2"),
         ("Send the notes again", None),
     ]
+
+
+def test_a_refusal_is_not_a_first_person_promise_and_a_contraction_is():
+    from graph.digest import _PROMISE
+
+    for promise in ("I'll send it", "We’ll send it", "I can send it", "I'm gonna send it", "We're going to ship it"):
+        assert _PROMISE.search(promise), promise
+    for refusal in ("I can't make Friday", "We will not do that", "We’ll never"):
+        assert not _PROMISE.search(refusal), refusal

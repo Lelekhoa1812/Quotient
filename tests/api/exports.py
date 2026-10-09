@@ -558,3 +558,24 @@ def test_a_stored_action_owner_who_never_spoke_the_cited_line_is_corrected_or_cl
     ]}
     assert [(a["task"], a["assignee"]) for a in _digest(stored, spans)["actions"]] == [("Classify", "spk_1"), ("Send the notes", "spk_2"), ("Send again", None)]
     assert stored["actions"][0]["assignee"] == "spk_2"  # the stored digest itself is not changed
+
+
+def test_positional_wording_is_removed_only_when_it_is_about_the_transcript_and_a_refusal_is_not_a_promise():
+    from quotient.graph.gate import _PROMISE, _unleak
+
+    # Ordinary English in a lecture about code, charts or a protocol stays.
+    for kept in (
+        "Revenue is shown on the line labelled Q3 in the chart, which rose 12%.",
+        "Lee proposes a retry in the following turn of the protocol handshake.",
+        "The panel discusses the continuing argument over funding.",
+        "The lecturer walks through the code; in the next line of the loop the counter increments.",
+    ):
+        assert _unleak(kept) == kept
+    # Commentary about the transcript's own layout goes, with the rest of the sentence kept.
+    assert _unleak("In the following line, Speaker 7 completes the thought; the team agrees to ship Friday.") == "the team agrees to ship Friday."
+    assert _unleak("The continuing argument under Speaker 8 is that costs rise.") == ""
+    # A promise binds an owner; a refusal does not.
+    for promise in ("I'll send it", "We’ll send it", "I can send it", "I will.", "I'm gonna send it", "We're going to ship it"):
+        assert _PROMISE.search(promise), promise
+    for refusal in ("I can't make Friday", "I can’t", "We will not do that", "We’ll never"):
+        assert not _PROMISE.search(refusal), refusal

@@ -58,7 +58,7 @@ def _due(value: object) -> str | None:
 
 
 # A first-person promise in a transcript: "we will", "i'll", "i am going to". Used to say who owns a task when only one voice spoke it.
-_PROMISE = re.compile(r"\b(?:i|we)(?:'ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna)\b", re.I)
+_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+(?:not|never)\b)", re.I)
 
 
 def _clean_item(item: dict) -> dict:

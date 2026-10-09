@@ -732,14 +732,27 @@ _DIGEST_LISTS = (
 # Commentary about the transcript's own mechanics ("the continuing argument under Speaker 8", "completed in the following
 # line labeled Speaker 7") reads as nonsense to someone who never saw the lines. The writer is told not to produce it; this
 # drops the clause that does, for meetings analysed before that rule and for any that slip past it.
-_LEAK = re.compile(
-    r"\b(?:the\s+)?(?:continuing|continued|continuation)\s+(?:argument|statement|remark|point|line)s?\b"
-    r"|\b(?:in|on|from|by)\s+the\s+(?:following|next|previous|preceding|prior)\s+(?:line|span|segment|turn)\b"
-    r"|\bline\s+labell?ed\b|\blabell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b|\bspan[_ ]?ids?\b",
+# The unambiguous marks: no meeting talks about "span ids", and a "line labelled Speaker 3" is the transcript's own layout.
+_LEAK_PLAIN = re.compile(
+    r"\bspan[_ ]?ids?\b|\bline\s+labell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b|\blabell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b",
     re.I,
 )
+# Positional wording is ordinary English in a lecture about code or a protocol ("in the next line of the loop", "the continuing
+# argument over funding"), so it counts as commentary only when the same clause also names a speaker.
+_LEAK_POSITION = re.compile(
+    r"\b(?:the\s+)?(?:continuing|continued|continuation)\s+(?:argument|statement|remark|point|line)s?\b"
+    r"|\b(?:in|on|from|by)\s+the\s+(?:following|next|previous|preceding|prior)\s+(?:line|span|segment|turn)\b",
+    re.I,
+)
+_SPEAKER_NAMED = re.compile(r"\b(?:speaker\s*\d+|spk_\d+)\b", re.I)
+
+
+def _leaks(text: str) -> bool:
+    return bool(_LEAK_PLAIN.search(text)) or bool(_LEAK_POSITION.search(text) and _SPEAKER_NAMED.search(text))
+
+
 # A first-person promise: "we will", "i'll". Mirrors the worker, which applies the same rule to new analyses.
-_PROMISE = re.compile(r"\b(?:i|we)(?:'ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna)\b", re.I)
+_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+(?:not|never)\b)", re.I)
 # A choice somebody describes from the past is background, not something these participants settled.
 _HISTORY = re.compile(r"^\s*(?:historically|in the past|back then|years ago)\b[\s,]", re.I)
 _PROSE_KEYS = ("text", "statement", "position", "task", "question", "answer", "explanation", "gist", "what", "reason")
@@ -747,10 +760,10 @@ _PROSE_KEYS = ("text", "statement", "position", "task", "question", "answer", "e
 
 def _unleak(value: str) -> str:
     """Remove every clause that talks about the transcript itself; keep the rest of the sentence."""
-    if not _LEAK.search(value):
+    if not _leaks(value):
         return value
     clauses = re.split(r"(?<=[;])\s+", value)
-    kept = [clause for clause in clauses if not _LEAK.search(clause)]
+    kept = [clause for clause in clauses if not _leaks(clause)]
     text = " ".join(kept).strip().rstrip(";,").strip()
     if text and text[-1] not in ".!?":
         text += "."
