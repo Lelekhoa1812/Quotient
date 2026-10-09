@@ -321,13 +321,21 @@ class Port:
         self._lock_file = self._claim_store(state_path)
         resume_ids = []
         if state_path is not None and state_path.exists():
-            payload = json.loads(state_path.read_text(encoding="utf-8"))
-            rows = payload.get("meetings", []) if isinstance(payload, dict) else []
+            # Refuse, never repair: this file is rewritten whole on every save, so reading a damaged or differently shaped one as
+            # "empty" would silently erase every meeting in it. The file is left exactly as found.
+            where = f"The local meeting file {state_path}"
+            try:
+                payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except ValueError as exc:
+                raise ValueError(f"{where} is not valid JSON ({exc}). Repair it, or move it aside to start with no meetings.") from exc
+            if not isinstance(payload, dict):
+                raise ValueError(f"{where} must be a JSON object with a meetings list, not {type(payload).__name__}. It was left unchanged.")
+            rows = payload.get("meetings", [])
             if not isinstance(rows, list):
-                raise ValueError("local meeting state has an invalid meetings collection")
+                raise ValueError(f"{where} has an invalid meetings collection. It was left unchanged.")
             for row in rows:
                 if not isinstance(row, dict) or not isinstance(row.get("meeting_id"), str):
-                    raise ValueError("local meeting state contains an invalid row")
+                    raise ValueError(f"{where} contains a row that is not a meeting object with a meeting_id. It was left unchanged.")
                 if row.get("status") in {"queued", "working"}:
                     # Bugs vs Fixes
                     # Bug: Every restart re-queued every unfinished row with no limit, so a
@@ -718,7 +726,7 @@ class Port:
             if scope == "hypothesis" and hypothesis:
                 # Locked: a name a person gave a voice survives any later analysis of the recording.
                 row.setdefault("speaker_names", {})[hypothesis] = display_name
-            row["revisions"].append(
+            row.setdefault("revisions", []).append(
                 {
                     "span_id": span_id,
                     "scope": scope,
@@ -758,7 +766,7 @@ class Port:
             names = row.setdefault("speaker_names", {})
             names.pop(gone, None)
             names[keep] = display_name
-            row["revisions"].append(
+            row.setdefault("revisions", []).append(
                 {
                     "span_id": span_id,
                     "scope": "merge",
@@ -778,7 +786,7 @@ class Port:
             if span is None:
                 _raise("not_found", "Span not found.")
             span["text"] = text
-            row["revisions"].append({"span_id": span_id, "text": text, "at": _now()})
+            _record_text_edit(row, span_id, text)
             row["updated_at"] = _now()
             self._save_locked()
             return copy.deepcopy(row)
@@ -1050,6 +1058,20 @@ class Port:
         if row is None or row["subject"] != subject:
             _raise("not_found", "Meeting not found.")
         return row
+
+
+MAX_REVISIONS = 5000
+
+
+def _record_text_edit(row: dict, span_id: str, text: str) -> None:
+    """Keep the newest correction per span (re-analysis replays only that) and bound the list, so repeated edits cannot grow the ledger file
+    that is rewritten whole on every save."""
+    revisions = [
+        item for item in row.get("revisions") or []
+        if not (isinstance(item, dict) and item.get("span_id") == span_id and "text" in item and "scope" not in item)
+    ]
+    revisions.append({"span_id": span_id, "text": text, "at": _now()})
+    row["revisions"] = revisions[-MAX_REVISIONS:]
 
 
 def apply_text_edits(row: dict, spans: list[dict]) -> None:

@@ -250,3 +250,40 @@ def test_a_rejected_sign_in_gets_an_actionable_sentence():
     module = _port_module()
     text = module._public_failure(RuntimeError("sonic HTTP 403: check the configured AWS identity, Sonic model access, and bidirectional-stream permission"))
     assert "Sign in to AWS again" in text and "HTTP" not in text
+
+
+def test_repeated_text_edits_keep_one_revision_per_span_and_the_ledger_stays_small(tmp_path):
+    module = _port_module()
+    port = module.Port(None, None, None, None, state_path=tmp_path / "meetings.json")
+    port._rows["m1"] = {
+        "meeting_id": "m1", "subject": "me", "status": "needs_review", "idempotency_key": None, "artifacts": {"exports": "not_run"},
+        "revisions": [{"span_id": "s1", "scope": "span", "display_name": "Lee", "at": "t"}],
+        "spans": [{"span_id": "s1", "text": "a"}, {"span_id": "s2", "text": "b"}],
+    }
+    for number in range(300):
+        port.revise_text("m1", "me", "s1", f"edit {number}")
+    port.revise_text("m1", "me", "s2", "other")
+    revisions = port._rows["m1"]["revisions"]
+    assert [(item["span_id"], item.get("text")) for item in revisions] == [("s1", None), ("s1", "edit 299"), ("s2", "other")]  # the rename is kept
+    spans = [{"span_id": "s1", "text": "model"}, {"span_id": "s2", "text": "model"}]
+    module.apply_text_edits(port._rows["m1"], spans)
+    assert [span["text"] for span in spans] == ["edit 299", "other"]  # the newest correction still wins on re-analysis
+    assert (tmp_path / "meetings.json").stat().st_size < 3000
+
+
+def test_a_ledger_that_is_damaged_or_the_wrong_shape_is_refused_and_left_exactly_as_found(tmp_path):
+    import pytest
+
+    module = _port_module()
+    good = {"meeting_id": "m1", "subject": "me", "status": "needs_review", "artifacts": {}, "spans": [], "revisions": []}
+    bad_files = {
+        "list": json.dumps([good]),  # was read as empty and then rewritten as empty: every meeting silently erased
+        "null": "null", "string": '"x"', "truncated": '{"version": 1, "meetings": [{"meeting_id": "m1", "sub',
+        "empty": "", "collection": '{"meetings": {"a": 1}}', "row": json.dumps({"meetings": [good, "oops"]}),
+    }
+    for name, body in bad_files.items():
+        state = tmp_path / f"{name}.json"
+        state.write_text(body, encoding="utf-8")
+        with pytest.raises(ValueError, match=str(state)):
+            module.Port(None, None, None, None, state_path=state)
+        assert state.read_text(encoding="utf-8") == body, name
