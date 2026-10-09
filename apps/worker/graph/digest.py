@@ -251,10 +251,12 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
         if start is None or not text(item.get("title")):
             continue
         end = end or start
-        start_ms, end_ms = start.start_ms, max(end.end_ms or end.start_ms, start.start_ms)
+        # A named end line that comes before the start line would leave a zero-length topic; it covers at least its own first line.
+        start_ms, end_ms = start.start_ms, max(end.end_ms or end.start_ms, start.end_ms or start.start_ms)
         chapters.append({"title": text(item["title"]), "gist": text(item.get("gist")),
                          "start_span_id": start.id, "start_ms": start_ms, "end_ms": end_ms})
     chapters.sort(key=lambda row: row["start_ms"])
+    chapters = [row for index, row in enumerate(chapters) if index == 0 or row["start_ms"] != chapters[index - 1]["start_ms"]]  # two topics cannot start on one line
     for current, following in zip(chapters, chapters[1:]):
         # Topics run until the next one starts, so the timeline has no unlabelled stretch.
         current["end_ms"] = following["start_ms"]
@@ -408,4 +410,16 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
         if ids and source and source.count("\n") <= 40:
             out["diagram"] = {"kind": diagram.get("kind") if diagram.get("kind") in {"flowchart", "sequence"} else "flowchart",
                               "title": text(diagram.get("title")), "mermaid": source, "span_ids": ids, "start_ms": when(ids)}
+    # The same point written twice (or once per window) is one item: keep the first of each.
+    for key, fields in (("summary", ("text",)), ("decisions", ("statement",)), ("actions", ("task",)), ("key_figures", ("value", "what")),
+                        ("open_questions", ("question",)), ("risks", ("risk",)), ("concepts", ("term",)), ("perspectives", ("speaker", "position")),
+                        ("disagreements", ("topic",))):
+        seen, unique = set(), []
+        for row in out.get(key) or []:
+            sig = tuple(squash(str(row.get(field) or "")) for field in fields)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            unique.append(row)
+        out[key] = unique
     return out

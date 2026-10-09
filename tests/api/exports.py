@@ -620,3 +620,30 @@ def test_span_id_in_running_prose_stays_and_named_speakers_count_as_commentary()
         {"speaker": "spk_1", "text": "In the next line of the loop the counter increments.", "span_ids": ["s1"], "start_ms": 0},
     ]}
     assert [row["text"] for row in _digest(stored, spans)["perspectives"]] == ["Costs will rise.", "In the next line of the loop the counter increments."]
+
+
+def test_read_time_cleaning_keeps_what_is_left_and_never_leaves_an_empty_answer_or_one_sided_dispute():
+    from quotient.graph.gate import _digest
+
+    spans = {s: {"kind": "speech", "start_ms": i * 5000, "end_ms": i * 5000 + 4000} for i, s in enumerate(("s1", "s2", "s3"))}
+    stored = {
+        "speakers": [],
+        "chapters": [
+            {"title": "Pricing", "gist": "The continuing argument under Speaker 8 is about cost.", "start_span_id": "s1", "start_ms": 0, "end_ms": 15000},
+            {"title": "Owners", "gist": "Who owns it.", "start_span_id": "s2", "start_ms": 5000, "end_ms": 30000},
+        ],
+        "open_questions": [{"question": "Who owns it?", "asked_span_id": "s1", "answered": True, "answer": "Completed in the following line labelled Speaker 7.", "answer_span_id": "s2", "answer_ms": 5000}],
+        "disagreements": [
+            {"topic": "t", "positions": [{"speaker": "spk_0", "position": "wait", "span_ids": ["s1"]}, {"speaker": "spk_1", "position": "The continuing argument under Speaker 8 repeats.", "span_ids": ["s2"]}], "span_ids": ["s1"]},
+            {"topic": "u", "positions": [{"speaker": "spk_0", "position": "go", "span_ids": ["s1"]}, {"speaker": "spk_1", "position": "no", "span_ids": ["s2"]}], "span_ids": ["s1"]},
+        ],
+        "risks": [{"risk": "Per span_ids s4 the vendor may slip", "span_ids": ["s1"]}, {"risk": "The vendor may slip.", "span_ids": ["s1"]}],
+        "concepts": [{"term": "Pivot span_ids: [s1]", "explanation": "x", "span_ids": ["s1"]}],
+    }
+    out = _digest(stored, spans)
+    # A topic whose gist is only commentary keeps its title and the timeline stays whole; an overlap is clipped to the next start, and the last topic stops at the last spoken line.
+    assert [(c["title"], c["gist"], c["start_ms"], c["end_ms"]) for c in out["chapters"]] == [("Pricing", "", 0, 5000), ("Owners", "Who owns it.", 5000, 14000)]
+    question = out["open_questions"][0]
+    assert (question["answered"], question["answer"], question["answer_span_id"]) == (False, None, None)
+    assert [d["topic"] for d in out["disagreements"]] == ["u"]  # one side left is not a disagreement
+    assert [r["risk"] for r in out["risks"]] == ["The vendor may slip."] and out["concepts"] == []

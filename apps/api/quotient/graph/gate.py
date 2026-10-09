@@ -761,7 +761,8 @@ def _leaks(text: str, names: tuple = ()) -> bool:
 _PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+never\b|\s+not(?!\s+only\b))", re.I)
 # A choice somebody describes from the past is background, not something these participants settled.
 _HISTORY = re.compile(r"^\s*(?:historically|in the past|back then|years ago)\b[\s,]", re.I)
-_PROSE_KEYS = ("text", "statement", "position", "task", "question", "answer", "explanation", "gist", "what", "reason")
+# The first key present is the row's main text: a chapter whose gist is only commentary keeps its title, a concept its term.
+_PROSE_KEYS = ("title", "term", "text", "statement", "position", "task", "question", "risk", "answer", "explanation", "gist", "what", "reason")
 
 
 def _unleak(value: str, names: tuple = ()) -> str:
@@ -781,11 +782,17 @@ def _unleak_row(row: dict, names: tuple = ()) -> bool:
     main = next((key for key in _PROSE_KEYS if isinstance(row.get(key), str) and row[key].strip()), None)
     for key in _PROSE_KEYS:
         if isinstance(row.get(key), str):
+            before = row[key]
             row[key] = _unleak(row[key], names)
+            if key == "answer" and before.strip() and not row[key] and row.get("answered") is True:
+                # The reply was only commentary: the question stays, and is unanswered rather than "answered" with nothing.
+                row.update({"answered": False, "answer": None, "answer_span_id": None, "answer_ms": None})
     positions = row.get("positions")
     if isinstance(positions, list):
         copies = [dict(position) for position in positions if isinstance(position, dict)]
         row["positions"] = [position for position in copies if _unleak_row(position, names)]
+        if len(row["positions"]) < 2:
+            return False  # one side left is not a disagreement
     return main is None or bool(row.get(main))
 
 
@@ -838,8 +845,8 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
         key=lambda row: row["start_ms"],
     )
     for current, following in zip(chapters, chapters[1:]):
-        if isinstance(current.get("end_ms"), (int, float)) and current["end_ms"] < following["start_ms"]:
-            current["end_ms"] = following["start_ms"]
+        if isinstance(current.get("end_ms"), (int, float)) and current["end_ms"] != following["start_ms"]:
+            current["end_ms"] = following["start_ms"]  # run until the next topic starts: no gap after a dropped one, no overlap in a stored one
     # And none runs past the last spoken line (a stored digest may round its last topic up to the minute).
     ends = [span.get("end_ms") for span in spans_by_id.values() if isinstance(span, dict) and span.get("kind") == "speech" and isinstance(span.get("end_ms"), (int, float))]
     if chapters and ends:

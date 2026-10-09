@@ -495,3 +495,17 @@ def test_a_key_figure_with_no_number_in_it_cannot_ground_against_any_line():
                            {"value": "1000", "what": "orders a day", "span_id": "s1"}]}
     figures = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["key_figures"]
     assert [figure["value"] for figure in figures] == ["1000"]
+
+
+def test_repeated_items_collapse_and_two_topics_cannot_start_on_one_line_or_have_no_length():
+    raw = _raw(
+        summary=[{"text": "We pick about one thousand orders every day.", "span_ids": ["s1"]}, {"text": "We pick about ONE thousand orders every day!", "span_ids": ["s1"]}],
+        chapters=[
+            {"title": "A", "gist": "g", "start_span_id": "s1", "end_span_id": "s1"},
+            {"title": "A again", "gist": "g", "start_span_id": "s1", "end_span_id": "s3"},
+            {"title": "B", "gist": "g", "start_span_id": "s4", "end_span_id": "s1"},  # names an end line before its own start
+        ],
+    )
+    out = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)
+    assert len(out["summary"]) == 1
+    assert [(c["title"], c["start_ms"], c["end_ms"]) for c in out["chapters"]] == [("A", 0, 13000), ("B", 13000, 17000)]
