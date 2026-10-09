@@ -14,7 +14,7 @@ from decimal import Decimal
 # could look alike.
 # Fix: Grouped digits (with or without a sign or currency) are one token; _digit removes the commas.
 _TOKEN = re.compile(
-    r"\d{1,2}:\d{2}(?::\d{2})?|[$€£]-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?[$€£]?\d+(?:\.\d+)?%?|[A-Za-z]+(?:-[A-Za-z]+)?(?:'[A-Za-z]+)?|%"
+    r"\d{1,2}:\d{2}(?::\d{2})?|[$€£]-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?:(?<![\d%])-)?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?:(?<![\d%])-)?[$€£]?\d+(?:\.\d+)?%?|[A-Za-z]+(?:-[A-Za-z]+)?(?:'[A-Za-z]+)?|%"
 )
 
 _ONES = {
@@ -29,6 +29,7 @@ _WORDS = {**_ONES, **_TENS}
 _UP = {"increase", "increased", "increasing", "up", "higher", "above", "gain", "gained", "grew", "rise", "rose", "rising"}
 _DOWN = {"decrease", "decreased", "decreasing", "down", "lower", "below", "drop", "dropped", "fell", "fall", "falling", "decline", "declined"}
 _UNSETTLED = {"couple", "dozen", "few"}
+_SCALES = {"hundred": 100, "thousand": 1_000, "k": 1_000, "million": 10**6, "billion": 10**9, "bn": 10**9, "trillion": 10**12}
 _CURRENCY = {"usd": "usd", "eur": "eur", "gbp": "gbp", "$": "usd", "€": "eur", "£": "gbp", "dollar": "usd", "dollars": "usd", "euro": "eur", "euros": "eur", "pound": "gbp", "pounds": "gbp"}
 
 
@@ -76,6 +77,8 @@ def scan(text: str) -> NumberScan:
             index += 1
             continue
         if word is not None:
+            scale, word_end = _scale(tokens, word_end)  # "fifty k" is 50,000, like "50k"; "million" and "thousand" were read by the word loop
+            word = word * scale
             unit, consumed_until = _unit_after(tokens, word_end)
             direction = _direction(tokens, index, consumed | set(range(index, consumed_until)))
             quantities.append(Quantity(value=word, unit=unit, direction=direction))
@@ -89,10 +92,12 @@ def scan(text: str) -> NumberScan:
             index += 1
             continue
         value, sign, prefix_unit, suffix_percent = number
+        scale, after = (Decimal(1), index + 1) if suffix_percent else _scale(tokens, index + 1)
+        value = value * scale
         unit = "percent" if suffix_percent else (prefix_unit or "bare")
-        consumed_until = index + 1
+        consumed_until = after
         if unit == "bare":
-            unit, consumed_until = _unit_after(tokens, index + 1)
+            unit, consumed_until = _unit_after(tokens, after)
             if unit == "bare" and prefix_unit:
                 unit = prefix_unit
         direction = -1 if sign else _direction(tokens, index, consumed | set(range(index, consumed_until)))
@@ -144,7 +149,7 @@ def _word_number(tokens: list[str], index: int) -> tuple[Decimal | None, int, bo
         if left in _WORDS:
             return None, index, True
         return None, index, False
-    if token.lower() not in _WORDS and token.lower() not in {"hundred", "thousand"}:
+    if token.lower() not in _WORDS and token.lower() not in {"hundred", "thousand", "million", "billion", "trillion"}:
         return None, index, False
     total = 0
     current = 0
@@ -170,8 +175,8 @@ def _word_number(tokens: list[str], index: int) -> tuple[Decimal | None, int, bo
             seen = True
             cursor += 1
             continue
-        if word == "thousand":
-            total += (current or 1) * 1000
+        if word in {"thousand", "million", "billion", "trillion"}:
+            total += (current or 1) * _SCALES[word]
             current = 0
             seen = True
             cursor += 1
@@ -183,6 +188,13 @@ def _word_number(tokens: list[str], index: int) -> tuple[Decimal | None, int, bo
     if not seen:
         return None, index, False
     return Decimal(total + current), cursor, False
+
+
+def _scale(tokens: list[str], index: int) -> tuple[Decimal, int]:
+    """A magnitude word after a digit: "5 million", "$50k". Without it "$5 million" and "$5 billion" would be the same number."""
+    if index < len(tokens) and tokens[index].lower() in _SCALES:
+        return Decimal(_SCALES[tokens[index].lower()]), index + 1
+    return Decimal(1), index
 
 
 def _unit_after(tokens: list[str], index: int) -> tuple[str, int]:

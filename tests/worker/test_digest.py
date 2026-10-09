@@ -471,3 +471,27 @@ def test_a_model_that_sends_positions_as_a_number_or_text_cannot_lose_the_digest
                "disagreements": [{"topic": "t", "positions": damaged}]}
         out = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)
         assert out is not None and out["disagreements"] == [] and out["summary"], damaged
+
+
+def test_a_magnitude_word_is_part_of_the_number_it_follows():
+    from graph.numbers import grounded
+
+    for claim, span in (
+        ("$5 million", "We need $5 million"), ("1,500,000", "1.5 million users"), ("$50k", "fifty thousand dollars"),
+        ("50k in fake money", "they get like fifty k"), ("5 million", "five million"), ("2 hundred", "two hundred"),
+        ("10-20 days", "10 to 20 days"),
+    ):
+        assert grounded(claim, span), (claim, span)
+    for claim, span in (
+        ("$5 million", "We need $5 billion"), ("1.5 billion", "1.5 million users"), ("$50k", "it costs $50"),
+        ("a million dollars", "no figures here"), ("$5 million", "five billion dollars"),
+    ):
+        assert not grounded(claim, span), (claim, span)
+
+
+def test_a_key_figure_with_no_number_in_it_cannot_ground_against_any_line():
+    raw = {"title": "T", "summary": [{"text": "We pick about one thousand orders every day.", "span_ids": ["s1"]}],
+           "key_figures": [{"value": "half", "what": "of the orders", "span_id": "s1"}, {"value": "negative", "what": "growth", "span_id": "s1"},
+                           {"value": "1000", "what": "orders a day", "span_id": "s1"}]}
+    figures = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["key_figures"]
+    assert [figure["value"] for figure in figures] == ["1000"]

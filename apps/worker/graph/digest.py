@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 
-from graph.numbers import grounded
+from graph.numbers import grounded, scan
 from graph.prose import _scrub
 
 _EVIDENCE = {"confirmed": 2, "likely": 1}
@@ -95,7 +95,8 @@ def _clean(raw: dict) -> dict:
 
 
 def _has_quantity(value: str) -> bool:
-    return bool(re.search(r"\d", value) or _NUMBER_WORDS.search(value))
+    """True when the figure reads as at least one number the span can be checked for; "half" or "negative" alone cannot, and would pass any span."""
+    return bool(scan(value).quantities)
 
 
 def _words(value: str) -> set[str]:
