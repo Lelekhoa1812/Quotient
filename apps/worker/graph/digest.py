@@ -53,6 +53,14 @@ _TIME_CUE = re.compile(
     r"mon|tue|tues|wed|thu|thur|thurs|fri)\b", re.I)
 
 
+_DATE_NAMES = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december)\b", re.I)
+
+
+def _due_supported(due: str | None, nearby: str) -> bool:
+    """A weekday or month in a due phrase has to be in the lines it came from (or the two either side): a date nobody said is worse than none."""
+    return all(name.lower() in nearby.lower() for name in _DATE_NAMES.findall(due or ""))
+
+
 def _due(value: object) -> str | None:
     due = value.strip() if isinstance(value, str) else ""
     return due if due and _TIME_CUE.search(due) else None
@@ -99,8 +107,16 @@ def _has_quantity(value: str) -> bool:
     return bool(scan(value).quantities)
 
 
+# Function words: two actions that both say "that" or "with" share nothing.
+_STOP = frozenset(
+    "that this these those with from have has had will would could should shall they them their then than there where when what which "
+    "while been being were into onto over under your yours ours about after before also just only very more most some such each both "
+    "other another same still like make made need needs want wants going gonna".split()
+)
+
+
 def _words(value: str) -> set[str]:
-    return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if len(word) > 3}
+    return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if len(word) > 3 and word not in _STOP}
 
 
 def _clock(ms: int) -> str:
@@ -174,6 +190,14 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
         if not isinstance(action_id, str) or action_id not in action_ids or action_id in linked:
             return None  # one ledger action backs one digest action
         return action_id if _words(str(item.get("task") or "")) & _words(statements[action_id]) else None
+
+    ordered = sorted(by_span.values(), key=lambda span: span.start_ms)
+    where = {span.id: index for index, span in enumerate(ordered)}
+
+    def neighbours(ids) -> list[str]:
+        """The cited lines and the two on either side of each, in transcript order."""
+        keep = {j for i in ids for j in range(where[i] - 2, where[i] + 3) if 0 <= j < len(ordered)}
+        return [ordered[j].id for j in sorted(keep)]
 
     def cite(ids) -> list[str]:
         return [item for item in dict.fromkeys(ids or []) if isinstance(item, str) and item in by_span]
@@ -308,8 +332,6 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
         if kept and text(item.get("task")):
             ids, claim_ids, level = kept
             link = linked_action(item)
-            if link:
-                linked.add(link)
             # The model's field is `owner`; the output calls it `assignee` because the API strips any key named owner.
             # The owner must be a voice that spoke one of the cited lines. When it was not, one voice making a
             # first-person promise in those lines owns it; otherwise no owner is stated, because a wrong name is worse.
@@ -320,8 +342,15 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
                 assignee = None
             if assignee is None and len(heard) == 1 and promised:
                 assignee = next(iter(heard))
+            if not ordinary and assignee is None:
+                continue  # outside an ordinary meeting an action needs a named owner, and the check above may have removed the model's
+            if link:
+                linked.add(link)
+            due = _due(text(item.get("due")))
+            if due and not _due_supported(due, " ".join(by_span[i].text or "" for i in neighbours(ids))):
+                due = None
             out_actions.append({"task": text(item["task"]), "assignee": assignee,
-                                "due": _due(text(item.get("due"))), "agreed": item.get("agreed") is True,
+                                "due": due, "agreed": item.get("agreed") is True,
                                 "action_id": link,
                                 "span_ids": ids, "claim_ids": claim_ids, "basis": level, "start_ms": when(ids)})
     out["actions"] = out_actions

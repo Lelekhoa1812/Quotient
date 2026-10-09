@@ -509,3 +509,31 @@ def test_repeated_items_collapse_and_two_topics_cannot_start_on_one_line_or_have
     out = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)
     assert len(out["summary"]) == 1
     assert [(c["title"], c["start_ms"], c["end_ms"]) for c in out["chapters"]] == [("A", 0, 13000), ("B", 13000, 17000)]
+
+
+def test_two_actions_that_share_only_function_words_are_not_linked():
+    raw = _raw(actions=[{"task": "Delete that database", "owner": "spk_0", "agreed": True, "span_ids": ["s1"], "action_id": "a0"}])
+    unrelated = ground_digest(raw, SPANS, [], [type("A", (), {"statement": "Ship that build"})()], SPEAKERS)
+    assert unrelated["actions"] == []
+    raw["actions"][0]["task"] = "Ship the build to the pilot site"
+    related = ground_digest(raw, SPANS, [], [type("A", (), {"statement": "Ship that build"})()], SPEAKERS)
+    assert [(a["task"], a["basis"]) for a in related["actions"]] == [("Ship the build to the pilot site", "likely")]
+
+
+def test_outside_an_ordinary_meeting_an_action_whose_owner_did_not_speak_the_line_is_dropped():
+    raw = _raw(content_type="interview", actions=[
+        {"task": "Send the notes", "owner": "spk_1", "agreed": True, "span_ids": ["s1"], "claim_ids": ["c-ok"]},   # spk_1 never spoke s1
+        {"task": "Send the report", "owner": "spk_1", "agreed": True, "span_ids": ["s2"], "claim_ids": ["c-ok"]},  # spk_1 spoke s2
+    ])
+    actions = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["actions"]
+    assert [(a["task"], a["assignee"]) for a in actions] == [("Send the report", "spk_1")]
+
+
+def test_a_weekday_in_a_due_phrase_must_have_been_said_near_the_lines_it_came_from():
+    raw = _raw(actions=[
+        {"task": "Confirm the order", "owner": "spk_1", "agreed": True, "span_ids": ["s4"], "claim_ids": ["c-likely"], "due": "Friday 5pm"},  # s4 says Monday
+        {"task": "Confirm the order now", "owner": "spk_1", "agreed": True, "span_ids": ["s4"], "claim_ids": ["c-likely"], "due": "by Monday"},
+        {"task": "Confirm the order soon", "owner": "spk_1", "agreed": True, "span_ids": ["s4"], "claim_ids": ["c-likely"], "due": "in two weeks"},
+    ])
+    actions = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)["actions"]
+    assert [(a["task"], a["due"]) for a in actions] == [("Confirm the order", None), ("Confirm the order now", "by Monday"), ("Confirm the order soon", "in two weeks")]
