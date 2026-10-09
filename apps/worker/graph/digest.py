@@ -49,7 +49,8 @@ _NUMBER_WORDS = re.compile(
 _TIME_CUE = re.compile(
     r"\d|\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|"
     r"may|june|july|august|september|october|november|december|week|weekend|month|year|quarter|morning|afternoon|evening|"
-    r"hour|hours|minute|minutes|day|days|eod|eow|end of)\b", re.I)
+    r"hour|hours|minute|minutes|day|days|eod|eow|end of|sprint|noon|midnight|midday|overnight|fortnight|asap|"
+    r"immediately|right away)\b", re.I)
 
 
 def _due(value: object) -> str | None:

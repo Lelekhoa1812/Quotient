@@ -453,3 +453,12 @@ def test_a_refusal_is_not_a_first_person_promise_and_a_contraction_is():
         assert _PROMISE.search(promise), promise
     for refusal in ("I can't make Friday", "We will not do that", "We’ll never"):
         assert not _PROMISE.search(refusal), refusal
+
+
+def test_a_due_phrase_needs_a_time_word_but_not_only_a_weekday_or_number():
+    from graph.digest import _due
+
+    for said in ("next sprint", "by noon", "ASAP", "in a fortnight", "by midnight", "overnight", "immediately", "Friday", "Q3", "end of the quarter"):
+        assert _due(said) == said, said
+    for not_a_time in ("Lee", "once approved", "after the demo", "before the board meets", "", None, 5):
+        assert _due(not_a_time) is None, not_a_time
