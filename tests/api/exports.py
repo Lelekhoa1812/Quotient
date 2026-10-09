@@ -579,3 +579,26 @@ def test_positional_wording_is_removed_only_when_it_is_about_the_transcript_and_
         assert _PROMISE.search(promise), promise
     for refusal in ("I can't make Friday", "I can’t", "We will not do that", "We’ll never"):
         assert not _PROMISE.search(refusal), refusal
+
+
+def test_a_damaged_stored_digest_loses_the_damaged_rows_and_never_the_meeting():
+    from quotient.graph.gate import _digest
+
+    spans = {"s1": {"kind": "speech", "start_ms": 0, "end_ms": 4000, "speaker_hypothesis_id": "spk_1", "text": "I will send it."}}
+    stored = {
+        "content_type": "meeting", "title": "T",
+        "summary": [{"text": "Damaged citations.", "span_ids": True}, {"text": "Fine.", "span_ids": ["s1"]}, {"text": "Float.", "span_ids": 1.5}],
+        "actions": [
+            {"task": "Unhashable owner", "assignee": {"a": 1}, "span_ids": ["s1"]},
+            {"task": "List owner", "assignee": ["spk_1"], "span_ids": ["s1"]},
+            {"task": "Fine", "assignee": "spk_1", "span_ids": ["s1"]},
+        ],
+        "open_questions": [{"question": "Q?", "asked_span_id": "s1", "answered": True, "answer": "A", "answer_span_id": ["s1"]}],
+        "disagreements": [{"topic": "t", "positions": "not a list", "span_ids": ["s1"]}, {"topic": "u", "positions": 3, "span_ids": ["s1"]}],
+        "decisions": 7, "chapters": "x",
+    }
+    out = _digest(stored, spans)
+    assert [row["text"] for row in out["summary"]] == ["Fine."]
+    assert [(row["task"], row["assignee"]) for row in out["actions"]] == [("Unhashable owner", "spk_1"), ("List owner", "spk_1"), ("Fine", "spk_1")]
+    assert out["open_questions"][0]["answered"] is False and out["open_questions"][0]["answer_span_id"] is None
+    assert out["decisions"] == [] and out["chapters"] == []

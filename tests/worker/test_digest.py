@@ -462,3 +462,11 @@ def test_a_due_phrase_needs_a_time_word_but_not_only_a_weekday_or_number():
         assert _due(said) == said, said
     for not_a_time in ("Lee", "once approved", "after the demo", "before the board meets", "", None, 5):
         assert _due(not_a_time) is None, not_a_time
+
+
+def test_a_model_that_sends_positions_as_a_number_or_text_cannot_lose_the_digest():
+    for damaged in (True, 3, 2.5, "wait", {"speaker": "spk_0"}, [None, "x", 4]):
+        raw = {"title": "T", "summary": [{"text": "We pick about one thousand orders every day.", "span_ids": ["s1"]}],
+               "disagreements": [{"topic": "t", "positions": damaged}]}
+        out = ground_digest(raw, SPANS, CLAIMS, [], SPEAKERS)
+        assert out is not None and out["disagreements"] == [] and out["summary"], damaged

@@ -793,11 +793,15 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
         return None
     known = {span_id for span_id, span in spans_by_id.items() if isinstance(span, dict)}
 
+    def listed(value: object) -> list:
+        """A stored field that should be a list; anything else (a damaged row) reads as empty, never as a crash."""
+        return value if isinstance(value, list) else []
+
     def cited(item: dict) -> bool:
         ids = [item.get(key) for key in ("span_id", "asked_span_id", "start_span_id") if item.get(key)]
-        ids += list(item.get("span_ids") or [])
-        for position in item.get("positions") or []:
-            ids += list(position.get("span_ids") or []) if isinstance(position, dict) else []
+        ids += listed(item.get("span_ids"))
+        for position in listed(item.get("positions")):
+            ids += listed(position.get("span_ids")) if isinstance(position, dict) else []
         return bool(ids) and all(isinstance(span_id, str) and span_id in known for span_id in ids)
 
     out: dict = {
@@ -808,16 +812,16 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
         rows = value.get(key) if isinstance(value.get(key), list) else []
         out[key] = [row for row in (dict(item) for item in rows if isinstance(item, dict) and cited(item)) if _unleak_row(row)]
     for row in out.get("actions") or []:
-        cited_spans = [spans_by_id[i] for i in row.get("span_ids") or [] if isinstance(spans_by_id.get(i), dict)]
+        cited_spans = [spans_by_id[i] for i in listed(row.get("span_ids")) if isinstance(i, str) and isinstance(spans_by_id.get(i), dict)]
         heard = {sp.get("speaker_hypothesis_id") for sp in cited_spans if sp.get("speaker_hypothesis_id")}
-        if row.get("assignee") and row["assignee"] not in heard:
+        if row.get("assignee") and not (isinstance(row["assignee"], str) and row["assignee"] in heard):
             promised = any(_PROMISE.search(str(sp.get("text") or sp.get("raw_text") or "")) for sp in cited_spans)
             row["assignee"] = next(iter(heard)) if len(heard) == 1 and promised else None
     out["decisions"] = [row for row in out.get("decisions") or [] if not _HISTORY.match(str(row.get("statement") or ""))]
     # A reply citing a line that is no longer on this graph loses the reply, not the question.
     for row in out.get("open_questions") or []:
         reply = row.get("answer_span_id")
-        if reply is not None and reply not in known:
+        if reply is not None and not (isinstance(reply, str) and reply in known):
             row.update({"answered": False, "answer": None, "answer_span_id": None, "answer_ms": None})
     # Topics stay contiguous after any chapter was dropped: each runs until the next one starts.
     chapters = sorted(

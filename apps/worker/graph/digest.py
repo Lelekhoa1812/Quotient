@@ -75,8 +75,9 @@ def _clean_item(item: dict) -> dict:
     for key in ("span_ids", "claim_ids"):
         value = item.get(key)
         item[key] = [entry for entry in value if isinstance(entry, str)] if isinstance(value, list) else []
-    if isinstance(item.get("positions"), list):
-        item["positions"] = [_clean_item(position) for position in item["positions"] if isinstance(position, dict)]
+    if "positions" in item:  # a number, boolean or string here would otherwise crash the loop that reads it and lose the digest
+        value = item["positions"]
+        item["positions"] = [_clean_item(position) for position in value if isinstance(position, dict)] if isinstance(value, list) else []
     return item
 
 
