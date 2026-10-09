@@ -177,3 +177,4 @@ def test_the_tested_prompt_wording_is_present_in_both_digest_prompts():
         assert "Coverage pass" not in body, name
         assert "a proposal that is only acknowledged" not in body, name
         assert "Signal only." not in body, name
+        assert "Vendor claims." not in body, name
