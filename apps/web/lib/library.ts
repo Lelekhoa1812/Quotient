@@ -11,6 +11,8 @@ export type LibraryRecord = {
   meetingId: string | null;
   taskId: string | null;
   title: string;
+  /** True when a person chose the name; it then outranks the title the analysis wrote. */
+  renamed?: boolean;
   filename: string;
   status: string;
   reviewCount: number | null;
@@ -42,6 +44,7 @@ export function readLibrary(): LibraryRecord[] {
         meetingId: record.meetingId ?? null,
         taskId: record.taskId ?? null,
         title: record.title,
+        renamed: record.renamed === true ? true : undefined,
         filename: record.filename ?? "",
         status: record.status ?? "",
         reviewCount: record.reviewCount ?? null,
@@ -55,7 +58,11 @@ export function readLibrary(): LibraryRecord[] {
 }
 
 export function writeLibrary(records: LibraryRecord[]): void {
-  storage()?.setItem(KEY, JSON.stringify(records.slice(0, 100)));
+  try {
+    storage()?.setItem(KEY, JSON.stringify(records.slice(0, 500)));
+  } catch {
+    // Storage full or blocked: the catalogue still works from the server list.
+  }
 }
 
 export function upsertLibrary(record: LibraryRecord): LibraryRecord[] {
@@ -119,4 +126,49 @@ export function meetingIdFromUri(uri: string): string | null {
   const slash = rest.indexOf("/");
   const id = slash === -1 ? rest : rest.slice(0, slash);
   return id.length > 0 ? id : null;
+}
+
+/**
+ * Motivation vs Logic
+ * Motivation: A submission is listed the moment it is made, under its task id. The meeting appears under
+ * its own id once the server lists it. If the page that made the submission is closed first, nothing ties
+ * the two, and one upload showed as two meetings.
+ * Logic: The server reports which task uploaded each meeting. A row that has a meeting id but no task is
+ * merged with the row that has that task and no meeting id: it keeps the name the person typed and the
+ * time they started it, and takes the meeting's id. A meeting no submission claims stays as it is.
+ */
+export type MeetingLink = { taskId: string | null; sourceName: string | null };
+
+function nameKey(value: string): string {
+  return value.replace(/\.[A-Za-z0-9]{1,5}$/, "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+export function reconcileOrphans(rows: LibraryRecord[], linkOf: (meetingId: string) => MeetingLink | null): LibraryRecord[] {
+  let out = [...rows];
+  for (const row of rows) {
+    if (!row.meetingId || row.taskId) continue;
+    const link = linkOf(row.meetingId);
+    if (!link) continue;
+    const orphans = out.filter((item) => !item.meetingId && item.taskId);
+    let orphan = link.taskId ? orphans.find((item) => item.taskId === link.taskId) : undefined;
+    if (!orphan && link.sourceName) {
+      // Older servers do not report the task. The recording's own name still ties them, when only one waiting
+      // submission has it (two uploads of the same file are left alone rather than guessed).
+      const wanted = nameKey(link.sourceName);
+      const same = orphans.filter((item) => item.filename && nameKey(item.filename) === wanted);
+      if (same.length === 1) orphan = same[0];
+    }
+    if (!orphan) continue;
+    const merged: LibraryRecord = {
+      ...row,
+      taskId: orphan.taskId,
+      title: orphan.title && orphan.title !== row.meetingId ? orphan.title : row.title,
+      renamed: orphan.renamed || row.renamed,
+      filename: orphan.filename || row.filename,
+      createdAt: orphan.createdAt || row.createdAt,
+    };
+    out = out.filter((item) => item !== orphan && item !== row);
+    out.push(merged);
+  }
+  return out;
 }

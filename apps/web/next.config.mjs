@@ -17,6 +17,19 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const mcp = process.env.QUOTIENT_MCP_URL ?? "http://127.0.0.1:8080/mcp";
 
+/**
+ * Baseline hardening for every page. A script/connect CSP is deliberately not set here: recordings go straight to the
+ * object store from the browser and the host differs per deployment, so a blind allow-list would break uploads.
+ * These directives and headers hold wherever the portal is hosted.
+ */
+const securityHeaders = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'" },
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Keep live development output separate from production builds. `next build`
@@ -31,6 +44,9 @@ const nextConfig = {
       "@/lib": path.join(root, "lib"),
     };
     return config;
+  },
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
   },
   async rewrites() {
     return {

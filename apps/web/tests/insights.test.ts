@@ -10,7 +10,7 @@ function span(id: string, start: number, end: number, extra: Partial<Span> = {})
 
 function claim(id: string, text: string, status: string, startMs: number | null = null): Claim {
   return {
-    id, kind: "decision", decision_status: null, origin: "model", status, coarse: false, overlap: false, text, span_ids: [],
+    id, kind: "decision", decision_status: null, origin: "model", status, coarse: false, overlap: false, text, span_ids: [], confidence: status === "supported" ? "confirmed" : "unverified",
     citations: startMs === null ? [] : [{ span_id: "s1", quote: text, relation: "entails", char_start: 0, char_end: 1, start_ms: startMs, end_ms: startMs + 1, playback: "" }],
   };
 }

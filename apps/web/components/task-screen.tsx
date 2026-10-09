@@ -8,6 +8,7 @@
  * meeting id, replace the route with the meeting workspace.
  */
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Progress } from "@/components/meeting/progress";
 import { mcp } from "@/lib/mcp/client";
@@ -17,6 +18,7 @@ export function TaskScreen({ taskId }: { taskId: string }) {
   const router = useRouter();
   const [task, setTask] = useState<TaskSnapshot | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     setTask(mcp.taskSnapshot(taskId));
@@ -30,15 +32,39 @@ export function TaskScreen({ taskId }: { taskId: string }) {
     }
   }, [task, router]);
 
+  // A task this browser has never heard of (a mistyped or expired link) must not look like work in progress.
+  useEffect(() => {
+    if (task) {
+      setMissing(false);
+      return;
+    }
+    const timer = setTimeout(() => setMissing(true), 6000);
+    return () => clearTimeout(timer);
+  }, [task]);
+
   const staged = mcp.stagedFiles(taskId);
 
+  if (missing && !task) {
+    return (
+      <main id="main" tabIndex={-1} className="q-main">
+        <section className="q-panel">
+          <h2>We can't find this analysis</h2>
+          <p className="q-muted">The link may be old, or the analysis may have been cleared. Your meetings are listed on the Meetings page.</p>
+          <Link className="q-btn-ghost" href="/">Back to Meetings</Link>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="q-main">
+    <main id="main" tabIndex={-1} className="q-main">
       <Progress
         meeting={null}
         task={task}
         onCancelTask={() => void mcp.cancelTask(taskId)}
-        onCancelMeeting={() => undefined}
+        onCancelMeeting={() => {
+          if (task?.meetingId) void mcp.cancelMeeting(task.meetingId);
+        }}
       />
       {task?.status === "input_required" ? (
         <section className="q-panel">

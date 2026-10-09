@@ -158,6 +158,38 @@ export function speakerName(label: string | null | undefined, hypothesisId: stri
   return "Unnamed speaker";
 }
 
+/**
+ * Display names for voices. A name a person typed (span.speaker_label) wins; otherwise a name the
+ * transcript itself gave (the digest's speakers); otherwise "Speaker N". Never a guess.
+ */
+export function voiceNames(
+  spans: { speaker_hypothesis_id: string | null; speaker_label: string | null }[],
+  named: { id: string; name: string; role: string | null }[] = [],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const speaker of named) {
+    const shown = speaker.name === speaker.name.toLowerCase() ? speaker.name.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : speaker.name;
+    names.set(speaker.id, speaker.role ? `${shown} (${speaker.role})` : shown);
+  }
+  for (const span of spans) {
+    if (span.speaker_hypothesis_id && span.speaker_label?.trim()) names.set(span.speaker_hypothesis_id, span.speaker_label.trim());
+  }
+  return names;
+}
+
+/**
+ * Free text written by the analysis can mention a voice by its id ("spk_0 will ..."). Show a name when
+ * the transcript gave one, "the speaker" when the recording has a single voice, else "Speaker N".
+ */
+export function readable(text: string, names: Map<string, string>, voices: number): string {
+  return text.replace(/\bspk_(\d+)\b/gi, (_match, digits: string) => {
+    const id = `spk_${digits}`;
+    const named = names.get(id);
+    if (named) return named;
+    return voices <= 1 ? "the speaker" : `Speaker ${Number(digits) + 1}`;
+  });
+}
+
 /** Duration in ms as m:ss or h:mm:ss, or "1 min 20 s" for prose. */
 export function durationText(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));

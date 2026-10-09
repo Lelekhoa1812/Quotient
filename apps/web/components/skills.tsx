@@ -25,6 +25,7 @@ export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
+  const [announce, setAnnounce] = useState(""); // read out by a screen reader; the button label alone is not reliably announced
 
   useEffect(() => {
     let cancel = false;
@@ -54,8 +55,10 @@ export function Skills() {
     try {
       await navigator.clipboard.writeText(skill.text);
       setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, copied: true } : item));
+      setAnnounce(`Copied ${skill.title}.`);
       window.setTimeout(() => {
         setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, copied: false } : item));
+        setAnnounce("");
       }, 1600);
     } catch {
       setMessage("That skill could not be copied.");
@@ -73,11 +76,12 @@ export function Skills() {
   }
 
   return (
-    <main className="q-portal">
+    <main id="main" tabIndex={-1} className="q-portal">
       <header className="q-page-head">
         <h1>Skills</h1>
         <p className="q-lede">Instructions a connected assistant can follow for one meeting.</p>
       </header>
+      <p className="q-sr" role="status">{announce}</p>
       {message ? <p role="alert">{message}</p> : null}
       {!ready && !message ? <p className="q-muted">Loading skills.</p> : null}
       {ready && skills.length === 0 && !message ? <p className="q-muted">No skills are available.</p> : null}
@@ -116,7 +120,7 @@ export function Skills() {
                 </button>
               </div>
             </div>
-            <div className={skill.view === "source" ? "q-cell is-source" : "q-cell"} tabIndex={0}>
+            <div className={skill.view === "source" ? "q-cell is-source" : "q-cell"} tabIndex={0} role="region" aria-label={`${skill.title}, ${skill.view === "source" ? "source" : "formatted"}`}>
               {skill.view === "source" ? skill.text : <Markdown text={skill.text} />}
             </div>
           </article>

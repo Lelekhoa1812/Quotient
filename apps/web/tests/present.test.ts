@@ -92,3 +92,11 @@ test("question and gap topics never claim something is unanswered", () => {
   assert.equal(isOpenPointTopic("question"), true);
   assert.equal(isOpenPointTopic("decision"), false);
 });
+
+test("voice ids inside analysis text become names, the speaker, or Speaker N", async () => {
+  const { readable } = await import("@/lib/present");
+  const names = new Map([["spk_1", "Dr. Casserly (witness)"]]);
+  assert.equal(readable("spk_0 will put a box around the pivot", names, 1), "the speaker will put a box around the pivot");
+  assert.equal(readable("spk_1 agrees with spk_2.", names, 3), "Dr. Casserly (witness) agrees with Speaker 3.");
+  assert.doesNotMatch(readable("SPK_4 and spk_10", new Map(), 5), /spk_/i);
+});

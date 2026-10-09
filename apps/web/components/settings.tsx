@@ -91,7 +91,7 @@ export function Settings() {
   const groups = ["Keys", "Models"] as const;
 
   return (
-    <main className="q-portal">
+    <main id="main" tabIndex={-1} className="q-portal">
       <header className="q-page-head">
         <h1>Settings</h1>
         <p className="q-lede">API keys for this computer. A blank key keeps the one already saved. The models Quotient uses are set by its release and are shown for reference.</p>

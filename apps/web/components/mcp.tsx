@@ -141,7 +141,7 @@ export function McpScreen({ contract }: { contract: string }) {
   ];
 
   return (
-    <main className="q-portal">
+    <main id="main" tabIndex={-1} className="q-portal">
       <header className="q-page-head">
         <h1>MCP</h1>
         <p className="q-lede">Connection values, the live tool list, and the contract to give your assistant.</p>

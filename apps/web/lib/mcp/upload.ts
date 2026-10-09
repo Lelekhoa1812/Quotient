@@ -21,9 +21,38 @@ type UploadTarget = {
   method: string;
   headers: Record<string, string>;
   parts: Part[];
+  objectKey: string | null;
 };
 
-export async function prepareElicitationContent(params: unknown, files: File[]): Promise<Record<string, unknown>> {
+export type UploadProgress = (fraction: number) => void;
+
+const EXTENSION_TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  mkv: "video/x-matroska",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  wav: "audio/wav",
+  flac: "audio/flac",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+};
+
+/** The file's media type, falling back to its extension when the browser does not know it. */
+export function mediaTypeOf(file: File): string {
+  if (file.type && /^(audio|video)\//.test(file.type)) return file.type;
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return EXTENSION_TYPES[extension] ?? (file.type || "application/octet-stream");
+}
+
+export async function prepareElicitationContent(
+  params: unknown,
+  files: File[],
+  onProgress?: UploadProgress,
+): Promise<Record<string, unknown>> {
   const file = pickFile(params, files);
   const target = findUpload(params);
   let uploaded = false;
@@ -32,16 +61,16 @@ export async function prepareElicitationContent(params: unknown, files: File[]):
     if (target.parts.length > 0) {
       for (const part of target.parts) {
         const slice = slicePart(file, part, target.parts);
-        const etag = await putBytes(part.url, slice, file.type, target.headers, target.method);
+        const etag = await putBytes(part.url, slice, mediaTypeOf(file), target.headers, target.method);
         parts.push({ part_number: part.part_number, etag });
       }
       uploaded = true;
     } else if (isHttp(target.url)) {
-      await putBytes(target.url, file, file.type, target.headers, target.method);
+      await putBytes(target.url, file, mediaTypeOf(file), target.headers, target.method, onProgress);
       uploaded = true;
     }
   }
-  return contentForSchema(asRecord(params)?.requestedSchema, file, uploaded, parts);
+  return contentForSchema(asRecord(params)?.requestedSchema, file, uploaded, parts, target?.objectKey ?? null);
 }
 
 function pickFile(params: unknown, files: File[]): File | null {
@@ -72,6 +101,7 @@ function findUpload(params: unknown): UploadTarget | null {
       method: (asString(bucket.method) ?? "PUT").toUpperCase(),
       headers: stringMap(bucket.headers),
       parts,
+      objectKey: asString(bucket.object_key),
     };
   }
   return null;
@@ -104,25 +134,43 @@ function slicePart(file: File, part: Part, parts: Part[]): Blob {
   return file.slice(start, Math.min(file.size, start + size));
 }
 
-async function putBytes(
+/** PUT one file to a signed URL with exactly the headers the service returned, reporting progress. */
+export function putFile(url: string, body: Blob, headers: Record<string, string>, onProgress?: UploadProgress): Promise<void> {
+  return putBytes(url, body, body.type, headers, "PUT", onProgress).then(() => undefined);
+}
+
+function putBytes(
   url: string,
   body: Blob,
   type: string,
   headers: Record<string, string>,
   method: string,
+  onProgress?: UploadProgress,
 ): Promise<string | null> {
-  const requestHeaders = new Headers(headers);
-  if (!requestHeaders.has("content-type")) {
-    requestHeaders.set("content-type", type || "application/octet-stream");
-  }
-  let response: Response;
-  try {
-    response = await fetch(url, { method, body, headers: requestHeaders });
-  } catch {
-    throw new Error("The upload URL did not accept the file");
-  }
-  if (!response.ok) throw new Error(`Upload failed (${response.status})`);
-  return response.headers.get("etag");
+  // XMLHttpRequest, not fetch, because only it reports upload progress.
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, url);
+    let typed = false;
+    for (const [key, value] of Object.entries(headers)) {
+      request.setRequestHeader(key, value);
+      if (key.toLowerCase() === "content-type") typed = true;
+    }
+    if (!typed) request.setRequestHeader("Content-Type", type || "application/octet-stream");
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total);
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) resolve(request.getResponseHeader("etag"));
+      else reject(new Error(`Upload failed (${request.status})`));
+    };
+    // A connection that stalls without an error would otherwise hold the whole submission forever.
+    request.timeout = 120_000 + Math.ceil(body.size / 20);
+    request.ontimeout = () => reject(new Error("The upload took too long"));
+    request.onerror = () => reject(new Error("The upload URL did not accept the file"));
+    request.onabort = () => reject(new Error("The upload was cancelled"));
+    request.send(body);
+  });
 }
 
 function contentForSchema(
@@ -130,8 +178,9 @@ function contentForSchema(
   file: File | null,
   uploaded: boolean,
   parts: { part_number: number; etag: string | null }[],
+  objectKey: string | null,
 ): Record<string, unknown> {
-  const facts = fileFacts(file, uploaded, parts);
+  const facts = fileFacts(file, uploaded, parts, objectKey);
   const properties = asRecord(asRecord(schema)?.properties);
   if (!properties) return facts;
   const keys = Object.keys(properties);
@@ -147,14 +196,18 @@ function fileFacts(
   file: File | null,
   uploaded: boolean,
   parts: { part_number: number; etag: string | null }[],
+  objectKey: string | null,
 ): Record<string, unknown> {
-  if (!file) return { uploaded };
+  if (!file) return { uploaded, upload_complete: false };
   return {
+    // The server minted this key; it accepts completion only for it.
+    ...(objectKey ? { object_key: objectKey } : {}),
+    upload_complete: uploaded,
     filename: file.name,
     name: file.name,
-    media_type: file.type || "application/octet-stream",
-    mime_type: file.type || "application/octet-stream",
-    content_type: file.type || "application/octet-stream",
+    media_type: mediaTypeOf(file),
+    mime_type: mediaTypeOf(file),
+    content_type: mediaTypeOf(file),
     byte_size: file.size,
     size: file.size,
     uploaded,
@@ -172,6 +225,13 @@ function stringMap(value: unknown): Record<string, string> {
   return headers;
 }
 
+/** https, or plain http only to this machine (local object storage): a document must not cross a network in clear text. */
 function isHttp(url: string): boolean {
-  return url.startsWith("https://") || url.startsWith("http://");
+  if (url.startsWith("https://")) return true;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }

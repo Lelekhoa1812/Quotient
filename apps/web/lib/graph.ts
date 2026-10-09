@@ -8,6 +8,7 @@
  */
 
 import { asArray, asFinite, asRecord, asString, stringList } from "@/lib/json";
+import { parseDigest } from "@/lib/digest";
 import {
   isDimension,
   type ActionItem,
@@ -20,7 +21,9 @@ import {
   type Disagreement,
   type ExportArtifact,
   type Finding,
+  type ContextUse,
   type GraphPage,
+  type MeetingContext,
   type MeetingStatus,
   type Playback,
   type RawTranscript,
@@ -69,6 +72,8 @@ export function emptyGraph(): GraphPage {
     review: [],
     review_present: false,
     charts: [],
+    digest: null,
+    captions: "",
     speakers: [],
     exports: [],
     seams: [],
@@ -146,6 +151,11 @@ export function parseGraph(result: unknown, meetingId: string): GraphPage {
     exports: asArray(graph.exports).map((item) => parseExport(item, meetingId)).filter((item): item is ExportArtifact => item !== null),
     seams: asArray(graph.seams).map(parseSeam).filter((item): item is Seam => item !== null),
     playback: parsePlayback(graph.playback),
+    digest: parseDigest(graph.digest),
+    captions: (() => {
+      const uri = asString(graph.captions);
+      return uri && uri.startsWith("quotient://") ? uri : "";
+    })(),
     rawTranscript: parseRawTranscript(graph),
     observations: parseObservations(graph),
     next_cursor: asString(graph.next_cursor) ?? asString(graph.nextCursor),
@@ -169,6 +179,8 @@ export function mergeGraph(base: GraphPage, page: GraphPage): GraphPage {
     review: page.review_present ? dedupe(base.review, page.review) : base.review,
     review_present: base.review_present || page.review_present,
     charts: dedupe(base.charts, page.charts),
+    digest: base.digest ?? page.digest,
+    captions: base.captions || page.captions,
     speakers: page.speakers.length > 0 ? page.speakers : base.speakers,
     exports: page.exports.length > 0 ? page.exports : base.exports,
     seams: dedupeSeams([...base.seams, ...page.seams]),
@@ -206,7 +218,52 @@ export function parseMeetingStatus(result: unknown, fallbackId: string): Meeting
     failureMessage: asString(meeting.failure_message) ?? "",
     updatedAt: asString(meeting.updated_at) ?? "",
     sourceName: asString(meeting.source_name) ?? "",
+    taskId: asString(meeting.task_id) ?? "",
+    headline: (() => {
+      const row = asRecord(meeting.headline);
+      if (!row) return null;
+      return {
+        title: asString(row.title) ?? "",
+        contentType: asString(row.content_type) ?? "other",
+        decisions: asFinite(row.decisions) ?? 0,
+        actions: asFinite(row.actions) ?? 0,
+        openQuestions: asFinite(row.open_questions) ?? 0,
+        summary: asString(row.summary) ?? "",
+      };
+    })(),
+    context: parseMeetingContext(meeting.context),
   };
+}
+
+/**
+ * Motivation vs Logic
+ * Motivation: A meeting analysed with reference material should say what it was given and what
+ * became of each item. Older meetings, and a service that sends something odd, must not break the
+ * overview.
+ * Logic: Read purpose and items defensively. An item without a name is dropped; an unknown status
+ * counts as pending; negative or non-numeric chars become null. Nothing usable returns null.
+ */
+export function parseMeetingContext(value: unknown): MeetingContext | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const purpose = asString(record.purpose)?.trim() || null;
+  const items: ContextUse[] = [];
+  for (const entry of asArray(record.items)) {
+    const item = asRecord(entry);
+    const name = asString(item?.name)?.trim();
+    if (!item || !name) continue;
+    const status = asString(item.status);
+    const chars = asFinite(item.chars);
+    items.push({
+      name,
+      status: status === "ready" || status === "skipped" || status === "failed" ? status : "pending",
+      reason: asString(item.reason)?.trim() || null,
+      chars: chars !== null && chars >= 0 ? chars : null,
+      summary: asString(item.summary)?.trim() || null,
+    });
+  }
+  if (!purpose && items.length === 0) return null;
+  return { purpose, items };
 }
 
 export function parseMeetingId(result: unknown): string | null {
@@ -323,6 +380,12 @@ function parseClaim(value: unknown): Claim | null {
     text: asString(record.text) ?? asString(record.statement) ?? "",
     span_ids: spanIds,
     citations,
+    confidence:
+      record.confidence === "confirmed" || record.confidence === "likely" || record.confidence === "contradicted"
+        ? record.confidence
+        : asString(record.status) === "supported"
+          ? "confirmed"
+          : "unverified",
   };
 }
 

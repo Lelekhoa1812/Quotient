@@ -2,43 +2,77 @@
 
 /**
  * Motivation vs Logic
- * Motivation: Statements the analysis could not confirm stay out of the brief.
- * A reader needs to see what they are, why each one is held, and hear the
- * moment, without wading through repeated extractions of the same sentence.
- * Logic: Prefer the graph's review collection; otherwise list claims whose status
- * is present and not supported. Statements are merged by normalised text and
- * status, then grouped by the reason a person would recognise: contradicted,
- * numbers to check, words not found in the recording, or found but not confirmed.
- * Server counts are shown as given. Long groups reveal 15 at a time.
+ * Motivation: The walkaway is only as good as the statements behind it. A reader who wants to
+ * audit it needs two lists: what it rests on (confirmed, and likely with a marker) and what was
+ * left out and why, without wading through repeats or a button per row.
+ * Logic: Statements are merged by normalised text. "Used" holds confirmed and likely statements;
+ * "Left out" holds the rest, grouped by the reason a person would recognise. Each row is the
+ * statement, its reason, and a moment (speaker icon) that plays the recording there. Parts of the
+ * recording that could not be accounted for are listed last.
  */
 import { useState } from "react";
-import { formatMs, formatTableNumber } from "@/lib/format";
-import { claimStatusText } from "@/lib/present";
+import { Moment } from "@/components/ui/moment";
+import { formatTableNumber } from "@/lib/format";
+import { readable } from "@/lib/present";
 import type { Claim, MeetingStatus, Span, TranscriptGap } from "@/lib/types";
 
 type Group = { claim: Claim; count: number };
-type Bucket = { key: string; title: string; hint: string; rows: Group[] };
 
-const PAGE = 15;
+const PAGE = 25;
 
-function bucketOf(claim: Claim): string {
-  if (claim.status === "contradicted") return "contradicted";
+const REASON: Record<string, string> = {
+  contradicted: "Contradicted elsewhere in the recording",
+  numbers: "A number doesn't match what was said",
+  unconfirmed: "Heard, but the meaning couldn't be confirmed",
+  "not-found": "Exact words not found in the recording",
+};
+
+function reasonOf(claim: Claim): string {
+  if (claim.confidence === "contradicted" || claim.status === "contradicted") return "contradicted";
   if (claim.status === "numeric_failed") return "numbers";
   if (claim.citations.length === 0) return "not-found";
   return "unconfirmed";
 }
 
-const TITLES: Record<string, [string, string]> = {
-  contradicted: ["Contradicted", "Something else in the recording says the opposite."],
-  numbers: ["Numbers to check", "A figure here doesn't match what was said."],
-  unconfirmed: ["Heard, but not confirmed", "The words are in the recording, but the meaning could not be confirmed."],
-  "not-found": ["Exact words not found", "The analysis could not locate these words in the recording."],
+const KIND_ORDER = ["decision", "commitment", "figure", "risk", "question", "fact", "other"] as const;
+const KIND_TITLE: Record<(typeof KIND_ORDER)[number], string> = {
+  decision: "Decisions",
+  commitment: "Commitments",
+  figure: "Figures",
+  risk: "Risks",
+  question: "Questions",
+  fact: "Facts",
+  other: "Everything else",
 };
+
+function kindOf(claim: Claim): (typeof KIND_ORDER)[number] {
+  return (KIND_ORDER as readonly string[]).includes(claim.kind) ? (claim.kind as (typeof KIND_ORDER)[number]) : "other";
+}
+
+/** Kind first, then time: one stable sort key so a page of rows never splits a group out of order. */
+function kindRank(claim: Claim): number {
+  return KIND_ORDER.indexOf(kindOf(claim)) * 1e9 + (claim.citations[0]?.start_ms ?? 1e8);
+}
+
+function merge(claims: Claim[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const claim of claims) {
+    const normalized = claim.text.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const key = normalized || claim.id;
+    const group = groups.get(key);
+    if (group) {
+      group.count += 1;
+      if (group.claim.citations.length === 0 && claim.citations.length > 0) group.claim = claim;
+    } else groups.set(key, { claim, count: 1 });
+  }
+  return [...groups.values()].sort(
+    (left, right) => (left.claim.citations[0]?.start_ms ?? Infinity) - (right.claim.citations[0]?.start_ms ?? Infinity),
+  );
+}
 
 export function Review({
   claims,
-  review,
-  reviewPresent,
+  names = new Map<string, string>(),
   meeting,
   onSeek,
   gaps,
@@ -46,6 +80,7 @@ export function Review({
   onSeekSpan,
 }: {
   claims: Claim[];
+  names?: Map<string, string>;
   review: Claim[];
   reviewPresent: boolean;
   meeting: MeetingStatus | null;
@@ -54,99 +89,132 @@ export function Review({
   spans: Span[];
   onSeekSpan: (span: Span) => void;
 }) {
-  const rows = reviewPresent ? review : claims.filter((claim) => claim.status.length > 0 && claim.status !== "supported");
-  const groups = new Map<string, Group>();
-  for (const claim of rows) {
-    const normalized = claim.text.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-    const key = `${bucketOf(claim)}\u0000${normalized || claim.id}`;
-    const group = groups.get(key);
-    if (group) {
-      group.count += 1;
-      if (group.claim.citations.length === 0 && claim.citations.length > 0) group.claim = claim;
-    } else groups.set(key, { claim, count: 1 });
-  }
-  const buckets: Bucket[] = ["contradicted", "numbers", "unconfirmed", "not-found"]
-    .map((key) => ({
-      key,
-      title: TITLES[key][0],
-      hint: TITLES[key][1],
-      rows: [...groups.entries()].filter(([id]) => id.startsWith(`${key}\u0000`)).map(([, group]) => group),
-    }))
-    .filter((bucket) => bucket.rows.length > 0);
-  const distinct = groups.size;
-  const counts = meeting?.reviewCounts;
+  const voices = new Set(spans.map((span) => span.speaker_hypothesis_id).filter(Boolean)).size;
+  const used = merge(claims.filter((claim) => claim.confidence === "confirmed" || claim.confidence === "likely"));
+  const left = merge(claims.filter((claim) => claim.confidence !== "confirmed" && claim.confidence !== "likely"));
+  // Open on what the summary rests on; what was left out is one tab away, grouped by why.
+  const [tab, setTab] = useState<"left" | "used">(used.length > 0 || left.length === 0 ? "used" : "left");
+  const confirmed = used.filter((group) => group.claim.confidence === "confirmed").length;
+  const likely = used.length - confirmed;
+  const shown = tab === "used" ? used : left;
+  void meeting;
 
   return (
-    <section className="q-section">
+    <section className="q-section" aria-label="Evidence">
       <div>
-        <h2>To check</h2>
+        <h2>Evidence</h2>
         <p className="q-lede">
-          Statements the analysis couldn't confirm against the recording. They are left out of the brief, so the brief only says what was confirmed. Play any moment to check it yourself.
+          Every point in the overview rests on statements checked against the recording. Here is what was used, and what was left out and why.
         </p>
       </div>
-      {distinct > 0 ? (
-        <p className="q-summary">
-          <strong>{formatTableNumber(distinct)}</strong> {distinct === 1 ? "statement" : "different statements"} to check
-          {rows.length > distinct ? ` (found ${formatTableNumber(rows.length)} times in total)` : ""}
-          {counts?.contradicted ? ` · ${formatTableNumber(counts.contradicted)} contradicted` : ""}
-        </p>
-      ) : null}
-      {rows.length === 0 && gaps.length === 0 ? <p className="q-empty">Nothing needs checking.</p> : null}
-      {buckets.map((bucket) => (
-        <BucketView key={bucket.key} bucket={bucket} onSeek={onSeek} />
-      ))}
+      <p className="q-evidence-tally">
+        <span><strong>{formatTableNumber(confirmed)}</strong> confirmed</span>
+        <span><strong>{formatTableNumber(likely)}</strong> likely</span>
+        <span><strong>{formatTableNumber(left.length)}</strong> left out</span>
+        {gaps.length ? <span><strong>{gaps.length}</strong> {gaps.length === 1 ? "part" : "parts"} not checked</span> : null}
+      </p>
+      <div className="q-segmented" role="group" aria-label="Which statements">
+        <button type="button" aria-pressed={tab === "left"} className={tab === "left" ? "is-on" : ""} onClick={() => setTab("left")}>
+          Left out ({left.length})
+        </button>
+        <button type="button" aria-pressed={tab === "used"} className={tab === "used" ? "is-on" : ""} onClick={() => setTab("used")}>
+          Used ({used.length})
+        </button>
+      </div>
+      <List key={tab} groups={shown} used={tab === "used"} onSeek={onSeek} text={(value) => readable(value, names, voices)} />
       {gaps.length > 0 ? (
         <details className="q-details">
-          <summary>Parts of the recording the analysis could not account for ({gaps.length})</summary>
-          <div className="q-cards">
-            {gaps.map((gap) => (
-              <article key={gap.id} className="q-card">
-                <p className="q-muted">{gap.reason || "The analysis could not turn this part into a statement."}</p>
-                {gap.spanIds.map((spanId) => {
-                  const span = spans.find((item) => item.id === spanId);
-                  return span ? (
-                    <div key={spanId}>
-                      <p>{span.text || span.raw_text || (span.start_ms !== null ? `The recording from ${formatMs(span.start_ms)}.` : "This part of the recording.")}</p>
-                      <button className="q-btn-ghost" type="button" onClick={() => onSeekSpan(span)}>Hear this part</button>
-                    </div>
-                  ) : null;
-                })}
-              </article>
-            ))}
-          </div>
+          <summary>Parts of the recording that were not checked ({gaps.length})</summary>
+          <ul className="q-rows">
+            {gaps.map((gap) => {
+              const first = gap.spanIds.map((spanId) => spans.find((item) => item.id === spanId)).find(Boolean) ?? null;
+              return (
+                <li key={gap.id} className="q-row">
+                  <div className="q-row-main">
+                    <p>{first?.text || first?.raw_text || "This part of the recording."}</p>
+                    <p className="q-row-meta">{gap.reason || "The analysis could not turn this part into a statement."}</p>
+                  </div>
+                  {first ? <Moment ms={first.start_ms} onPlay={() => onSeekSpan(first)} /> : null}
+                </li>
+              );
+            })}
+          </ul>
         </details>
       ) : null}
     </section>
   );
 }
 
-function BucketView({ bucket, onSeek }: { bucket: Bucket; onSeek: (claim: Claim) => void }) {
-  const [shown, setShown] = useState(PAGE);
+const REASON_ORDER = ["contradicted", "numbers", "unconfirmed", "not-found"] as const;
+
+function Row({ claim, count, used, onSeek, text }: { claim: Claim; count: number; used: boolean; onSeek: (claim: Claim) => void; text: (value: string) => string }) {
+  const ms = claim.citations.find((item) => item.start_ms !== null)?.start_ms ?? null;
   return (
-    <div className="q-cards">
-      <div>
-        <h3>{bucket.title} <span className="q-badge">{bucket.rows.length}</span></h3>
-        <p className="q-muted">{bucket.hint}</p>
+    <li className="q-row">
+      <div className="q-row-main">
+        <p>{claim.text ? text(claim.text) : "Statement without text"}</p>
+        <p className="q-row-meta">
+          {used ? (claim.confidence === "confirmed" ? "Confirmed" : "Likely: it matches the recording, but one check was not certain") : null}
+          {used && count > 1 ? " · " : ""}
+          {count > 1 ? `said ${count} times` : ""}
+        </p>
       </div>
-      {bucket.rows.slice(0, shown).map(({ claim, count }) => (
-        <article key={claim.id} className="q-card">
-          <p>{claim.text || "Statement without text"}</p>
-          <div className="q-inline">
-            <span className="q-meta">{claimStatusText(claim.status)}</span>
-            {count > 1 ? <span className="q-muted">Mentioned {count} times</span> : null}
-          </div>
-          {claim.citations.length > 0 ? (
-            <button className="q-btn-ghost" type="button" onClick={() => onSeek(claim)}>Hear the moment</button>
-          ) : (
-            <p className="q-muted">No matching moment could be found in the recording.</p>
-          )}
-        </article>
-      ))}
-      {bucket.rows.length > shown ? (
-        <button className="q-btn-ghost" type="button" onClick={() => setShown(shown + PAGE)}>
-          Show {Math.min(PAGE, bucket.rows.length - shown)} more
-        </button>
-      ) : null}
-    </div>
+      {ms !== null ? <Moment ms={ms} onPlay={() => onSeek(claim)} label={text(claim.text)} /> : null}
+    </li>
+  );
+}
+
+function List({ groups, used, onSeek, text }: { groups: Group[]; used: boolean; onSeek: (claim: Claim) => void; text: (value: string) => string }) {
+  const [limit, setLimit] = useState(PAGE);
+  if (groups.length === 0) {
+    return <p className="q-empty">{used ? "No statement could be confirmed yet." : "Nothing was left out."}</p>;
+  }
+  const more = groups.length > limit ? (
+    <button className="q-btn-ghost" type="button" onClick={() => setLimit(limit + PAGE)}>
+      Show {Math.min(PAGE, groups.length - limit)} more
+    </button>
+  ) : null;
+  if (used) {
+    // Consequential statements first; small talk and scene-setting land in "Other", last. Time order holds inside a group.
+    const sorted = [...groups].sort((left, right) => kindRank(left.claim) - kindRank(right.claim));
+    const shown = sorted.slice(0, limit);
+    return (
+      <>
+        {KIND_ORDER.map((kind) => {
+          const rows = shown.filter((group) => kindOf(group.claim) === kind);
+          if (rows.length === 0) return null;
+          const total = groups.filter((group) => kindOf(group.claim) === kind).length;
+          return (
+            <section key={kind} className="q-reason-group" aria-label={KIND_TITLE[kind]}>
+              <h3 className="q-reason-title">{KIND_TITLE[kind]} <span className="q-faint">({total})</span></h3>
+              <ul className="q-rows">
+                {rows.map((group) => <Row key={group.claim.id} {...group} used onSeek={onSeek} text={text} />)}
+              </ul>
+            </section>
+          );
+        })}
+        {more}
+      </>
+    );
+  }
+  // Left out: one heading per reason, so the same sentence is not repeated on every row.
+  const shown = groups.slice(0, limit);
+  return (
+    <>
+      {REASON_ORDER.map((reason) => {
+        const rows = shown.filter((group) => reasonOf(group.claim) === reason);
+        if (rows.length === 0) return null;
+        const total = groups.filter((group) => reasonOf(group.claim) === reason).length;
+        return (
+          <section key={reason} className="q-reason-group" aria-label={REASON[reason]}>
+            <h3 className="q-reason-title">{REASON[reason]} <span className="q-faint">({total})</span></h3>
+            <ul className="q-rows">
+              {rows.map((group) => <Row key={group.claim.id} {...group} used={false} onSeek={onSeek} text={text} />)}
+            </ul>
+          </section>
+        );
+      })}
+      {more}
+    </>
   );
 }

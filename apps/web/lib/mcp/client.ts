@@ -11,7 +11,15 @@
 import { emptyGraph, mergeGraph, parseGraph, parseMeetingId, parseMeetingStatus, unwrapTool } from "@/lib/graph";
 import { asArray, asFinite, asRecord, asString } from "@/lib/json";
 import { meetingIdFromUri, readLibrary, upsertLibrary } from "@/lib/library";
-import { prepareElicitationContent } from "@/lib/mcp/upload";
+import {
+  UPLOAD_CONCURRENCY,
+  buildPrepareArgs,
+  parsePrepareResult,
+  runPool,
+  toUploads,
+  type ContextItem,
+} from "@/lib/context";
+import { mediaTypeOf, prepareElicitationContent, putFile } from "@/lib/mcp/upload";
 import type { GraphPage, MeetingStatus, TaskSnapshot } from "@/lib/types";
 
 export type SkillSummary = {
@@ -33,6 +41,21 @@ export class McpDisconnected extends Error {
     this.name = "McpDisconnected";
   }
 }
+
+/** The service answered prepare_context with a plain error. The meeting is not started. */
+export class ContextPrepareError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContextPrepareError";
+  }
+}
+
+/** Reference material for one submission, plus an optional hook that reports each item's upload. */
+export type SubmitContext = {
+  items: ContextItem[];
+  purpose: string;
+  onItem?: (id: string, update: Partial<Pick<ContextItem, "status" | "progress" | "reason">>) => void;
+};
 
 export type Phase = "idle" | "connecting" | "connected" | "disconnected";
 
@@ -111,6 +134,9 @@ function publishCore(core: CoreTask): TaskSnapshot {
   const next = snapshotFrom(core, tasks.get(core.taskId));
   tasks.set(core.taskId, next);
   emit();
+  // The pending upload request is delivered on tasks/result. A task seen waiting for its
+  // upload (after a reload, or polled from another screen) must open it, or it waits forever.
+  if (next.status === "input_required") ensureResult(core.taskId);
   return next;
 }
 
@@ -234,7 +260,12 @@ async function request(method: string, params: unknown, timeoutMs = 20000): Prom
   if (!type.includes("text/event-stream")) {
     const text = await response.text();
     if (!text) return null;
-    return settle(JSON.parse(text) as JsonRpc);
+    try {
+      return settle(JSON.parse(text) as JsonRpc);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error("The service sent an unexpected reply. Please try again.");
+      throw error;
+    }
   }
   if (!response.body) throw new McpDisconnected("Quotient MCP is disconnected");
   return readUntil(response.body, id, timeoutMs);
@@ -261,10 +292,19 @@ async function stagedOrWait(taskId: string): Promise<File[]> {
   });
 }
 
+// An elicitation arrives on both the notification stream and tasks/result; answer it once.
+const answeredElicitations = new Set<string>();
+
 async function onElicitation(taskId: string, rpcId: number | string, params: unknown): Promise<void> {
+  const seen = `${taskId}:${String(rpcId)}`;
+  if (answeredElicitations.has(seen)) return;
+  answeredElicitations.add(seen);
   try {
     const files = await stagedOrWait(taskId);
-    const content = await prepareElicitationContent(params, files);
+    patchTask(taskId, { progress: 0, progressMessage: "Uploading the recording" });
+    const content = await prepareElicitationContent(params, files, (fraction) => {
+      patchTask(taskId, { progress: fraction, progressMessage: `Uploading the recording (${Math.round(fraction * 100)}%)` });
+    });
     await respond(rpcId, { action: "accept", content });
     patchTask(taskId, { error: null });
   } catch (error) {
@@ -371,6 +411,50 @@ async function ensure(): Promise<void> {
 async function callTool(name: string, args: Record<string, unknown>, timeoutMs = 30000): Promise<unknown> {
   await ensure();
   return request("tools/call", { name, arguments: args }, timeoutMs);
+}
+
+/**
+ * Motivation vs Logic
+ * Motivation: Reference material has to reach the analysis before the meeting starts, and one bad
+ * file must not stop a meeting.
+ * Logic: prepare_context returns a signed target per file. Upload two at a time, each retried once.
+ * A failed item is marked and skipped. Returns the batch id when at least one upload landed.
+ * A prepare_context failure throws ContextPrepareError and nothing is uploaded.
+ */
+async function sendContext(context: SubmitContext): Promise<string | null> {
+  const uploads = toUploads(context.items);
+  if (uploads.length === 0) return null;
+  const report = context.onItem ?? (() => undefined);
+  let outcome;
+  try {
+    outcome = parsePrepareResult(await callTool("prepare_context", buildPrepareArgs(uploads)), uploads.length);
+  } catch (error) {
+    if (error instanceof McpDisconnected) throw error;
+    throw new ContextPrepareError(error instanceof Error && error.message ? error.message : "The context could not be prepared.");
+  }
+  if (!outcome.ok) throw new ContextPrepareError(outcome.error);
+  const targets = outcome.uploads;
+  let succeeded = 0;
+  await runPool(uploads, UPLOAD_CONCURRENCY, async (upload, index) => {
+    const target = targets[index];
+    if (!target) {
+      report(upload.id, { status: "failed", reason: "Couldn't upload" });
+      return;
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      report(upload.id, { status: "uploading", progress: 0, reason: "" });
+      try {
+        await putFile(target.url, upload.file, target.headers, (fraction) => report(upload.id, { status: "uploading", progress: fraction }));
+        report(upload.id, { status: "ready", progress: 1 });
+        succeeded += 1;
+        return;
+      } catch {
+        // One more try, then the item is skipped.
+      }
+    }
+    report(upload.id, { status: "failed", reason: "Couldn't upload" });
+  });
+  return succeeded > 0 ? outcome.batchId : null;
 }
 
 function ensureResult(taskId: string): void {
@@ -497,15 +581,23 @@ export const mcp = {
   stagedFiles(taskId: string): File[] {
     return staged.get(taskId) ?? [];
   },
-  async submitMeeting(primary: File, others: File[], title: string): Promise<TaskSnapshot> {
+  async submitMeeting(primary: File, others: File[], title: string, context?: SubmitContext): Promise<TaskSnapshot> {
     await ensure();
+    // Reference material goes first; if it cannot be prepared, no meeting is started.
+    const contextBatch = context ? await sendContext(context) : null;
+    const purpose = context?.purpose.trim() ?? "";
     const token = `submit:${primary.size}:${nextId + 1}`;
     const result = await request("tools/call", {
       name: "submit_meeting",
       arguments: {
+        // An empty key asks the server for a signed upload target (input_required).
+        object_key: "",
+        upload_complete: false,
         filename: primary.name,
-        media_type: primary.type || "application/octet-stream",
+        media_type: mediaTypeOf(primary),
         byte_size: primary.size,
+        ...(contextBatch ? { context_batch: contextBatch } : {}),
+        ...(purpose ? { purpose } : {}),
       },
       task: { ttl: 86_400_000 },
       _meta: { progressToken: token },
@@ -514,13 +606,21 @@ export const mcp = {
     if (!core) throw new Error("submit_meeting did not return a task");
     activeTaskId = core.taskId;
     tokenToTask.set(token, core.taskId);
-    staged.set(core.taskId, [primary, ...others]);
+    // Bugs vs Fixes
+    // Bug: The upload elicitation can arrive on the stream before this call returns. Its
+    // handler then waited for files, and storing them here never woke it, so the upload
+    // never started unless the user picked the file again.
+    // Fix: Stage through attachFiles, which also resolves a waiting handler.
+    mcp.attachFiles(core.taskId, [primary, ...others]);
     const snapshot = publishCore(core);
     const now = new Date().toISOString();
+    // A name the person typed differs from the one the file name would give; it is theirs from the start.
+    const fromFile = primary.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
     upsertLibrary({
       meetingId: snapshot.meetingId,
       taskId: snapshot.taskId,
       title,
+      renamed: title !== fromFile,
       filename: primary.name,
       status: snapshot.status,
       reviewCount: null,
@@ -591,6 +691,14 @@ export const mcp = {
       meeting_id: meetingId,
       span_id: spanId,
       scope,
+      display_name: displayName,
+    });
+  },
+  async mergeSpeakers(meetingId: string, spanId: string, otherSpanId: string, displayName: string): Promise<void> {
+    await callTool("merge_speakers", {
+      meeting_id: meetingId,
+      span_id: spanId,
+      other_span_id: otherSpanId,
       display_name: displayName,
     });
   },

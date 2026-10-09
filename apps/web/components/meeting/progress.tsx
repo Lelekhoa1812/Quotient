@@ -87,7 +87,7 @@ export function Progress({
           );
         })}
       </ol>
-      {meeting && !finished && !failed && !stopped ? (
+      {(meeting || task) && !finished && !failed && !stopped ? (
         confirming ? (
           <div className="q-inline" role="group" aria-label="Confirm stopping the analysis">
             <span>Stop the analysis? Work done so far will be lost.</span>

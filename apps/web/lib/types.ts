@@ -6,6 +6,8 @@
  * unions. Absence is null or an empty string, never a fabricated owner.
  */
 
+import type { Digest } from "@/lib/digest";
+
 export const DIMENSIONS = [
   "decision",
   "commitment",
@@ -77,6 +79,8 @@ export type Claim = {
   text: string;
   span_ids: string[];
   citations: Citation[];
+  /** confirmed | likely | contradicted | unverified (how strongly the recording supports it). */
+  confidence: "confirmed" | "likely" | "contradicted" | "unverified";
 };
 
 export type Finding = {
@@ -207,6 +211,10 @@ export type GraphPage = {
   playback: Playback;
   rawTranscript: RawTranscript;
   observations: VideoObservation[];
+  /** The walkaway, grounded by the server; null for meetings analysed before it existed. */
+  digest: Digest | null;
+  /** quotient:// URI of the WebVTT captions, when the meeting has speech. */
+  captions: string;
   next_cursor: string | null;
 };
 
@@ -221,6 +229,38 @@ export type MeetingStatus = {
   failureMessage: string;
   updatedAt: string;
   sourceName: string;
+  /** The task that uploaded the recording, when it came from the portal; ties a submission to its meeting. */
+  taskId: string;
+  /** From the walkaway, when the meeting has one: what it was and what came out of it. */
+  headline: MeetingHeadline | null;
+  /** The reference material the analysis was given, when the person supplied any. */
+  context: MeetingContext | null;
+};
+
+export type ContextUseStatus = "pending" | "ready" | "skipped" | "failed";
+
+export type ContextUse = {
+  name: string;
+  status: ContextUseStatus;
+  /** A plain reason, for a skipped or failed item. */
+  reason: string | null;
+  chars: number | null;
+  /** One line on what the item contributed, when the service wrote one. */
+  summary: string | null;
+};
+
+export type MeetingContext = {
+  purpose: string | null;
+  items: ContextUse[];
+};
+
+export type MeetingHeadline = {
+  title: string;
+  contentType: string;
+  decisions: number;
+  actions: number;
+  openQuestions: number;
+  summary: string;
 };
 
 export type TaskSnapshot = {
@@ -244,6 +284,7 @@ export const ARTIFACT_ORDER = [
 ] as const;
 
 export const VIEWS = [
+  "overview",
   "progress",
   "transcript",
   "board",
@@ -251,6 +292,7 @@ export const VIEWS = [
   "disagreements",
   "review",
   "charts",
+  "insights",
   "exports",
 ] as const;
 

@@ -166,7 +166,7 @@ export function HomeObject() {
   }, []);
 
   return (
-    <div className="q-stage" ref={frameRef} aria-hidden="true">
+    <div className="q-spark-field" ref={frameRef} aria-hidden="true">
       <canvas ref={canvasRef} />
     </div>
   );

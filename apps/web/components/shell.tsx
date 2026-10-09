@@ -72,7 +72,11 @@ function ThemeToggle() {
 
   function apply(next: "light" | "dark") {
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("quotient-theme", next);
+    try {
+      localStorage.setItem("quotient-theme", next);
+    } catch {
+      // Private browsing or blocked storage: the theme still changes for this visit.
+    }
     setTheme(next);
   }
 
@@ -125,6 +129,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="q-app">
+      <a className="q-skip" href="#main">Skip to content</a>
       <header className="q-header">
         {/*
           Motivation vs Logic

@@ -40,6 +40,7 @@ export function Exports({ meetingId, artifacts, renderedReady }: { meetingId: st
     setMessage("");
     try {
       const body = await mcp.readResource(artifact.uri);
+      if (!body.href && !body.blob) throw new Error("This file is not ready yet.");
       if (body.href) {
         const anchor = document.createElement("a");
         anchor.href = body.href;

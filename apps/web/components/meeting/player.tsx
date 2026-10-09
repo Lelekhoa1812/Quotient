@@ -2,99 +2,140 @@
 
 /**
  * Motivation vs Logic
- * Motivation: Playback is a field of the graph. A citation seek has to land on
- * start_ms for original, burned-in, and sidecar media.
- * Logic: Imperative seek sets currentTime to start_ms / 1000. quotient://
- * sources are read through resources/read. Missing media keeps the chrome.
+ * Motivation: The recording is the evidence behind everything on the page. It has to be large
+ * enough to watch, captioned by default, navigable by topic, and in sync with the transcript.
+ * Logic:
+ * - The media plays at its true aspect ratio (set from videoWidth/videoHeight), as big as the
+ *   stage allows. A recording with no picture plays in a native audio control with a note.
+ * - Captions: the graph's captions URI (WebVTT) is read through resources/read and attached as a
+ *   same-origin blob track, shown by default; the CC button toggles textTracks without remounting.
+ * - Speed, keyboard shortcuts (space/k, j/l, arrows, c, m; ignored while typing) and a chapter
+ *   strip under the video. Current time is reported (about 4 times a second) for transcript sync.
+ * - quotient:// media is resolved through resources/read; one renewal on a playback error.
  * Bugs vs Fixes
- * Bug: A recording with no picture (black frames) showed a black rectangle and
- * read as a broken player. Each reload() also rebuilt the playback object, which
- * re-resolved the URL and remounted the video, losing the position.
- * Fix: Sample three frames through a separate CORS-enabled probe; when every
- * sampled frame is black the player collapses to an audio-only bar with a note.
- * Effects depend on the three locator strings, not the object identity.
+ * Bug: Captions were only attached in a "sidecar" mode the server never produced, so the player
+ * never showed subtitles. Fix: captions come from their own graph field and load by default.
  */
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type React from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Captions, CaptionsOff, Gauge } from "lucide-react";
+import { formatMs } from "@/lib/format";
+import type { Chapter } from "@/lib/digest";
 import { mcp } from "@/lib/mcp/client";
 import type { Playback } from "@/lib/types";
 
-export type PlayerHandle = { seek: (startMs: number) => void };
+/** `play` starts playback after the jump. A person's click or key press passes it; a `?t=` link does not, so opening a shared link never plays audio by itself. */
+export type PlayerHandle = { seek: (startMs: number, play?: boolean) => void };
 
-type Mode = "original" | "burned" | "sidecar";
+const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
-export const Player = forwardRef<PlayerHandle, { playback: Playback; loading?: boolean; status?: string }>(function Player({ playback, loading = false, status = "" }, ref) {
+type Props = {
+  playback: Playback;
+  captions: string;
+  chapters: Chapter[];
+  loading?: boolean;
+  status?: string;
+  onTime?: (ms: number) => void;
+};
+
+export const Player = forwardRef<PlayerHandle, Props>(function Player(
+  { playback, captions, chapters, loading = false, status = "", onTime },
+  ref,
+) {
   const mediaRef = useRef<HTMLVideoElement>(null);
   const timeRef = useRef(0);
-  const [mode, setMode] = useState<Mode>("original");
+  const lastReport = useRef(0);
   const [src, setSrc] = useState("");
-  const [caption, setCaption] = useState("");
+  const [track, setTrack] = useState("");
   const [note, setNote] = useState("");
   const [blank, setBlank] = useState(false);
+  const [ratio, setRatio] = useState(16 / 9);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const [now, setNow] = useState(0);
+  const [duration, setDuration] = useState(0);
   const renewalAttempted = useRef(false);
-  const source = mode === "burned" ? playback.burned : playback.original;
+  const source = playback.original || playback.burned;
 
-  useImperativeHandle(ref, () => ({
-    seek(startMs: number) {
-      timeRef.current = startMs / 1000;
-      const node = mediaRef.current;
-      if (!node) return;
-      const apply = () => {
-        node.currentTime = startMs / 1000;
-      };
-      if (node.readyState >= 1) apply();
-      else node.addEventListener("loadedmetadata", apply, { once: true });
-    },
-  }));
+  const seekTo = useCallback((startMs: number, play = false) => {
+    timeRef.current = startMs / 1000;
+    const node = mediaRef.current;
+    if (!node) return;
+    const apply = () => {
+      node.currentTime = startMs / 1000;
+      if (play) node.play().catch(() => undefined); // the browser may refuse; the jump has still happened
+    };
+    if (node.readyState >= 1) apply();
+    else node.addEventListener("loadedmetadata", apply, { once: true });
+  }, []);
 
+  useImperativeHandle(ref, () => ({ seek: seekTo }), [seekTo]);
+
+  // Media URL.
   useEffect(() => {
     let cancel = false;
-    const created: string[] = [];
-    const track = mode === "sidecar" ? playback.sidecar : "";
     renewalAttempted.current = false;
-    async function resolve(url: string): Promise<string> {
-      if (!url) return "";
-      if (!url.startsWith("quotient://")) return url;
-      const body = await mcp.readResource(url);
-      if (body.href) return body.href;
-      if (!body.blob) return "";
-      const objectUrl = URL.createObjectURL(body.blob);
-      created.push(objectUrl);
-      return objectUrl;
-    }
     void (async () => {
       try {
-        const next = await resolve(source);
-        const nextCaption = track ? await resolve(track) : "";
-        if (cancel) {
-          for (const url of created) URL.revokeObjectURL(url);
+        if (!source) {
+          setSrc("");
+          setNote("The recording isn't available for playback.");
           return;
         }
+        const next = source.startsWith("quotient://") ? (await mcp.readResource(source)).href ?? "" : source;
+        if (cancel) return;
         setSrc(next);
-        setCaption(nextCaption);
         setNote(next ? "" : "The recording isn't available for playback.");
-      } catch (error) {
+      } catch {
         if (!cancel) setNote("The recording could not be loaded.");
       }
     })();
     return () => {
       cancel = true;
-      for (const url of created) URL.revokeObjectURL(url);
     };
-  }, [mode, playback.original, playback.burned, playback.sidecar]);
+  }, [source]);
+
+  // Captions track (same-origin blob, so no CORS is needed on the media host).
+  useEffect(() => {
+    let cancel = false;
+    let created = "";
+    void (async () => {
+      if (!captions) {
+        setTrack("");
+        return;
+      }
+      try {
+        const body = await mcp.readResource(captions);
+        if (cancel) return;
+        if (body.blob) {
+          created = URL.createObjectURL(body.blob);
+          setTrack(created);
+        } else if (body.href) setTrack(body.href);
+      } catch {
+        if (!cancel) setTrack("");
+      }
+    })();
+    return () => {
+      cancel = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [captions]);
+
+  // Toggle captions without remounting the media element.
+  useEffect(() => {
+    const node = mediaRef.current;
+    if (!node) return;
+    for (const textTrack of Array.from(node.textTracks)) textTrack.mode = showCaptions ? "showing" : "hidden";
+  }, [showCaptions, track, src]);
 
   useEffect(() => {
-    const available = mode === "original"
-      ? playback.original
-      : mode === "burned"
-        ? playback.burned
-        : playback.sidecar;
-    if (available) return;
-    setMode(playback.original ? "original" : playback.burned ? "burned" : "sidecar");
-  }, [mode, playback.original, playback.burned, playback.sidecar]);
+    if (mediaRef.current) mediaRef.current.playbackRate = speed;
+  }, [speed, src]);
 
+  // Blank-picture probe.
   useEffect(() => {
     setBlank(false);
-    if (!src || mode === "sidecar") return;
+    if (!src) return;
     let cancel = false;
     const probe = document.createElement("video");
     probe.crossOrigin = "anonymous";
@@ -102,7 +143,6 @@ export const Player = forwardRef<PlayerHandle, { playback: Playback; loading?: b
     probe.preload = "auto";
     const finish = (value: boolean) => {
       if (!cancel) {
-        // Switching element type remounts the media; keep the listener's place.
         const live = mediaRef.current;
         if (live && value && Number.isFinite(live.currentTime)) timeRef.current = live.currentTime;
         setBlank(value);
@@ -126,73 +166,160 @@ export const Player = forwardRef<PlayerHandle, { playback: Playback; loading?: b
     return () => {
       cancel = true;
       probe.removeAttribute("src");
-      probe.load(); // aborts the in-flight download
+      probe.load();
     };
-  }, [src, mode]);
+  }, [src]);
 
-  // A recording with no picture plays in a native audio control, not a black frame.
+  // Keyboard shortcuts for the whole meeting page; typing in a field is never intercepted.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      const key = event.key.toLowerCase();
+      // On a focused button or summary, Space and Enter belong to that control; the other shortcuts
+      // keep working, so clicking a timestamp does not switch the keyboard off.
+      if (target && /^(BUTTON|SUMMARY|A)$/.test(target.tagName) && (key === " " || key === "enter")) return;
+      const node = mediaRef.current;
+      if (!node) return;
+      const jump = (seconds: number) => {
+        node.currentTime = Math.max(0, Math.min(node.duration || Infinity, node.currentTime + seconds));
+      };
+      if (key === " " || key === "k") (node.paused ? node.play() : (node.pause(), Promise.resolve())).catch(() => undefined);
+      else if (key === "j") jump(-10);
+      else if (key === "l") jump(10);
+      else if (key === "arrowleft" || key === "arrowright") {
+        // Arrow keys keep scrolling and moving through lists unless the player (or nothing) has focus.
+        if (target && target !== document.body && !/^(VIDEO|AUDIO)$/.test(target.tagName) && !target.closest(".q-stage")) return;
+        jump(key === "arrowleft" ? -5 : 5);
+      }
+      else if (key === "c") setShowCaptions((value) => !value);
+      else if (key === "m") node.muted = !node.muted;
+      else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const Media = (blank ? "audio" : "video") as "video";
-
-  const modes: Mode[] = [
-    ...(playback.original ? ["original" as const] : []),
-    ...(playback.burned ? ["burned" as const] : []),
-    ...(playback.sidecar ? ["sidecar" as const] : []),
-  ];
+  const total = duration || Math.max(1, ...chapters.map((chapter) => chapter.endMs)) / 1000;
 
   return (
-    <div>
-      {modes.length > 1 ? (
-        <div className="q-modes" role="group" aria-label="Playback version">
-          {modes.map((item) => (
-            <button key={item} className={item === mode ? "q-btn" : "q-btn-ghost"} type="button" aria-pressed={item === mode} onClick={() => setMode(item)}>
-              {item === "burned" ? "With captions" : item === "sidecar" ? "Subtitles" : "Original"}
-            </button>
-          ))}
+    <div className="q-stage-player">
+      {src ? (
+        <div className={blank ? "q-frame is-audio" : "q-frame"} style={blank ? undefined : ({ "--ratio": String(ratio) } as React.CSSProperties)}>
+          <Media
+            key={`${blank ? "audio" : "video"}:${src}`}
+            ref={mediaRef}
+            src={src}
+            aria-label={blank ? "Meeting audio" : "Meeting video"}
+            controls
+            playsInline
+            preload="metadata"
+            onLoadedMetadata={(event) => {
+              const node = event.currentTarget;
+              if (node.videoWidth && node.videoHeight) setRatio(node.videoWidth / node.videoHeight);
+              setDuration(Number.isFinite(node.duration) ? node.duration : 0);
+              node.playbackRate = speed;
+              // preload="metadata" paints no frame; nudging the playhead makes the first picture show.
+              node.currentTime = timeRef.current > 0 ? timeRef.current : 0.05;
+              for (const textTrack of Array.from(node.textTracks)) textTrack.mode = showCaptions ? "showing" : "hidden";
+            }}
+            onTimeUpdate={(event) => {
+              const ms = event.currentTarget.currentTime * 1000;
+              setNow(ms);
+              if (onTime && Math.abs(ms - lastReport.current) > 240) {
+                lastReport.current = ms;
+                onTime(ms);
+              }
+            }}
+            onError={(event) => {
+              if (renewalAttempted.current || !source.startsWith("quotient://")) {
+                setNote("This recording can't be played right now. Reload the page to try again.");
+                return;
+              }
+              renewalAttempted.current = true;
+              timeRef.current = event.currentTarget.currentTime;
+              void mcp
+                .readResource(source)
+                .then((body) => {
+                  if (body.href) {
+                    setSrc(body.href);
+                    setNote("");
+                  } else setNote("This recording can't be played right now. Reload the page to try again.");
+                })
+                .catch(() => setNote("The recording could not be loaded."));
+            }}
+          >
+            {track ? <track kind="subtitles" src={track} srcLang="en" label="English" default /> : null}
+          </Media>
+          {note ? <p className="q-player-note" role="alert">{note}</p> : null}
+        </div>
+      ) : (
+        <div className="q-player-empty" role="status">
+          <p>
+            {loading
+              ? "Loading the recording…"
+              : status === "queued" || status === "working"
+                ? "The recording can be played once the analysis has finished."
+                : status === "failed" || status === "cancelled"
+                  ? "There is no playable recording for this meeting."
+                  : note || "Loading the recording…"}
+          </p>
+        </div>
+      )}
+      {src ? (
+        <div className="q-player-bar">
+          {chapters.length > 0 ? (
+            <div className="q-chapters" role="group" aria-label="Topics">
+              {chapters.map((chapter) => {
+                const width = ((chapter.endMs - chapter.startMs) / 1000 / total) * 100;
+                const on = now >= chapter.startMs && now < chapter.endMs;
+                return (
+                  <button
+                    key={`${chapter.startMs}:${chapter.title}`}
+                    type="button"
+                    className={on ? "q-chapter is-on" : "q-chapter"}
+                    style={{ flexGrow: Math.max(0.5, width) }}
+                    title={`${formatMs(chapter.startMs)} · ${chapter.title}`}
+                    aria-label={`Play topic ${chapter.title} from ${formatMs(chapter.startMs)}`}
+                    onClick={() => seekTo(chapter.startMs, true)}
+                  >
+                    <span>{chapter.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <span />
+          )}
+          <div className="q-player-tools">
+            {track ? (
+              <button
+                type="button"
+                className={showCaptions ? "q-icon-btn is-on" : "q-icon-btn"}
+                aria-pressed={showCaptions}
+                aria-label="Captions"
+                title={showCaptions ? "Hide captions (C)" : "Show captions (C)"}
+                onClick={() => setShowCaptions((value) => !value)}
+              >
+                {showCaptions ? <Captions size={16} aria-hidden="true" /> : <CaptionsOff size={16} aria-hidden="true" />}
+              </button>
+            ) : null}
+            <label className="q-speed" title="Playback speed">
+              <Gauge size={14} aria-hidden="true" />
+              <span className="q-speed-label">Speed</span>
+              <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
+                {SPEEDS.map((value) => (
+                  <option key={value} value={value}>{value}×</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       ) : null}
-      {src ? (
-        <Media
-          key={`${blank ? "audio" : "video"}:${mode}:${src}`}
-          ref={mediaRef}
-          className={blank ? "q-video is-audio" : "q-video"}
-          src={src}
-          aria-label={blank ? "Meeting audio" : "Meeting video"}
-          controls
-          playsInline
-          onLoadedMetadata={(event) => {
-            if (timeRef.current > 0) event.currentTarget.currentTime = timeRef.current;
-          }}
-          onError={(event) => {
-            if (renewalAttempted.current || !source.startsWith("quotient://")) {
-              setNote("This recording can't be played right now. Reload the page to try again.");
-              return;
-            }
-            renewalAttempted.current = true;
-            timeRef.current = event.currentTarget.currentTime;
-            void mcp.readResource(source).then((body) => {
-              if (body.href) {
-                setSrc(body.href);
-                setNote("");
-              } else {
-                setNote("This recording can't be played right now. Reload the page to try again.");
-              }
-            }).catch((error: unknown) => {
-              setNote("The recording could not be loaded.");
-            });
-          }}
-        >
-          {caption ? <track kind="subtitles" src={caption} srcLang="en" label="Subtitles" default /> : null}
-        </Media>
-      ) : (
-        <div className="q-player-empty" role="status"><p>{loading
-            ? "Loading the recording…"
-            : status === "queued" || status === "working"
-              ? "The recording can be played once the analysis has finished."
-              : status === "failed" || status === "cancelled"
-                ? "There is no playable recording for this meeting."
-                : note || "Loading the recording…"}</p></div>
-      )}
-      {blank ? <p className="q-muted q-player-note">This recording appears to have no picture, so only the audio plays.</p> : null}
+      {blank ? <p className="q-muted q-player-note is-info">This recording appears to have no picture, so only the audio plays.</p> : null}
     </div>
   );
 });
@@ -224,7 +351,6 @@ async function sampleBlank(probe: HTMLVideoElement): Promise<boolean> {
     for (let index = 0; index < data.length; index += 4) {
       peak = Math.max(peak, data[index], data[index + 1], data[index + 2]);
     }
-    // Limited-range black decodes to about 16; anything above 40 is real picture.
     if (peak > 40) return false;
   }
   return true;
