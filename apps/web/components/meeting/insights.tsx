@@ -49,7 +49,7 @@ export function Insights({ spans, claims, digest, names, onPlay }: { spans: Span
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   const voices = useMemo(() => voiceStats(spans, names), [spans, names]);
-  const durationMs = useMemo(() => Math.max(0, ...spans.map((span) => span.end_ms ?? 0)), [spans]);
+  const durationMs = useMemo(() => Math.max(0, ...spans.map((span) => span.end_ms ?? 0).filter((end) => Number.isFinite(end))), [spans]);
   const colorOf = useMemo(() => new Map(voices.map((voice, index) => [voice.id, voiceColor(index)])), [voices]);
   const chapters = digest?.chapters ?? [];
   const width = bucketWidth(durationMs);

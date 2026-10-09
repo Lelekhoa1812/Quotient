@@ -93,3 +93,13 @@ test("overlapping lines of one voice are counted once in its talk time", () => {
   const voices = voiceStats([span("a", 0, 10_000, "spk_0"), span("b", 5_000, 12_000, "spk_0")], new Map());
   assert.equal(voices[0].ms, 12_000);
 });
+
+test("one corrupt span time cannot make the buckets crash or ask for an enormous array", () => {
+  assert.deepEqual(buckets([span("a", 0, 1000, "spk_0", "hello")], 60_000, Number.POSITIVE_INFINITY), []);
+  assert.deepEqual(buckets([span("a", 0, 1000, "spk_0", "hello")], 60_000, Number.NaN), []);
+  assert.ok(buckets([span("a", 0, 1000, "spk_0", "hello")], 1, 1e30).length <= 1000);
+  // A negative start is clipped to the first bucket instead of indexing before it.
+  const out = buckets([span("a", -5000, 4000, "spk_0", "w w w w w w w w w")], 60_000, 120_000);
+  assert.equal(out.length, 2);
+  assert.ok(out[0].ms > 0 && out[0].ms <= 4000);
+});

@@ -73,17 +73,20 @@ function fallbackName(id: string): string {
 
 export type Bucket = { startMs: number; endMs: number; ms: number; words: number; byVoice: Record<string, number> };
 
+const MAX_BUCKETS = 1000;
+
 /** Talk time and words per bucket; a span crossing a boundary is shared out by overlap. */
 export function buckets(spans: Span[], bucketMs: number, durationMs: number): Bucket[] {
-  if (!(bucketMs > 0) || !(durationMs > 0)) return [];
-  const count = Math.max(1, Math.ceil(durationMs / bucketMs));
+  if (!(bucketMs > 0) || !Number.isFinite(durationMs) || !(durationMs > 0)) return [];
+  // A corrupt span end (one huge number) must not ask for an enormous array and blank the whole tab.
+  const count = Math.min(MAX_BUCKETS, Math.max(1, Math.ceil(durationMs / bucketMs)));
   const out: Bucket[] = Array.from({ length: count }, (_, index) => ({ startMs: index * bucketMs, endMs: Math.min(durationMs, (index + 1) * bucketMs), ms: 0, words: 0, byVoice: {} }));
   for (const span of speechSpans(spans)) {
     const start = span.start_ms ?? 0;
     const end = span.end_ms ?? 0;
     const words = wordCount(span.text || span.raw_text);
     const length = end - start;
-    for (let index = Math.floor(start / bucketMs); index <= Math.min(count - 1, Math.floor((end - 1) / bucketMs)); index += 1) {
+    for (let index = Math.max(0, Math.floor(start / bucketMs)); index <= Math.min(count - 1, Math.floor((end - 1) / bucketMs)); index += 1) {
       const overlap = Math.min(end, (index + 1) * bucketMs) - Math.max(start, index * bucketMs);
       if (overlap <= 0) continue;
       const bucket = out[index];
