@@ -46,6 +46,7 @@ def _blank_meeting(*, meeting_id: str, subject: str, object_key: str, context_na
         "omissions": [],
         "none_in_transcript": [],
         "not_evaluated": [],
+        "digest": None,
         "observations": [],
         "revisions": [],
     }
@@ -64,6 +65,8 @@ class MemoryPort:
         object_key: str,
         context_names: tuple[str, ...],
         idempotency_key: str | None,
+        context_batch: str | None = None,
+        purpose: str | None = None,
     ) -> str:
         with self._lock:
             if idempotency_key:
@@ -80,6 +83,12 @@ class MemoryPort:
             if idempotency_key:
                 self._idempotency[(subject, idempotency_key)] = meeting_id
             return meeting_id
+
+    def prepare_context(self, subject: str, files: list[dict]) -> dict | None:
+        return None  # no object storage in this adapter
+
+    def context_items(self, subject: str, batch_id: str) -> list[dict] | None:
+        return None
 
     def meeting(self, meeting_id: str, subject: str) -> dict | None:
         with self._lock:
@@ -154,6 +163,45 @@ class MemoryPort:
             row["updated_at"] = _now()
             return copy.deepcopy(row)
 
+    def merge_speakers(
+        self,
+        meeting_id: str,
+        subject: str,
+        span_id: str,
+        other_span_id: str,
+        display_name: str,
+    ) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            anchor = next((span for span in row["spans"] if span.get("span_id") == span_id), None)
+            other = next((span for span in row["spans"] if span.get("span_id") == other_span_id), None)
+            if anchor is None or other is None:
+                raise PortError("not_found", "Span not found.")
+            keep = anchor.get("speaker_hypothesis_id")
+            gone = other.get("speaker_hypothesis_id")
+            if not keep or not gone:
+                raise PortError("conflict", "Both lines need a speaker to be merged.")
+            # One voice from here on: every line of the other voice moves to the anchor's voice and takes its name.
+            for span in row["spans"]:
+                if span.get("speaker_hypothesis_id") == gone:
+                    span["speaker_hypothesis_id"] = keep
+                if span.get("speaker_hypothesis_id") == keep:
+                    span["speaker_display"] = display_name
+            names = row.setdefault("speaker_names", {})
+            names.pop(gone, None)
+            names[keep] = display_name
+            row["revisions"].append(
+                {
+                    "span_id": span_id,
+                    "scope": "merge",
+                    "display_name": display_name,
+                    "merged_from": gone,
+                    "at": _now(),
+                }
+            )
+            row["updated_at"] = _now()
+            return copy.deepcopy(row)
+
     def revise_text(self, meeting_id: str, subject: str, span_id: str, text: str) -> dict:
         with self._lock:
             row = self._owned(meeting_id, subject)
@@ -208,6 +256,10 @@ class MemoryPort:
                     "omissions",
                     "none_in_transcript",
                     "not_evaluated",
+                    "digest",
+                    "gaps",
+                    "charts",
+                    "synthesis_omissions",
                     "observations",
                 ):
                     if key in graph:

@@ -342,7 +342,7 @@ async def _tools_call(params: dict, request_id: object, session: Session, runtim
         port=runtime.port,  # type: ignore[attr-defined]
         request_id=request_id,
     )
-    if name in {"accept_action", "revise_speaker", "cancel_meeting"}:
+    if name in {"accept_action", "revise_speaker", "merge_speakers", "cancel_meeting"}:
         if not (message.get("result") or {}).get("isError"):
             meeting_id = arguments.get("meeting_id") if isinstance(arguments, dict) else None
             if isinstance(meeting_id, str):
@@ -562,11 +562,18 @@ def _empty(session: Session) -> Response:
 
 
 def _sse_response(events: AsyncIterator[bytes], session: Session) -> StreamingResponse:
+    # Bugs vs Fixes
+    # Bug: The portal reaches MCP through the Next.js /mcp rewrite, whose compression
+    # gzipped and buffered this stream, so no event (not even the upload elicitation)
+    # reached the browser and a meeting could never be submitted from the portal.
+    # Fix: no-transform forbids intermediaries from compressing or buffering the stream;
+    # X-Accel-Buffering does the same for nginx-style proxies.
     return StreamingResponse(
         events,
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
             "MCP-Protocol-Version": PROTOCOL_VERSION,
             "MCP-Session-Id": session.session_id,
         },

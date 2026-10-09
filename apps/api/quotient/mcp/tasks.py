@@ -224,7 +224,9 @@ class TaskBoard:
         return page, next_offset
 
     def _drop_expired_locked(self) -> None:
-        expired = [task_id for task_id, task in self._items.items() if task.expired()]
+        # A task that is still running is never dropped: its meeting keeps analysing (and spending) either
+        # way, and losing the record would leave the person unable to follow or cancel it.
+        expired = [task_id for task_id, task in self._items.items() if task.expired() and task.terminal()]
         for task_id in expired:
             del self._items[task_id]
 

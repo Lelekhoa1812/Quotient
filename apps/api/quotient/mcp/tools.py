@@ -58,12 +58,66 @@ TOOLS: list[dict] = [
                     "type": "string",
                     "description": "Optional retry key. The same key and authorization context return the same meeting.",
                 },
+                "filename": {
+                    "type": "string",
+                    "description": "Name of the file to upload. With an empty object_key the task returns a signed upload target.",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "audio/* or video/* type of the file to upload.",
+                },
+                "byte_size": {"type": "integer", "description": "Size of the file to upload, in bytes."},
+                "context_batch": {
+                    "type": "string",
+                    "description": "Optional batch id returned by prepare_context after its files were uploaded: reference material for the analysis.",
+                },
+                "purpose": {
+                    "type": "string",
+                    "description": "Optional, at most 2000 characters: what the meeting is about, in the person's words. Reference only.",
+                },
             },
             ["object_key"],
         ),
         "execution": {"taskSupport": "required"},
         "annotations": {
             "title": "Submit meeting",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    },
+    {
+        "name": "prepare_context",
+        "title": "Prepare context upload",
+        "description": (
+            "Reserve signed upload targets for reference material (design documents, slides, spreadsheets, notes) "
+            "that the analysis may read: one entry per file, at most 20 files, 25 MB each, 100 MB in all. "
+            "Upload each file with a PUT to its upload_url using the returned headers, then pass the returned "
+            "batch_id to submit_meeting as context_batch. Reference only: it is never treated as what was said."
+        ),
+        "inputSchema": _schema(
+            {
+                "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "filename": {"type": "string", "description": "File name including its extension."},
+                            "media_type": {"type": "string", "description": "Content type the PUT will send."},
+                            "byte_size": {"type": "integer", "description": "Size in bytes."},
+                        },
+                        "required": ["filename"],
+                    },
+                },
+            },
+            ["files"],
+        ),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {
+            "title": "Prepare context upload",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
@@ -195,6 +249,32 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "merge_speakers",
+        "title": "Merge speakers",
+        "description": (
+            "Merge two speaker voices into one everywhere. Every line of the other span's voice moves to the anchor "
+            "span's voice and takes display_name. Use only when a person confirms they are the same speaker. "
+            "This updates the transcript presentation immediately; it does not rerun analysis. raw_text is unchanged."
+        ),
+        "inputSchema": _schema(
+            {
+                "meeting_id": _MEETING,
+                "span_id": {"type": "string", "description": "Anchor span; its voice is kept."},
+                "other_span_id": {"type": "string", "description": "A span of the voice to fold into the anchor's voice."},
+                "display_name": {"type": "string", "description": "Name for the merged voice."},
+            },
+            ["meeting_id", "span_id", "other_span_id", "display_name"],
+        ),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {
+            "title": "Merge speakers",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    },
+    {
         "name": "revise_text",
         "title": "Revise transcript text",
         "description": "Edit the synthesized text for one transcript span. The original raw_text is preserved; this edit does not rerun analysis.",
@@ -264,11 +344,13 @@ def call_immediate(name: str, arguments: dict, *, subject: str, port: object, re
 
 def _handlers() -> dict[str, Callable]:
     return {
+        "prepare_context": _prepare_context,
         "get_meeting": _get_meeting,
         "read_graph": _read_graph,
         "read_span": _read_span,
         "accept_action": _accept_action,
         "revise_speaker": _revise_speaker,
+        "merge_speakers": _merge_speakers,
         "revise_text": _revise_text,
         "cancel_meeting": _cancel_meeting,
     }
@@ -279,6 +361,30 @@ def _owned(port: object, meeting_id: str, subject: str) -> dict:
     if raw is None:
         raise PortError("not_found", "Meeting not found.")
     return raw
+
+
+def _prepare_context(arguments: dict, subject: str, port: object) -> dict:
+    files = arguments.get("files")
+    if not isinstance(files, list) or not 1 <= len(files) <= 20:
+        raise ValueError("files must be a list of 1 to 20 entries")
+    clean = []
+    for entry in files:
+        if not isinstance(entry, dict) or not isinstance(entry.get("filename"), str) or not entry["filename"].strip() or len(entry["filename"]) > 200:
+            raise ValueError("each file needs a filename of at most 200 characters")
+        media = entry.get("media_type")
+        size = entry.get("byte_size")
+        if media is not None and (not isinstance(media, str) or len(media) > 127):
+            raise ValueError("media_type must be a short string")
+        if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
+            raise ValueError("byte_size must be a non-negative integer")
+        clean.append({"filename": entry["filename"].strip(), "media_type": media, "byte_size": size})
+    prepare = getattr(port, "prepare_context", None)
+    if not callable(prepare):
+        raise PortError("unavailable", "Context uploads need object storage, which is not configured.")
+    result = prepare(subject, clean)
+    if result is None:
+        raise PortError("unavailable", "Context uploads need object storage, which is not configured.")
+    return result
 
 
 def _get_meeting(arguments: dict, subject: str, port: object) -> dict:
@@ -329,6 +435,17 @@ def _revise_speaker(arguments: dict, subject: str, port: object) -> dict:
     raw = port.revise_speaker(meeting_id, subject, span_id, scope, display_name)  # type: ignore[attr-defined]
     projected = project_meeting(raw)
     return summary(projected)
+
+
+def _merge_speakers(arguments: dict, subject: str, port: object) -> dict:
+    meeting_id = _required_id(arguments, "meeting_id")
+    span_id = _required_text(arguments, "span_id")
+    other_span_id = _required_text(arguments, "other_span_id")
+    display_name = _required_text(arguments, "display_name")
+    if len(display_name) > 128:
+        raise ValueError("display_name is too long")
+    raw = port.merge_speakers(meeting_id, subject, span_id, other_span_id, display_name)  # type: ignore[attr-defined]
+    return summary(project_meeting(raw))
 
 
 def _revise_text(arguments: dict, subject: str, port: object) -> dict:
@@ -390,6 +507,12 @@ def validate_submit_arguments(arguments: dict) -> str | None:
     for name in names:
         if not isinstance(name, str) or len(name) > 64 or not name.strip():
             return "context_names entries must be short strings"
+    batch = arguments.get("context_batch")
+    if batch is not None and (not isinstance(batch, str) or not 1 <= len(batch) <= 64 or not all(c.isalnum() or c in "_-" for c in batch)):
+        return "context_batch is not a batch id"
+    purpose = arguments.get("purpose")
+    if purpose is not None and (not isinstance(purpose, str) or len(purpose) > 2000):
+        return "purpose must be text of at most 2000 characters"
     idem = arguments.get("idempotency_key")
     if idem is not None:
         if not isinstance(idem, str) or len(idem) > 128:

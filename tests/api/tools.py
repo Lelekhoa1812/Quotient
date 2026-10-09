@@ -15,6 +15,12 @@ EXPECTED = {
         "destructiveHint": False,
         "required": ["object_key"],
     },
+    "prepare_context": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "required": ["files"],
+    },
     "get_meeting": {
         "taskSupport": "forbidden",
         "readOnlyHint": True,
@@ -44,6 +50,12 @@ EXPECTED = {
         "readOnlyHint": False,
         "destructiveHint": False,
         "required": ["meeting_id", "span_id", "scope", "display_name"],
+    },
+    "merge_speakers": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "required": ["meeting_id", "span_id", "other_span_id", "display_name"],
     },
     "revise_text": {
         "taskSupport": "forbidden",
@@ -133,3 +145,43 @@ def test_task_support_errors_and_no_meetings_route():
         )
     assert missing_task["error"]["code"] == -32601
     assert forbidden["error"]["code"] == -32601
+
+
+class _ContextPort(MemoryPort):
+    """A port that can sign context uploads, to exercise the tool without object storage."""
+
+    def __init__(self):
+        super().__init__()
+        self.batches = {}
+        self.seen = []
+
+    def prepare_context(self, subject, files):
+        self.seen.append((subject, files))
+        batch = "batch1"
+        self.batches[batch] = (subject, [f["filename"] for f in files])
+        return {"batch_id": batch, "uploads": [{"index": i, "filename": f["filename"], "upload_url": "http://x/put", "method": "PUT", "headers": {"Content-Type": "text/plain"}, "object_key": f"context/{batch}/{i:02d}-{f['filename']}"} for i, f in enumerate(files)]}
+
+    def context_items(self, subject, batch_id):
+        owner = self.batches.get(batch_id)
+        return [] if owner and owner[0] == subject else None
+
+
+def _call(client, headers, name, arguments):
+    return rpc(client, headers, "tools/call", {"name": name, "arguments": arguments})
+
+
+def test_prepare_context_validates_input_and_returns_one_target_per_file():
+    port = _ContextPort()
+    with TestClient(create_app(auth_bypass=True, port=port, environ={})) as client:
+        headers = open_session(client)
+        good = _call(client, headers, "prepare_context", {"files": [{"filename": "design.docx", "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "byte_size": 1000}, {"filename": "notes.md"}]})
+        body = good["result"]["structuredContent"]
+        assert body["batch_id"] == "batch1" and [u["index"] for u in body["uploads"]] == [0, 1]
+        for bad in ({"files": []}, {"files": "x"}, {"files": [{}]}, {"files": [{"filename": "a.md", "byte_size": -1}]}, {"files": [{"filename": "a.md", "media_type": 5}]}, {"files": [{"filename": "x" * 201}]}, {"files": [{"filename": "a.md"}] * 21}):
+            assert "error" in _call(client, headers, "prepare_context", bad)
+
+
+def test_prepare_context_without_object_storage_says_so_plainly():
+    with TestClient(create_app(auth_bypass=True, port=MemoryPort(), environ={})) as client:
+        reply = _call(client, open_session(client), "prepare_context", {"files": [{"filename": "a.md"}]})
+        assert reply["result"]["isError"] is True and "object storage" in reply["result"]["structuredContent"]["error"]

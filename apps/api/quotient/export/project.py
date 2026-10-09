@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import html
+import re
 import io
 import json
 import zipfile
@@ -56,9 +57,11 @@ def render_local(name: str, projected: dict) -> tuple[str, bytes] | None:
     if name == "graph.json":
         body = json.dumps(projected["graph"], ensure_ascii=False, indent=2).encode("utf-8")
     elif name == "brief.html":
-        body = _html(_export_brief(projected)).encode("utf-8")
+        digest = projected["graph"].get("digest")
+        body = (_digest_html(digest, _voice_names(projected)) if isinstance(digest, dict) else _html(_export_brief(projected))).encode("utf-8")
     elif name == "brief.pdf":
-        body = _pdf(_pdf_blocks(_export_brief(projected)))
+        digest = projected["graph"].get("digest")
+        body = _pdf(_digest_blocks(digest, _voice_names(projected)) if isinstance(digest, dict) else _pdf_blocks(_export_brief(projected)))
     elif name == "actions.csv":
         body = _csv(projected["graph"]["actions"]).encode("utf-8")
     elif name == "actions.xlsx":
@@ -437,3 +440,133 @@ def _xml(value: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+# Motivation vs Logic
+# Motivation: The downloaded brief is what people forward. It should carry the walkaway the portal
+# shows (what it was, decisions, actions, open questions, figures, topics), not a sentence list.
+# Logic: One block list renders to both PDF and HTML. Every item keeps its time. Items resting on
+# "likely" evidence say so. The MCP brief resource is not changed by this.
+_KIND = {"meeting": "Meeting", "presentation": "Presentation", "lecture": "Lecture", "discussion": "Discussion", "interview": "Interview"}
+
+
+def _at(row: dict, key: str = "start_ms") -> str:
+    value = row.get(key)
+    if not isinstance(value, int):
+        return ""
+    seconds = value // 1000
+    return f" ({seconds // 60}:{seconds % 60:02d})"
+
+
+def _mark(row: dict) -> str:
+    return " [likely]" if row.get("basis") == "likely" else ""
+
+
+def _voice_names(projected: dict) -> dict[str, str]:
+    """Names a reader should see for voice ids: what the transcript named, overridden by what a person typed."""
+    graph = projected.get("graph") if isinstance(projected, dict) else None
+    graph = graph if isinstance(graph, dict) else {}
+    names: dict[str, str] = {}
+    digest = graph.get("digest")
+    for row in (digest.get("speakers") if isinstance(digest, dict) else None) or []:
+        if isinstance(row, dict) and row.get("id") and row.get("name"):
+            names[row["id"]] = f"{row['name']} ({row['role']})" if row.get("role") else str(row["name"])
+    for span in graph.get("spans") or []:
+        if isinstance(span, dict) and span.get("speaker_hypothesis_id") and span.get("speaker_display"):
+            names[span["speaker_hypothesis_id"]] = str(span["speaker_display"])
+    return names
+
+
+def _speaker(value: object, names: dict[str, str] | None = None) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    if names and value in names:
+        return names[value]
+    digits = "".join(ch for ch in value if ch.isdigit())
+    return f"Speaker {int(digits) + 1}" if digits and value.startswith("spk_") else value
+
+
+def _digest_blocks(digest: dict, names: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    blocks: list[tuple[str, str]] = [("title", str(digest.get("title") or "Brief"))]
+    kind = _KIND.get(str(digest.get("content_type") or ""))
+    if kind:
+        blocks.append(("cite", kind))
+    for row in digest.get("summary") or []:
+        blocks.append(("p", f"{row.get('text', '')}{_mark(row)}{_at(row)}"))
+    blocks.append(("gap", ""))
+
+    def section(title: str, lines: list[str]) -> None:
+        if lines:
+            blocks.append(("heading", title))
+            blocks.extend(("p", line) for line in lines)
+            blocks.append(("gap", ""))
+
+    section("Decisions", [
+        f"{str(row.get('status') or 'tentative').capitalize()}: {row.get('statement', '')}"
+        f"{' (decided by ' + _speaker(row.get('decided_by'), names) + ')' if row.get('decided_by') else ''}{_mark(row)}{_at(row)}"
+        for row in digest.get("decisions") or []
+    ])
+    section("Action items", [
+        f"{'Agreed' if row.get('agreed') else 'Suggested'}: {row.get('task', '')}"
+        f"{' (owner ' + _speaker(row.get('assignee'), names) + ')' if row.get('assignee') else ''}"
+        f"{' (due ' + str(row.get('due')) + ')' if row.get('due') else ''}{_mark(row)}{_at(row)}"
+        for row in digest.get("actions") or []
+    ])
+    section("Questions raised", [
+        f"{'Answered' if row.get('answered') else 'Open'}: {row.get('question', '')}{_at(row)}"
+        + (f" Answer: {row.get('answer')}{_at(row, 'answer_ms')}" if row.get("answered") and row.get("answer") else "")
+        for row in digest.get("open_questions") or []
+    ])
+    disputes = []
+    for row in digest.get("disagreements") or []:
+        sides = "; ".join(
+            f"{_speaker(side.get('speaker'), names) or 'A participant'}: {side.get('position', '')}{_at(side)}"
+            for side in row.get("positions") or []
+        )
+        disputes.append(f"{row.get('topic', '')}. {sides}")
+    section("Where people disagreed", disputes)
+    section("Key figures", [f"{row.get('value', '')}: {row.get('what', '')}{_at(row)}" for row in digest.get("key_figures") or []])
+    section("Key ideas", [f"{row.get('term', '')}: {row.get('explanation', '')}{_mark(row)}{_at(row)}" for row in digest.get("concepts") or []])
+    section("Risks and concerns", [f"{row.get('risk', '')}{_mark(row)}{_at(row)}" for row in digest.get("risks") or []])
+    diagram = digest.get("diagram")
+    if isinstance(diagram, dict) and diagram.get("mermaid"):
+        blocks.append(("heading", str(diagram.get("title") or "How it fits together")))
+        blocks.append(("figure", str(diagram["mermaid"])))
+        blocks.append(("gap", ""))
+    section("Topics", [f"{_at(row).strip(' ()') or ''} {row.get('title', '')}: {row.get('gist', '')}".strip() for row in digest.get("chapters") or []])
+    blocks.append(("cite", "Every point above is tied to the moment in the recording where it was said. [likely] marks points where one of two checks was not certain."))
+    # Free text can still mention a voice by id ("spk_2 will ..."); show the name a person would use.
+    def named(value: str) -> str:
+        return re.sub(r"\bspk_(\d+)\b", lambda m: _speaker(m.group(0), names), value)
+
+    return [(kind, named(text)) for kind, text in blocks]
+
+
+def _digest_html(digest: dict, names: dict[str, str] | None = None) -> str:
+    parts = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        f"<head><meta charset=\"utf-8\"><title>{html.escape(str(digest.get('title') or 'Brief'))}</title>",
+        "<style>body{font:16px/1.55 sans-serif;max-width:46rem;margin:2rem auto;color:#001938;background:#fff;padding:0 1rem}"
+        "h1{font-size:1.6rem;margin:0 0 .25rem}h2{font-size:1.05rem;margin:1.6rem 0 .4rem;border-bottom:1px solid #d6dde8;padding-bottom:.25rem}"
+        "p{margin:.35rem 0}.cite{color:#506079;font-size:.85rem}figure.diagram{margin:1rem 0} svg{max-width:100%;height:auto}</style></head>",
+        "<body>",
+    ]
+    script = False
+    for kind, text in _digest_blocks(digest, names):
+        if kind == "title":
+            parts.append(f"<h1>{html.escape(text)}</h1>")
+        elif kind == "heading":
+            parts.append(f"<h2>{html.escape(text)}</h2>")
+        elif kind == "cite":
+            parts.append(f'<p class="cite">{html.escape(text)}</p>')
+        elif kind == "figure":
+            fragment, needs_script = render_markdown(f"```mermaid\n{text}\n```")
+            script = script or needs_script
+            parts.append(fragment)
+        elif kind == "p":
+            parts.append(f"<p>{html.escape(text)}</p>")
+    if script:
+        parts.append(mermaid_script())
+    parts.append("</body></html>")
+    return "\n".join(parts)

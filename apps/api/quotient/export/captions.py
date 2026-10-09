@@ -6,6 +6,10 @@ Logic: WebVTT and SRT cues use start_ms and end_ms. Cue text is the human text
 field. No model is asked to rewrite a line. When a cue would still be on screen
 as the next one starts, its end is cut to that start so two lines are never
 shown at once; cues that start together are left as they are.
+A span longer than two caption lines (2 x 42 characters) is split at word
+boundaries into several cues; its time is shared by character count, so a
+minute-long span never becomes one wall of text. An empty edited text falls back
+to the transcript's own wording.
 """
 
 from __future__ import annotations
@@ -22,11 +26,12 @@ def srt(spans: list[dict]) -> str:
 def _document(spans: list[dict], *, separator: str) -> str:
     cues = []
     for span in _speech(spans):
-        text = _cue_text(span.get("text") if isinstance(span.get("text"), str) else "")
+        source = span.get("text") if isinstance(span.get("text"), str) and span.get("text").strip() else span.get("raw_text")
+        text = _cue_text(source if isinstance(source, str) else "")
         if not text:
             continue
         start_ms, end_ms = _bounds(span)
-        cues.append((start_ms, end_ms, text))
+        cues.extend(_split(start_ms, end_ms, text))
     # Bugs vs Fixes
     # Bug: Neighbouring spans overlap (the sample-clock estimate is coarse), so players stacked
     # two captions on screen.
@@ -70,7 +75,40 @@ def _stamp(milliseconds: int, separator: str) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}{separator}{millis:03d}"
 
 
+LINE = 42
+
+
+def _split(start_ms: int, end_ms: int, text: str) -> list[tuple[int, int, str]]:
+    """Pack words into lines of at most LINE characters, then pair lines into cues.
+
+    Each cue gets a share of the span's time proportional to its characters. A single word
+    longer than LINE stays on its own line rather than being cut.
+    """
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if len(candidate) > LINE and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) <= 2:
+        return [(start_ms, end_ms, "\n".join(lines))]
+    chunks = ["\n".join(lines[index : index + 2]) for index in range(0, len(lines), 2)]
+    total = sum(len(chunk) for chunk in chunks)
+    cues = []
+    cursor = start_ms
+    for index, chunk in enumerate(chunks):
+        stop = end_ms if index == len(chunks) - 1 else cursor + max(1, round((end_ms - start_ms) * len(chunk) / total))
+        cues.append((cursor, max(stop, cursor + 1), chunk))
+        cursor = stop
+    return cues
+
+
 def _cue_text(value: str) -> str:
     cleaned = value.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
-    cleaned = cleaned.replace("&", "&amp;").replace("<", "&lt;")
-    return cleaned.strip()
+    cleaned = cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return " ".join(cleaned.split())

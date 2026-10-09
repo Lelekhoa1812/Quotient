@@ -32,7 +32,7 @@ async def run_submit(task: TaskRecord, arguments: dict, runtime: object) -> None
             _notify_status(task, runtime)
             return
         if upload_incomplete(arguments):
-            supplied = await _collect_upload(task, runtime)
+            supplied = await _collect_upload(task, runtime, arguments)
             if supplied is None:
                 return
             arguments = {**arguments, **supplied}
@@ -41,12 +41,33 @@ async def run_submit(task: TaskRecord, arguments: dict, runtime: object) -> None
                 task.fail_tool(problem)
                 _notify_status(task, runtime)
                 return
+        key = str(arguments.get("object_key") or "").strip()
+        if key.startswith("uploads/") and not key.startswith(f"uploads/{task.task_id}/"):
+            # A browser upload is only ever analysed under the key the server issued to this very task.
+            task.fail_tool("That upload does not belong to this request.")
+            _notify_status(task, runtime)
+            return
+        batch = arguments.get("context_batch")
+        # With an idempotency key the port decides: a retry of a request that already ran must return its
+        # meeting even though that request consumed the batch.
+        if isinstance(batch, str) and batch and not arguments.get("idempotency_key"):
+            known = getattr(runtime.port, "context_items", None)  # type: ignore[attr-defined]
+            if not callable(known) or known(task.auth_subject, batch) is None:
+                task.fail_tool("The context you added was not found. Add it again and start the analysis.")
+                _notify_status(task, runtime)
+                return
         _progress(task, runtime, 1, "Recording the meeting.")
+        extra = {}
+        if isinstance(batch, str) and batch:
+            extra["context_batch"] = batch
+        if isinstance(arguments.get("purpose"), str) and arguments["purpose"].strip():
+            extra["purpose"] = arguments["purpose"].strip()
         meeting_id = runtime.port.submit(  # type: ignore[attr-defined]
             subject=task.auth_subject,
             object_key=str(arguments.get("object_key")).strip(),
             context_names=_names(arguments.get("context_names")),
             idempotency_key=arguments.get("idempotency_key"),
+            **extra,
         )
         task.meeting_id = meeting_id
         task.touch(f"Meeting {meeting_id} is queued.")
@@ -108,12 +129,33 @@ def _sync(task: TaskRecord, runtime: object) -> bool:
     return False
 
 
-async def _collect_upload(task: TaskRecord, runtime: object) -> dict | None:
+async def _collect_upload(task: TaskRecord, runtime: object, arguments: dict | None = None) -> dict | None:
+    """Pause in input_required until the upload is stored.
+
+    Bugs vs Fixes
+    Bug: The elicitation carried no upload target, so a browser had nowhere to send the
+    file, and the server accepted any object key the client echoed back.
+    Fix: When the worker port can sign uploads, the elicitation carries a signed PUT for a
+    key the server minted (uploads/<task_id>/<name>). Completion is accepted only for that
+    key and only once the stored object exists and is not empty. Without object storage
+    (CLI use) the previous contract stands: the client names a completed key.
+    """
+    arguments = arguments or {}
+    port = runtime.port  # type: ignore[attr-defined]
+    target = None
+    signer = getattr(port, "upload_target", None)
+    if callable(signer):
+        try:
+            target = signer(task.task_id, arguments.get("filename"), arguments.get("media_type"), arguments.get("byte_size"))
+        except PortError as exc:
+            task.fail_tool(exc.message)
+            _notify_status(task, runtime)
+            return None
     for _attempt in range(_ELICIT_ATTEMPTS):
         if task.terminal():
             return None
-        body = _elicitation(task.task_id)
-        future = task.mark_input_required("The upload is incomplete.", body)
+        body = _elicitation(task.task_id, target)
+        future = task.mark_input_required("Waiting for the recording to upload.", body)
         _notify_status(task, runtime)
         _fanout(runtime, task.session_id, body)
         try:
@@ -129,10 +171,20 @@ async def _collect_upload(task: TaskRecord, runtime: object) -> dict | None:
             _notify_status(task, runtime)
             return None
         content = response.get("content") if isinstance(response.get("content"), dict) else {}
-        key = content.get("object_key")
         complete = content.get("upload_complete") is True
+        if target is not None:
+            if not complete:
+                continue
+            stored = _stored(port, target["object_key"])
+            if stored is None or stored.get("size", 0) <= 0:
+                continue
+            key = target["object_key"]
+            task.mark_working("Upload received.")
+            _notify_status(task, runtime)
+            return {"object_key": key, "upload_complete": True}
+        key = content.get("object_key")
         if isinstance(key, str) and key.strip() and complete:
-            task.mark_working(f"Upload accepted for {key.strip()}.")
+            task.mark_working("Upload received.")
             _notify_status(task, runtime)
             return {"object_key": key.strip(), "upload_complete": True}
     task.fail_tool("Upload was not completed.")
@@ -140,30 +192,44 @@ async def _collect_upload(task: TaskRecord, runtime: object) -> dict | None:
     return None
 
 
-def _elicitation(task_id: str) -> dict:
+def _stored(port: object, key: str) -> dict | None:
+    probe = getattr(port, "uploaded_object", None)
+    if not callable(probe):
+        return {"size": 1}
+    try:
+        return probe(key)
+    except Exception:
+        return None
+
+
+def _elicitation(task_id: str, target: dict | None = None) -> dict:
+    params: dict = {
+        "_meta": {RELATED_TASK: {"taskId": task_id}},
+        "mode": "form",
+        "message": "The media upload is incomplete. Send the completed object key to continue.",
+        "requestedSchema": {
+            "type": "object",
+            "properties": {
+                "object_key": {
+                    "type": "string",
+                    "description": "Object key of the completed upload.",
+                },
+                "upload_complete": {
+                    "type": "boolean",
+                    "description": "True only when the object is fully stored.",
+                },
+            },
+            "required": ["object_key", "upload_complete"],
+        },
+    }
+    if target is not None:
+        params["message"] = "Upload the recording to the signed URL, then confirm."
+        params["upload"] = dict(target)
     return {
         "jsonrpc": "2.0",
         "id": secrets.token_urlsafe(12),
         "method": "elicitation/create",
-        "params": {
-            "_meta": {RELATED_TASK: {"taskId": task_id}},
-            "mode": "form",
-            "message": "The media upload is incomplete. Send the completed object key to continue.",
-            "requestedSchema": {
-                "type": "object",
-                "properties": {
-                    "object_key": {
-                        "type": "string",
-                        "description": "Object key of the completed upload.",
-                    },
-                    "upload_complete": {
-                        "type": "boolean",
-                        "description": "True only when the object is fully stored.",
-                    },
-                },
-                "required": ["object_key", "upload_complete"],
-            },
-        },
+        "params": params,
     }
 
 

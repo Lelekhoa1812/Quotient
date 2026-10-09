@@ -63,7 +63,13 @@ class WorkerPort(Protocol):
         object_key: str,
         context_names: tuple[str, ...],
         idempotency_key: str | None,
+        context_batch: str | None = None,
+        purpose: str | None = None,
     ) -> str: ...
+
+    def prepare_context(self, subject: str, files: list[dict]) -> dict | None: ...
+
+    def context_items(self, subject: str, batch_id: str) -> list[dict] | None: ...
 
     def meeting(self, meeting_id: str, subject: str) -> dict | None: ...
 
@@ -77,6 +83,15 @@ class WorkerPort(Protocol):
         subject: str,
         span_id: str,
         scope: str,
+        display_name: str,
+    ) -> dict: ...
+
+    def merge_speakers(
+        self,
+        meeting_id: str,
+        subject: str,
+        span_id: str,
+        other_span_id: str,
         display_name: str,
     ) -> dict: ...
 

@@ -11,6 +11,8 @@ uncovered speech spans.
 
 from __future__ import annotations
 
+import re
+
 from quotient.worker.port import ARTIFACT_KEYS
 
 DIMENSIONS = (
@@ -116,6 +118,12 @@ def project_meeting(raw: dict) -> dict:
         "dimensions": dimensions,
         "raw_transcript": _raw_transcript(spans, cleaned.get("observations")),
         "charts": _charts(cleaned.get("charts")),
+        "digest": _digest(cleaned.get("digest"), spans_by_id),
+        "captions": (
+            f"quotient://meetings/{meeting_id}/exports/captions.vtt"
+            if any(span.get("kind") == "speech" for span in spans)
+            else None
+        ),
         "synthesis_omissions": _omissions(cleaned.get("synthesis_omissions"), "finding_id"),
         "dissent_omissions": _omissions(cleaned.get("synthesis_omissions"), "finding_id"),
     }
@@ -155,6 +163,8 @@ def project_meeting(raw: dict) -> dict:
         "withheld": withheld,
         "updated_at": cleaned.get("updated_at") if isinstance(cleaned.get("updated_at"), str) else None,
         "source_name": _source_name(raw.get("object_key")),
+        "task_id": _task_id(raw.get("object_key")),
+        "context": _context_view(raw.get("context")),
         "failure_message": _safe_failure(cleaned.get("failure_message")),
         "graph": graph,
         "brief": brief,
@@ -182,6 +192,21 @@ def summary(projected: dict) -> dict:
         result["updated_at"] = projected["updated_at"]  # additive: lets a client show real times
     if projected.get("source_name"):
         result["source_name"] = projected["source_name"]  # additive: a readable fallback title
+    if projected.get("task_id"):
+        result["task_id"] = projected["task_id"]  # additive: lets a client tie its own submission to this meeting
+    if projected.get("context"):
+        result["context"] = projected["context"]  # additive: what reference material the analysis was given
+    digest = (projected.get("graph") or {}).get("digest")
+    if isinstance(digest, dict):
+        # Additive: what a meeting list needs to say what the meeting was and what came out of it.
+        result["headline"] = {
+            "title": digest.get("title") or "",
+            "content_type": digest.get("content_type") or "other",
+            "decisions": len(digest.get("decisions") or []),
+            "actions": len(digest.get("actions") or []),
+            "open_questions": sum(1 for row in digest.get("open_questions") or [] if not row.get("answered")),
+            "summary": next((row.get("text") for row in digest.get("summary") or [] if row.get("text")), ""),
+        }
     # Additive: only a failed meeting carries its (already sanitised) reason.
     if projected["status"] == "failed" and projected.get("failure_message"):
         result["failure_message"] = projected["failure_message"]
@@ -203,6 +228,8 @@ def page_graph(graph: dict, offset: int, page_size: int) -> tuple[dict, int | No
                 "raw_transcript": graph["raw_transcript"],
                 "charts": graph.get("charts") or [],
                 "synthesis_omissions": graph.get("synthesis_omissions") or [],
+                "digest": graph.get("digest"),
+                "captions": graph.get("captions"),
                 "dissent_omissions": graph.get("dissent_omissions") or [],
             }
         )
@@ -480,8 +507,36 @@ def _claim_view(claim: dict, spans_by_id: dict, meeting_id: str) -> tuple[dict, 
         "coarse": bool(claim.get("coarse")),
         "overlap": bool(claim.get("overlap")),
         "citations": citations,
+        "confidence": _confidence(claim, public_status, citations),
     }
     return view, holds and bool(claim_id)
+
+
+_CONFIDENCE = {"confirmed", "likely", "contradicted", "unverified"}
+
+
+def _confidence(claim: dict, public_status: str, citations: list[dict]) -> str:
+    """Confidence tier for display. A tier never outranks what the citations prove:
+    without a verified citation a claim is at best unverified."""
+    if public_status == "supported":
+        return "confirmed"
+    if public_status == "contradicted":
+        return "contradicted"
+    stored = claim.get("confidence")
+    if stored not in _CONFIDENCE:
+        verdict = claim.get("verdict") if isinstance(claim.get("verdict"), dict) else {}
+        labels = {verdict.get("sol"), verdict.get("luna")}
+        if "contradicts" in labels or verdict.get("contradiction"):
+            stored = "contradicted"
+        elif verdict.get("quote_resolved") and "entails" in labels:
+            stored = "likely"
+        else:
+            stored = "unverified"
+    if stored == "confirmed":
+        stored = "likely"
+    if stored == "likely" and not citations:
+        return "unverified"
+    return stored
 
 
 def _citation_view(citation: object, spans_by_id: dict, meeting_id: str) -> dict | None:
@@ -602,6 +657,39 @@ def _release(value: object) -> str | None:
 _LEAKY = ("/Users/", "/home/", "/private/", "/tmp/", "Command [", "Command '[", "Traceback", "RequestId")
 
 
+_CONTEXT_STATUS = {"pending", "ready", "skipped", "failed"}
+
+
+def _context_view(value: object) -> dict | None:
+    """The person's purpose and each item's name and state; never storage keys or batch ids."""
+    if not isinstance(value, dict):
+        return None
+    items = []
+    for item in value.get("items") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            continue
+        status = item.get("status") if item.get("status") in _CONTEXT_STATUS else "pending"
+        chars = item.get("chars")
+        items.append({
+            "name": item["name"][:160],
+            "status": status,
+            "reason": item.get("reason") if isinstance(item.get("reason"), str) else None,
+            "chars": chars if isinstance(chars, int) and not isinstance(chars, bool) else None,
+            "summary": item.get("summary") if isinstance(item.get("summary"), str) else None,
+        })
+    purpose = value.get("purpose") if isinstance(value.get("purpose"), str) and value["purpose"].strip() else None
+    return {"purpose": purpose, "items": items} if (items or purpose) else None
+
+
+_UPLOAD_TASK = re.compile(r"^uploads/([A-Za-z0-9_-]{1,64})/")
+
+
+def _task_id(object_key: object) -> str | None:
+    """The task that uploaded the recording: the server mints uploads/<task_id>/<name>, so the key names it."""
+    match = _UPLOAD_TASK.match(object_key) if isinstance(object_key, str) else None
+    return match.group(1) if match else None
+
+
 def _source_name(object_key: object) -> str | None:
     """The file's own name without folders or extension; never the per-meeting copy's generated name."""
     if not isinstance(object_key, str) or not object_key:
@@ -633,3 +721,114 @@ def _strip(value: object) -> object:
 
 def _ints(*values: object) -> bool:
     return all(isinstance(value, int) and not isinstance(value, bool) for value in values)
+
+
+_DIGEST_LISTS = (
+    "summary", "chapters", "decisions", "actions", "open_questions", "disagreements", "perspectives",
+    "key_figures", "risks", "concepts", "speakers",
+)
+
+
+# Commentary about the transcript's own mechanics ("the continuing argument under Speaker 8", "completed in the following
+# line labeled Speaker 7") reads as nonsense to someone who never saw the lines. The writer is told not to produce it; this
+# drops the clause that does, for meetings analysed before that rule and for any that slip past it.
+_LEAK = re.compile(
+    r"\b(?:the\s+)?(?:continuing|continued|continuation)\s+(?:argument|statement|remark|point|line)s?\b"
+    r"|\b(?:in|on|from|by)\s+the\s+(?:following|next|previous|preceding|prior)\s+(?:line|span|segment|turn)\b"
+    r"|\bline\s+labell?ed\b|\blabell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b|\bspan[_ ]?ids?\b",
+    re.I,
+)
+# A first-person promise: "we will", "i'll". Mirrors the worker, which applies the same rule to new analyses.
+_PROMISE = re.compile(r"\b(?:i|we)(?:'ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna)\b", re.I)
+# A choice somebody describes from the past is background, not something these participants settled.
+_HISTORY = re.compile(r"^\s*(?:historically|in the past|back then|years ago)\b[\s,]", re.I)
+_PROSE_KEYS = ("text", "statement", "position", "task", "question", "answer", "explanation", "gist", "what", "reason")
+
+
+def _unleak(value: str) -> str:
+    """Remove every clause that talks about the transcript itself; keep the rest of the sentence."""
+    if not _LEAK.search(value):
+        return value
+    clauses = re.split(r"(?<=[;])\s+", value)
+    kept = [clause for clause in clauses if not _LEAK.search(clause)]
+    text = " ".join(kept).strip().rstrip(";,").strip()
+    if text and text[-1] not in ".!?":
+        text += "."
+    return text if kept else ""
+
+
+def _unleak_row(row: dict) -> bool:
+    """Clean one row in place. False when its main text was nothing but such commentary."""
+    main = next((key for key in _PROSE_KEYS if isinstance(row.get(key), str) and row[key].strip()), None)
+    for key in _PROSE_KEYS:
+        if isinstance(row.get(key), str):
+            row[key] = _unleak(row[key])
+    positions = row.get("positions")
+    if isinstance(positions, list):
+        copies = [dict(position) for position in positions if isinstance(position, dict)]
+        row["positions"] = [position for position in copies if _unleak_row(position)]
+    return main is None or bool(row.get(main))
+
+
+def _digest(value: object, spans_by_id: dict) -> dict | None:
+    """Re-check the worker's grounded digest against this meeting's spans before anyone reads it.
+
+    An item whose citations no longer resolve (for example after a span was removed) is dropped,
+    so the API never shows a walkaway item without evidence on this graph.
+    """
+    if not isinstance(value, dict):
+        return None
+    known = {span_id for span_id, span in spans_by_id.items() if isinstance(span, dict)}
+
+    def cited(item: dict) -> bool:
+        ids = [item.get(key) for key in ("span_id", "asked_span_id", "start_span_id") if item.get(key)]
+        ids += list(item.get("span_ids") or [])
+        for position in item.get("positions") or []:
+            ids += list(position.get("span_ids") or []) if isinstance(position, dict) else []
+        return bool(ids) and all(isinstance(span_id, str) and span_id in known for span_id in ids)
+
+    out: dict = {
+        "content_type": value.get("content_type") if isinstance(value.get("content_type"), str) else "other",
+        "title": value.get("title") if isinstance(value.get("title"), str) else "",
+    }
+    for key in _DIGEST_LISTS:
+        rows = value.get(key) if isinstance(value.get(key), list) else []
+        out[key] = [row for row in (dict(item) for item in rows if isinstance(item, dict) and cited(item)) if _unleak_row(row)]
+    for row in out.get("actions") or []:
+        cited_spans = [spans_by_id[i] for i in row.get("span_ids") or [] if isinstance(spans_by_id.get(i), dict)]
+        heard = {sp.get("speaker_hypothesis_id") for sp in cited_spans if sp.get("speaker_hypothesis_id")}
+        if row.get("assignee") and row["assignee"] not in heard:
+            promised = any(_PROMISE.search(str(sp.get("text") or sp.get("raw_text") or "")) for sp in cited_spans)
+            row["assignee"] = next(iter(heard)) if len(heard) == 1 and promised else None
+    out["decisions"] = [row for row in out.get("decisions") or [] if not _HISTORY.match(str(row.get("statement") or ""))]
+    # A reply citing a line that is no longer on this graph loses the reply, not the question.
+    for row in out.get("open_questions") or []:
+        reply = row.get("answer_span_id")
+        if reply is not None and reply not in known:
+            row.update({"answered": False, "answer": None, "answer_span_id": None, "answer_ms": None})
+    # Topics stay contiguous after any chapter was dropped: each runs until the next one starts.
+    chapters = sorted(
+        (row for row in out.get("chapters") or [] if isinstance(row.get("start_ms"), (int, float))),
+        key=lambda row: row["start_ms"],
+    )
+    for current, following in zip(chapters, chapters[1:]):
+        if isinstance(current.get("end_ms"), (int, float)) and current["end_ms"] < following["start_ms"]:
+            current["end_ms"] = following["start_ms"]
+    # And none runs past the last spoken line (a stored digest may round its last topic up to the minute).
+    ends = [span.get("end_ms") for span in spans_by_id.values() if isinstance(span, dict) and span.get("kind") == "speech" and isinstance(span.get("end_ms"), (int, float))]
+    if chapters and ends:
+        last = max(ends)
+        for row in chapters:
+            if isinstance(row.get("end_ms"), (int, float)):
+                row["end_ms"] = min(row["end_ms"], max(last, row["start_ms"]))
+    if chapters:
+        out["chapters"] = chapters
+    outcome = value.get("outcome")
+    out["outcome"] = outcome if isinstance(outcome, dict) and cited(outcome) and isinstance(outcome.get("text"), str) else None
+    if out["outcome"] is not None:
+        out["outcome"] = dict(out["outcome"])
+        if not _unleak_row(out["outcome"]):
+            out["outcome"] = None
+    diagram = value.get("diagram")
+    out["diagram"] = diagram if isinstance(diagram, dict) and cited(diagram) and isinstance(diagram.get("mermaid"), str) else None
+    return out

@@ -179,6 +179,10 @@ def test_submit_task_reaches_ready_and_prompts_are_partner_workflows():
         assert meeting_id in text
         assert "review" in text
         assert "contracts/prompts" not in text
+        assert "digest" in text and "likely" in text and "context" in text
+        for name in ("open_questions", "proposed_actions"):
+            body = rpc(client, headers, "prompts/get", {"name": name, "arguments": {"meeting_id": meeting_id}})
+            assert "digest" in body["result"]["messages"][0]["content"]["text"]
 
 
 def test_incomplete_upload_is_input_required_and_tasks_are_auth_bound():
@@ -271,3 +275,169 @@ def test_needs_review_completes_the_task():
         summary = finished["result"]["structuredContent"]
         assert summary["status"] == "needs_review"
         assert summary["withheld"] is True
+
+
+class _UploadPort(MemoryPort):
+    """A MemoryPort that signs uploads and reports which keys are stored."""
+
+    def __init__(self, stored: dict | None = None):
+        super().__init__()
+        self.stored = stored or {}
+        self.submitted = []
+
+    def upload_target(self, task_id, filename, media_type, byte_size):
+        key = f"uploads/{task_id}/{filename}"
+        return {"upload_url": f"http://storage.test/{key}?sig=1", "method": "PUT", "headers": {"Content-Type": media_type}, "object_key": key}
+
+    def uploaded_object(self, key):
+        return self.stored.get(key)
+
+    def submit(self, **kwargs):
+        self.submitted.append(kwargs["object_key"])
+        return super().submit(**kwargs)
+
+
+def _submit_upload(client, headers):
+    created = rpc(
+        client,
+        headers,
+        "tools/call",
+        {
+            "name": "submit_meeting",
+            "arguments": {"object_key": "", "upload_complete": False, "filename": "call.m4a", "media_type": "audio/mp4", "byte_size": 10},
+            "task": {},
+        },
+    )
+    return created["result"]["task"]["taskId"]
+
+
+def _answer(client, headers, record, content):
+    return client.post(
+        "/mcp",
+        headers=headers,
+        json={"jsonrpc": "2.0", "id": record.elicitation_id, "result": {"action": "accept", "content": content}},
+    )
+
+
+def test_portal_upload_gets_a_signed_target_and_only_the_issued_stored_key_is_analysed():
+    port = _UploadPort()
+    app = create_app(auth_bypass=False, port=port, verifier=MapVerifier({"alpha": "subject-a"}), environ={})
+    with TestClient(app) as client:
+        alpha = open_session(client, "alpha")
+        task_id = _submit_upload(client, alpha)
+        record = app.state.runtime.tasks.get(task_id, "subject-a")
+        upload = record.elicitation_body["params"]["upload"]
+        issued = f"uploads/{task_id}/call.m4a"
+        assert upload["object_key"] == issued and upload["method"] == "PUT"
+        assert upload["headers"] == {"Content-Type": "audio/mp4"}
+
+        # Not stored yet: the claim of completion is not trusted, the task asks again.
+        first = record.elicitation_id
+        assert _answer(client, alpha, record, {"object_key": issued, "upload_complete": True}).status_code == 202
+        import time
+
+        for _ in range(100):
+            if record.elicitation_id != first:
+                break
+            time.sleep(0.02)
+        assert record.status == "input_required" and record.elicitation_id != first
+
+        # Stored, but the client names a different key: the issued key is analysed, not the echo.
+        port.stored[issued] = {"size": 10, "content_type": "audio/mp4"}
+        assert _answer(client, alpha, record, {"object_key": "derivatives/someone-else.mp4", "upload_complete": True}).status_code == 202
+        meeting_id = _meeting_id(client, alpha, task_id)
+        assert meeting_id
+        assert port.submitted == [issued]
+
+
+def test_a_non_media_upload_is_refused_before_any_target_is_issued():
+    from quotient.worker.port import PortError
+
+    class Refusing(_UploadPort):
+        def upload_target(self, task_id, filename, media_type, byte_size):
+            raise PortError("invalid", "Only audio or video recordings can be uploaded.")
+
+    app = create_app(auth_bypass=False, port=Refusing(), verifier=MapVerifier({"alpha": "subject-a"}), environ={})
+    with TestClient(app) as client:
+        alpha = open_session(client, "alpha")
+        task_id = _submit_upload(client, alpha)
+        viewed = rpc(client, alpha, "tasks/get", {"taskId": task_id})
+        assert viewed["result"]["status"] == "failed"
+
+
+def _submit_with_context(client, headers, batch, purpose="Review the order service"):
+    created = rpc(client, headers, "tools/call", {
+        "name": "submit_meeting",
+        "arguments": {"object_key": "derivatives/call.mp4", "upload_complete": True, "context_batch": batch, "purpose": purpose},
+        "task": {},
+    })
+    return created["result"]["task"]["taskId"]
+
+
+class _ContextOwningPort(MemoryPort):
+    def __init__(self):
+        super().__init__()
+        self.batches = {"b1": "subject-a"}
+        self.submitted = []
+
+    def context_items(self, subject, batch_id):
+        return [] if self.batches.get(batch_id) == subject else None
+
+    def submit(self, **kwargs):
+        self.submitted.append({key: kwargs.get(key) for key in ("context_batch", "purpose")})
+        return super().submit(**kwargs)
+
+
+def test_context_and_purpose_reach_the_port_for_the_batch_owner():
+    port = _ContextOwningPort()
+    app = create_app(auth_bypass=False, port=port, verifier=MapVerifier({"alpha": "subject-a"}), environ={})
+    with TestClient(app) as client:
+        alpha = open_session(client, "alpha")
+        task_id = _submit_with_context(client, alpha, "b1")
+        assert _meeting_id(client, alpha, task_id)
+        assert port.submitted == [{"context_batch": "b1", "purpose": "Review the order service"}]
+
+
+def test_an_unknown_or_foreign_context_batch_stops_the_submission_with_a_plain_message():
+    port = _ContextOwningPort()
+    app = create_app(auth_bypass=False, port=port, verifier=MapVerifier({"alpha": "subject-a", "beta": "subject-b"}), environ={})
+    with TestClient(app) as client:
+        for token, batch in (("alpha", "missing"), ("beta", "b1")):
+            headers = open_session(client, token)
+            task_id = _submit_with_context(client, headers, batch)
+            viewed = rpc(client, headers, "tasks/get", {"taskId": task_id})["result"]
+            assert viewed["status"] == "failed" and "context you added was not found" in viewed["statusMessage"]
+        assert port.submitted == []  # nothing was started
+
+
+def test_a_malformed_context_batch_or_purpose_is_rejected_up_front():
+    app = create_app(auth_bypass=True, port=MemoryPort(), environ={})
+    with TestClient(app) as client:
+        headers = open_session(client)
+        for arguments in ({"context_batch": "../x"}, {"context_batch": 5}, {"purpose": "x" * 2001}, {"purpose": 7}):
+            created = rpc(client, headers, "tools/call", {"name": "submit_meeting", "arguments": {"object_key": "derivatives/a.mp4", "upload_complete": True, **arguments}, "task": {}})
+            assert "error" in created and "task" not in created.get("result", {})  # refused before any task exists
+
+
+def test_a_client_cannot_point_a_submission_at_another_requests_upload():
+    app = create_app(auth_bypass=True, port=MemoryPort(), environ={})
+    with TestClient(app) as client:
+        headers = open_session(client)
+        created = rpc(client, headers, "tools/call", {"name": "submit_meeting", "arguments": {"object_key": "uploads/someone-elses-task/rec.mp4", "upload_complete": True}, "task": {}})
+        task_id = created["result"]["task"]["taskId"]
+        viewed = rpc(client, headers, "tasks/get", {"taskId": task_id})["result"]
+        assert viewed["status"] == "failed" and "does not belong" in viewed["statusMessage"]
+
+
+def test_a_task_past_its_ttl_is_dropped_only_once_it_has_finished():
+    from quotient.mcp.tasks import TaskBoard
+
+    def make(status):
+        return TaskRecord(task_id=status, auth_subject="s", session_id="x", status=status, status_message="", created_at="2020-01-01T00:00:00Z",
+                          last_updated_at="2020-01-01T00:00:00Z", ttl_ms=1000, poll_interval_ms=1000, progress_token=None)
+
+    store = TaskBoard()
+    for status in ("working", "input_required", "completed", "failed", "cancelled"):
+        store._items[status] = make(status)
+    store._drop_expired_locked()
+    assert sorted(store._items) == ["input_required", "working"]  # the live ones stay, however old
