@@ -37,7 +37,7 @@ Remove it (the old text is in git history) if the confirming run shows summaries
 
 ## Open defects, in the order worth fixing
 1. **Missed follow-ups on the sales call.** Soft vendor offers are excluded by design (running the demo is not an action); decide whether that is right for sales calls.
-2. **Completeness stays at 3** on every recording: detail and some positions are missed. The lever is probably chapter and perspective coverage, not grounding.
+2. **Completeness stays at 3** on every recording: detail and some positions are missed. The lever is probably chapter and perspective coverage, not grounding. `scripts/audit_coverage.py` (no model) shows detail density falls with length: 6 to 8 items per ten minutes on the 55-minute meetings against 9 to 13.5 on the 20 to 25 minute ones, with the longest uncited stretch growing from about 1 to 3 minutes to 3.7. The summary is fixed at three to five sentences whatever the length. Leading hypothesis to test on the confirming run (ledger, "Where the walkaway is thin"): scale summary and chapter count with length, and keep it only if blind completeness rises without more faulty clauses.
 3. **Diarizer errors** (one person split across ids, or two people merged) drive attribution and the empty "decided by" lines.
 4. **A proposal nobody confirmed can show as a "tentative" decision** (1 to 2 per meeting). A stricter prompt rule and a code-side cap were both measured and rejected: each made recall or labels worse.
 5. **Security and operations still open:** no per-user rate limit or upload quota, no script/connect CSP (needs the production hosts and a report-only trial), the converter has no memory limit, prompt-injection defence for context documents is soft, the ledger is one JSON file.
