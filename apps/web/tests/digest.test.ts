@@ -60,7 +60,7 @@ test("a due phrase is shown only when it names a time", () => {
   assert.equal(dueText("Monday"), "Monday");
   assert.equal(dueText("in the next half hour or so"), "in the next half hour or so");
   assert.equal(dueText("by the 3rd of November"), "by the 3rd of November");
-  for (const said of ["next sprint", "by noon", "ASAP", "in a fortnight", "by midnight", "immediately"]) assert.equal(dueText(said), said);
+  for (const said of ["next sprint", "by noon", "ASAP", "in a fortnight", "by midnight", "immediately", "in two weeks", "several quarters", "by Fri", "３日", "٣ أيام"]) assert.equal(dueText(said), said);
   assert.equal(dueText("next"), null);
   assert.equal(dueText("later"), null);
   assert.equal(dueText(null), null);
@@ -74,6 +74,6 @@ test("an action is a promise only when its owner said they would do it in a line
   assert.equal(promisedByOwner({ owner: "spk_1", spanIds: ["b"] }, spans), false); // did not speak the cited line
   assert.equal(promisedByOwner({ owner: null, spanIds: ["a"] }, spans), false);
   const said = (text: string) => promisedByOwner({ owner: "spk_1", spanIds: ["x"] }, [line("x", "spk_1", text)]);
-  for (const promise of ["I'm gonna send it", "We’ll send it", "I can send it"]) assert.equal(said(promise), true, promise);
+  for (const promise of ["I'm gonna send it", "We’ll send it", "I can send it", "We will not only fix it but test it"]) assert.equal(said(promise), true, promise);
   for (const refusal of ["I can't make Friday", "We will not do that", "I can’t"]) assert.equal(said(refusal), false, refusal);
 });

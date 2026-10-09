@@ -602,3 +602,21 @@ def test_a_damaged_stored_digest_loses_the_damaged_rows_and_never_the_meeting():
     assert [(row["task"], row["assignee"]) for row in out["actions"]] == [("Unhashable owner", "spk_1"), ("List owner", "spk_1"), ("Fine", "spk_1")]
     assert out["open_questions"][0]["answered"] is False and out["open_questions"][0]["answer_span_id"] is None
     assert out["decisions"] == [] and out["chapters"] == []
+
+
+def test_span_id_in_running_prose_stays_and_named_speakers_count_as_commentary():
+    from quotient.graph.gate import _digest, _unleak
+
+    assert _unleak("Propagate the trace ID and span ID across services.") == "Propagate the trace ID and span ID across services."
+    assert _unleak("Each span id must be unique in the HTML.") == "Each span id must be unique in the HTML."
+    assert _unleak("The list is span ids: s1, s2.") == ""  # an id list written out is the transcript's layout
+    assert _unleak("The writer cites span_ids for each row.") == ""
+    # Sentences are judged one at a time: a sentence that is only positional wording stays when no speaker is in it.
+    assert _unleak("Speaker 1 opens. In the next line of the loop, the counter increments.") == "Speaker 1 opens. In the next line of the loop, the counter increments."
+    assert _unleak("Costs rise. In the following line, Speaker 7 completes the thought.") == "Costs rise."
+    spans = {"s1": {"kind": "speech", "start_ms": 0, "end_ms": 4000}}
+    stored = {"speakers": [{"id": "spk_1", "name": "Priya", "span_ids": ["s1"]}], "perspectives": [
+        {"speaker": "spk_1", "text": "Costs will rise. In the following line, Priya completes the thought.", "span_ids": ["s1"], "start_ms": 0},
+        {"speaker": "spk_1", "text": "In the next line of the loop the counter increments.", "span_ids": ["s1"], "start_ms": 0},
+    ]}
+    assert [row["text"] for row in _digest(stored, spans)["perspectives"]] == ["Costs will rise.", "In the next line of the loop the counter increments."]

@@ -25,9 +25,12 @@ MAX_DOC_CHARS = 400_000
 TIMEOUT_SECONDS = 120.0
 _PLAIN = {".txt", ".md", ".markdown"}
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-# Text a person cannot see but a model reads: the Unicode Tags block (used to smuggle hidden instructions) and the bidirectional
-# overrides and isolates (which reorder what is shown). Joiners and the left/right marks stay: Arabic, Persian, Indic and emoji need them.
-_INVISIBLE = re.compile("[\U000e0000-\U000e007f\u202a-\u202e\u2066-\u2069]")
+# Text a person cannot see but a model reads: the Unicode Tags block (used to smuggle hidden instructions), variation selectors
+# beyond the first block, the word joiner and byte-order mark, C1 controls, and the bidirectional overrides and isolates (which reorder
+# what is shown). Joiners, the zero-width space and the left/right marks stay: Persian, Indic, Thai, Arabic and emoji need them.
+# The three subdivision flags (England, Scotland, Wales) are real emoji written with Tags characters and are kept exactly.
+_FLAGS = "\U0001F3F4(?:\U000e0067\U000e0062(?:\U000e0065\U000e006e\U000e0067|\U000e0073\U000e0063\U000e0074|\U000e0077\U000e006c\U000e0073))\U000e007f"
+_INVISIBLE = re.compile("(" + _FLAGS + ")|[\U000e0000-\U000e007f\U000e0100-\U000e01ef\u202a-\u202e\u2066-\u2069\u2060\ufeff\x80-\x9f]")
 
 
 class ConverterUnavailable(RuntimeError):
@@ -47,7 +50,7 @@ def _python() -> Path | None:
 
 def clean(text: str) -> tuple[str, bool]:
     """Printable text with tidy spacing, capped; the flag says whether it was cut."""
-    text = _INVISIBLE.sub("", _CONTROL.sub("", text.replace("\r\n", "\n").replace("\r", "\n")))
+    text = _INVISIBLE.sub(lambda m: m.group(1) or "", _CONTROL.sub("", text.replace("\r\n", "\n").replace("\r", "\n")))
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if len(text) > MAX_DOC_CHARS:

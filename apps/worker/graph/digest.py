@@ -48,9 +48,9 @@ _NUMBER_WORDS = re.compile(
 # A due phrase is worth showing only when it names a time. "next", "soon" or "later" on their own tell the reader nothing.
 _TIME_CUE = re.compile(
     r"\d|\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|"
-    r"may|june|july|august|september|october|november|december|week|weekend|month|year|quarter|morning|afternoon|evening|"
-    r"hour|hours|minute|minutes|day|days|eod|eow|end of|sprint|noon|midnight|midday|overnight|fortnight|asap|"
-    r"immediately|right away)\b", re.I)
+    r"may|june|july|august|september|october|november|december|weeks?|weekends?|months?|years?|quarters?|morning|afternoon|evening|"
+    r"hours?|minutes?|days?|eod|eow|end of|sprints?|noon|midnight|midday|overnight|fortnights?|asap|immediately|right away|"
+    r"mon|tue|tues|wed|thu|thur|thurs|fri)\b", re.I)
 
 
 def _due(value: object) -> str | None:
@@ -59,7 +59,7 @@ def _due(value: object) -> str | None:
 
 
 # A first-person promise in a transcript: "we will", "i'll", "i am going to". Used to say who owns a task when only one voice spoke it.
-_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+(?:not|never)\b)", re.I)
+_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+never\b|\s+not(?!\s+only\b))", re.I)
 
 
 def _clean_item(item: dict) -> dict:

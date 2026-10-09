@@ -732,9 +732,10 @@ _DIGEST_LISTS = (
 # Commentary about the transcript's own mechanics ("the continuing argument under Speaker 8", "completed in the following
 # line labeled Speaker 7") reads as nonsense to someone who never saw the lines. The writer is told not to produce it; this
 # drops the clause that does, for meetings analysed before that rule and for any that slip past it.
-# The unambiguous marks: no meeting talks about "span ids", and a "line labelled Speaker 3" is the transcript's own layout.
+# The unambiguous marks: the field name "span_ids", an id list written out ("span id: s4"; a tracing or HTML meeting still says "span ID"
+# in running prose), and a "line labelled Speaker 3", which is the transcript's own layout.
 _LEAK_PLAIN = re.compile(
-    r"\bspan[_ ]?ids?\b|\bline\s+labell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b|\blabell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b",
+    r"\bspan_ids?\b|\bspan\s+ids?\s*[:\[(]|\bline\s+labell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b|\blabell?ed\s+(?:as\s+)?(?:speaker\s*\d+|spk_\d+)\b",
     re.I,
 )
 # Positional wording is ordinary English in a lecture about code or a protocol ("in the next line of the loop", "the continuing
@@ -747,39 +748,44 @@ _LEAK_POSITION = re.compile(
 _SPEAKER_NAMED = re.compile(r"\b(?:speaker\s*\d+|spk_\d+)\b", re.I)
 
 
-def _leaks(text: str) -> bool:
-    return bool(_LEAK_PLAIN.search(text)) or bool(_LEAK_POSITION.search(text) and _SPEAKER_NAMED.search(text))
+def _leaks(text: str, names: tuple = ()) -> bool:
+    """Commentary about the transcript itself. Positional wording needs a speaker in the same clause: "Speaker 7", or a name the digest lists."""
+    if _LEAK_PLAIN.search(text):
+        return True
+    if not _LEAK_POSITION.search(text):
+        return False
+    return bool(_SPEAKER_NAMED.search(text)) or any(re.search(r"\b" + re.escape(name) + r"\b", text, re.I) for name in names)
 
 
 # A first-person promise: "we will", "i'll". Mirrors the worker, which applies the same rule to new analyses.
-_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+(?:not|never)\b)", re.I)
+_PROMISE = re.compile(r"\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+never\b|\s+not(?!\s+only\b))", re.I)
 # A choice somebody describes from the past is background, not something these participants settled.
 _HISTORY = re.compile(r"^\s*(?:historically|in the past|back then|years ago)\b[\s,]", re.I)
 _PROSE_KEYS = ("text", "statement", "position", "task", "question", "answer", "explanation", "gist", "what", "reason")
 
 
-def _unleak(value: str) -> str:
-    """Remove every clause that talks about the transcript itself; keep the rest of the sentence."""
-    if not _leaks(value):
+def _unleak(value: str, names: tuple = ()) -> str:
+    """Remove every clause or sentence that talks about the transcript itself; keep the rest."""
+    if not _leaks(value, names):
         return value
-    clauses = re.split(r"(?<=[;])\s+", value)
-    kept = [clause for clause in clauses if not _leaks(clause)]
+    clauses = re.split(r"(?<=[;.!?])\s+", value)
+    kept = [clause for clause in clauses if not _leaks(clause, names)]
     text = " ".join(kept).strip().rstrip(";,").strip()
     if text and text[-1] not in ".!?":
         text += "."
     return text if kept else ""
 
 
-def _unleak_row(row: dict) -> bool:
+def _unleak_row(row: dict, names: tuple = ()) -> bool:
     """Clean one row in place. False when its main text was nothing but such commentary."""
     main = next((key for key in _PROSE_KEYS if isinstance(row.get(key), str) and row[key].strip()), None)
     for key in _PROSE_KEYS:
         if isinstance(row.get(key), str):
-            row[key] = _unleak(row[key])
+            row[key] = _unleak(row[key], names)
     positions = row.get("positions")
     if isinstance(positions, list):
         copies = [dict(position) for position in positions if isinstance(position, dict)]
-        row["positions"] = [position for position in copies if _unleak_row(position)]
+        row["positions"] = [position for position in copies if _unleak_row(position, names)]
     return main is None or bool(row.get(main))
 
 
@@ -808,9 +814,12 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
         "content_type": value.get("content_type") if isinstance(value.get("content_type"), str) else "other",
         "title": value.get("title") if isinstance(value.get("title"), str) else "",
     }
+    names = tuple(
+        row["name"].strip() for row in listed(value.get("speakers")) if isinstance(row, dict) and isinstance(row.get("name"), str) and len(row["name"].strip()) >= 2
+    )
     for key in _DIGEST_LISTS:
         rows = value.get(key) if isinstance(value.get(key), list) else []
-        out[key] = [row for row in (dict(item) for item in rows if isinstance(item, dict) and cited(item)) if _unleak_row(row)]
+        out[key] = [row for row in (dict(item) for item in rows if isinstance(item, dict) and cited(item)) if _unleak_row(row, names)]
     for row in out.get("actions") or []:
         cited_spans = [spans_by_id[i] for i in listed(row.get("span_ids")) if isinstance(i, str) and isinstance(spans_by_id.get(i), dict)]
         heard = {sp.get("speaker_hypothesis_id") for sp in cited_spans if sp.get("speaker_hypothesis_id")}
@@ -844,7 +853,7 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
     out["outcome"] = outcome if isinstance(outcome, dict) and cited(outcome) and isinstance(outcome.get("text"), str) else None
     if out["outcome"] is not None:
         out["outcome"] = dict(out["outcome"])
-        if not _unleak_row(out["outcome"]):
+        if not _unleak_row(out["outcome"], names):
             out["outcome"] = None
     diagram = value.get("diagram")
     out["diagram"] = diagram if isinstance(diagram, dict) and cited(diagram) and isinstance(diagram.get("mermaid"), str) else None

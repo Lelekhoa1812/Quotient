@@ -365,7 +365,7 @@ def _owned(port: object, meeting_id: str, subject: str) -> dict:
 
 
 # A file name is shown to people; a right-to-left override or a hidden Tags-block character makes "notes\u202egpj.md" read as another type.
-_HIDDEN = re.compile("[\U000e0000-\U000e007f\u202a-\u202e\u2066-\u2069\x00-\x1f\x7f]")
+_HIDDEN = re.compile("[\U000e0000-\U000e007f\U000e0100-\U000e01ef\u202a-\u202e\u2066-\u2069\u2060\ufeff\x00-\x1f\x7f-\x9f]")
 
 
 def _prepare_context(arguments: dict, subject: str, port: object) -> dict:
@@ -384,7 +384,7 @@ def _prepare_context(arguments: dict, subject: str, port: object) -> dict:
             raise ValueError("byte_size must be a non-negative integer")
         name = _HIDDEN.sub("", entry["filename"]).strip()
         if not name:
-            raise ValueError("each file needs a filename of at most 200 characters")
+            raise ValueError("each file needs a filename with visible characters")
         clean.append({"filename": name, "media_type": media, "byte_size": size})
     prepare = getattr(port, "prepare_context", None)
     if not callable(prepare):

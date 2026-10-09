@@ -15,13 +15,13 @@ export type DigestLine = { text: string; spanIds: string[]; basis: Basis; startM
 export type Chapter = { title: string; gist: string; startMs: number; endMs: number; startSpanId: string };
 export type Decision = { statement: string; status: "agreed" | "tentative" | "deferred"; by: string | null; spanIds: string[]; basis: Basis; startMs: number | null };
 /** A due phrase is worth showing only when it names a time; "next" or "later" alone tells the reader nothing. */
-const TIME_CUE = /\d|\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|week|weekend|month|year|quarter|morning|afternoon|evening|hours?|minutes?|days?|eod|eow|end of|sprint|noon|midnight|midday|overnight|fortnight|asap|immediately|right away)\b/i;
+const TIME_CUE = /\p{Nd}|\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|weeks?|weekends?|months?|years?|quarters?|morning|afternoon|evening|hours?|minutes?|days?|eod|eow|end of|sprints?|noon|midnight|midday|overnight|fortnights?|asap|immediately|right away|mon|tue|tues|wed|thu|thur|thurs|fri)\b/iu;
 export function dueText(value: string | null): string | null {
   return value && TIME_CUE.test(value) ? value : null;
 }
 
 /** A first-person promise as speech-to-text writes it: "we will", "i'll", "i am going to". */
-const PROMISE = /\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+(?:not|never)\b)/i;
+const PROMISE = /\b(?:i|we)(?:['’]ll|\s+will|\s+shall|\s+can|\s+am\s+going\s+to|\s+are\s+going\s+to|\s+gonna|['’](?:m|re)\s+(?:gonna|going\s+to))\b(?!['’]t|\s+never\b|\s+not(?!\s+only\b))/i;
 
 /** True when the action's owner said, in a line the action cites, that they will do it. Nobody else has confirmed it, but it is more than a suggestion. */
 export function promisedByOwner(action: { owner: string | null; spanIds: string[] }, spans: { id: string; speaker_hypothesis_id: string | null; text: string; raw_text: string }[]): boolean {
