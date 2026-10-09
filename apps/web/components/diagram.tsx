@@ -9,6 +9,8 @@
  */
 import { useEffect, useId, useState } from "react";
 
+import { isDrawable } from "@/lib/diagram";
+
 type MermaidTheme = "dark" | "default";
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -64,6 +66,11 @@ export function Diagram({ source }: { source: string }) {
   useEffect(() => {
     let cancel = false;
     setFailed(false);
+    if (!isDrawable(source)) {
+      setSvg("");
+      setFailed(true); // not a flowchart or sequence diagram: shown as plain source, never handed to the renderer
+      return;
+    }
     void enqueue(async () => {
       const mermaid = (await import("mermaid")).default;
       const ink = theme === "dark" ? "#ffffff" : "#001938";
