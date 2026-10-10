@@ -18,6 +18,7 @@ from registry.ids import (
     DIGEST,
     DIGEST_REVIEW,
     ANSWER_CHECK,
+    SCREEN_USE,
     lens_id,
 )
 
@@ -48,6 +49,7 @@ PROMPT_ROLE = {
     DIGEST: "llm",
     DIGEST_REVIEW: "llm",
     ANSWER_CHECK: "slm",
+    SCREEN_USE: "llm",
     DISSENT: "slm",
     CHART: "slm",
     FRAME: "llm",

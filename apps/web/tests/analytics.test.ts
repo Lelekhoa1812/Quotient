@@ -64,7 +64,7 @@ test("evidence mix counts distinct statements at their weakest tier", () => {
 });
 
 function digest(overrides: Partial<Digest>): Digest {
-  return { contentType: "meeting", title: "", summary: [], outcome: null, speakers: [], perspectives: [], chapters: [], decisions: [], actions: [], questions: [], disagreements: [], figures: [], risks: [], concepts: [], diagram: null, ...overrides };
+  return { contentType: "meeting", title: "", summary: [], outcome: null, speakers: [], perspectives: [], chapters: [], decisions: [], actions: [], questions: [], disagreements: [], figures: [], risks: [], concepts: [], diagram: null, screenUses: [], ...overrides };
 }
 
 test("moment lanes and running totals only include what exists", () => {

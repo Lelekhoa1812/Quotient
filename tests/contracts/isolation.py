@@ -44,6 +44,7 @@ PINS = {
     "digest": "llm",
     "digest_review": "llm",
     "answer_check": "slm",
+    "screen_use": "llm",
     "dissent": "slm",
     "chart": "slm",
     # Motivation vs Logic

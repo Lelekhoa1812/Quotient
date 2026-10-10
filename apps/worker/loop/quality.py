@@ -822,10 +822,27 @@ def _digest(ledger, call, claims, actions):
         digest = _verify_questions(ledger, call, digest)
         from jev.rank import rank_digest
 
-        return rank_digest(digest)
+        digest = rank_digest(digest)
+        return _screen_readings(ledger, call, digest)
     except Exception as exc:  # the walkaway is optional; the evidence graph is not
         print(f"digest skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
         return None
+
+
+def _screen_readings(ledger, call, digest):
+    """Attach a checked reading of each screen. A failure here keeps the walkaway without readings."""
+    if not isinstance(digest, dict):
+        return digest
+    screens = getattr(ledger, "screens", None) or []
+    if not screens:
+        return digest
+    try:
+        from graph.screenuse import read_screens
+
+        digest["screen_uses"] = read_screens(screens, ledger.spans, call)
+    except Exception as exc:  # the readings are an improvement, never a reason to lose the walkaway
+        print(f"screen use skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+    return digest
 
 
 # Motivation vs Logic

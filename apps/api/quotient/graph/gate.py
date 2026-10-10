@@ -935,4 +935,32 @@ def _digest(value: object, spans_by_id: dict) -> dict | None:
     # Only the two diagram types the contract allows reach a reader, whatever an older stored digest holds.
     allowed = isinstance(source, str) and bool(source.strip()) and source.split(None, 1)[0] in {"flowchart", "graph", "sequenceDiagram"}
     out["diagram"] = diagram if isinstance(diagram, dict) and cited(diagram) and allowed else None
+    # Motivation vs Logic
+    # Motivation: A screen reading is prose about what was shown. A citation that no longer
+    # resolves would let it stand without the line it claims to rest on.
+    # Logic: Drop a reading whose cited spans are all gone. Keep one that cited nothing (it rests
+    # on the screen). Drop a reading whose wording talks about the transcript's own machinery.
+    uses = []
+    for item in listed(value.get("screen_uses")):
+        if not isinstance(item, dict):
+            continue
+        screen_id = item.get("id")
+        reading = item.get("reading")
+        if not isinstance(screen_id, str) or not screen_id.strip() or not isinstance(reading, str) or not reading.strip():
+            continue
+        if _leaks(reading) or (isinstance(item.get("differs"), str) and _leaks(item["differs"])):
+            continue
+        original = [span_id for span_id in listed(item.get("span_ids")) if isinstance(span_id, str)]
+        kept_ids = [span_id for span_id in original if span_id in known]
+        if original and not kept_ids:
+            continue
+        differs = item.get("differs")
+        uses.append({
+            "id": screen_id.strip()[:96],
+            "reading": reading.strip()[:500],
+            "span_ids": kept_ids[:4],
+            "differs": differs.strip()[:300] if isinstance(differs, str) and differs.strip() else None,
+            "start_ms": item.get("start_ms") if _ints(item.get("start_ms")) else None,
+        })
+    out["screen_uses"] = uses
     return out

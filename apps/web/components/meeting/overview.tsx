@@ -11,15 +11,19 @@
  * "likely" evidence carry a small marker; confirmed items carry none. A meeting analysed before
  * digests existed shows its confirmed brief sentences and offers nothing invented.
  */
-import { Check, CircleHelp, Flag, GitCompareArrows, ListChecks, MonitorPlay, RotateCw, Scale, Sigma, Users } from "lucide-react";
-import type { ReactNode } from "react";
+import { Check, CircleHelp, Flag, GitCompareArrows, ListChecks, Route, RotateCw, Scale, Sigma, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Diagram } from "@/components/diagram";
 import { Markdown } from "@/components/markdown";
 import { IconButton, Likely, Moment } from "@/components/ui/moment";
+import { ScreenCardView, Storyline } from "@/components/meeting/storyline";
 import { UnknownVoiceButton } from "@/components/meeting/unknown-voice";
 import { VoiceName } from "@/components/meeting/voices";
 import { hasOutcomes, promisedByOwner, type Digest } from "@/lib/digest";
 import { formatMs } from "@/lib/format";
+import { attachReadings } from "@/lib/readings";
+import { buildScreenCards } from "@/lib/screens";
+import { buildStoryline, topicIndex } from "@/lib/storyline";
 import { durationText, percentText, readable, speakerName } from "@/lib/present";
 import type { ActionItem, Claim, ContextUse, IdentityState, MeetingContext, ScreenView, Span, SynthesisSentence, VoiceIdentity } from "@/lib/types";
 
@@ -85,6 +89,28 @@ export function Overview({
   const likely = claims.filter((claim) => claim.confidence === "likely").length;
   const unchecked = claims.length - confirmed - likely;
 
+  const cards = useMemo(() => attachReadings(buildScreenCards(screens), digest?.screenUses ?? []), [screens, digest]);
+  const topics = useMemo(() => (digest ? buildStoryline(digest, cards) : []), [digest, cards]);
+  const [openTopics, setOpenTopics] = useState<Set<number>>(() => new Set([0]));
+  const [reveal, setReveal] = useState<number | null>(null);
+  const toggleTopic = useCallback((index: number) => setOpenTopics((current) => {
+    const next = new Set(current);
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+    return next;
+  }), []);
+  const setAllTopics = useCallback((open: boolean) => setOpenTopics(open ? new Set(topics.map((topic) => topic.index)) : new Set()), [topics]);
+  /** Open a topic and bring it into view: the link back from an action, a question or a risk. */
+  const goToTopic = useCallback((index: number) => {
+    setOpenTopics((current) => new Set(current).add(index));
+    setReveal(index);
+  }, []);
+  useEffect(() => {
+    if (reveal === null) return;
+    document.getElementById(`topic-${reveal}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    setReveal(null);
+  }, [reveal]);
+
   if (!digest) {
     const pending = status === "queued" || status === "working";
     const heading = pending ? "The summary is being written" : status === "failed" ? "This analysis did not finish" : status === "cancelled" ? "This analysis was stopped" : "No summary for this meeting yet";
@@ -128,6 +154,18 @@ export function Overview({
   const locked = new Set(spans.filter((span) => span.speaker_label?.trim() && span.speaker_hypothesis_id).map((span) => span.speaker_hypothesis_id as string));
   const rename = (id: string, name: string) => onRenameVoice(id, name);
   const argued = groupBySpeaker(digest.perspectives);
+  /** "From <topic>": the stretch of the meeting an item came from, as a link into the walkthrough. */
+  const fromTopic = (ms: number | null) => {
+    const index = topicIndex(digest.chapters, ms);
+    if (index === null || topics.length === 0) return null;
+    return (
+      <button type="button" className="q-from-topic" onClick={() => goToTopic(index)} aria-label={`Go to the topic ${digest.chapters[index].title}`}>
+        {digest.chapters[index].title}
+      </button>
+    );
+  };
+  const storyline = topics.length > 0;
+  const stillOpen = unanswered.length + digest.risks.length + digest.disagreements.length;
 
   const unknownSet = new Set(unknown);
   return (
@@ -165,8 +203,8 @@ export function Overview({
           <ul className="q-glance" aria-label="At a glance">
             {digest.decisions.length ? <li><a href="#decisions"><strong>{digest.decisions.length}</strong> {digest.decisions.length === 1 ? "decision" : "decisions"}</a></li> : null}
             {digest.actions.length ? <li><a href="#actions"><strong>{digest.actions.length}</strong> {digest.actions.length === 1 ? "action" : "actions"}</a></li> : null}
-            {unanswered.length ? <li><a href="#questions"><strong>{unanswered.length}</strong> unanswered</a></li> : null}
-            {digest.disagreements.length ? <li><a href="#disagreements"><strong>{digest.disagreements.length}</strong> {digest.disagreements.length === 1 ? "disagreement" : "disagreements"}</a></li> : null}
+            {unanswered.length ? <li><a href="#open"><strong>{unanswered.length}</strong> unanswered</a></li> : null}
+            {digest.disagreements.length ? <li><a href="#open"><strong>{digest.disagreements.length}</strong> {digest.disagreements.length === 1 ? "disagreement" : "disagreements"}</a></li> : null}
           </ul>
         ) : null}
       </header>
@@ -209,6 +247,7 @@ export function Overview({
                     <p className="q-row-meta">
                       {who(action.owner) ? <span className="q-chip"><Users size={12} aria-hidden="true" /> {who(action.owner)}</span> : <span className="q-faint">No owner named</span>}
                       {action.due ? <span className="q-chip">Due {action.due}</span> : null}
+                      {fromTopic(action.startMs)}
                     </p>
                   </div>
                   {record && proposed ? (
@@ -224,192 +263,178 @@ export function Overview({
         </Section>
       ) : null}
 
-      {digest.questions.length ? (
-        <Section id="questions" icon={<CircleHelp size={16} />} title="Questions raised">
+      {stillOpen > 0 || (!storyline && digest.questions.length > 0) ? (
+        <Section id="open" icon={<CircleHelp size={16} />} title="Still open">
           {unanswered.length ? (
-            <ul className="q-rows">
-              {unanswered.map((question, index) => (
-                <li key={index} className="q-row">
-                  <span className="q-pill is-open">Open</span>
-                  <div className="q-row-main">
-                    <p>{t(question.question)}</p>
-                    {question.answer ? (
-                      <p className="q-row-meta">
-                        <span>Partly addressed: {t(question.answer)}</span>
-                        {question.answerMs !== null ? <Moment ms={question.answerMs} onPlay={onPlay} label="the partial reply" /> : null}
-                      </p>
-                    ) : question.askedBy ? <p className="q-row-meta">Asked by {who(question.askedBy)}</p> : null}
-                  </div>
-                  <Moment ms={question.startMs} onPlay={onPlay} label={question.question} />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="q-faint">Every question that came up was answered.</p>
-          )}
-          {answered.length ? (
-            <details className="q-details">
-              <summary>Answered in the recording ({answered.length})</summary>
+            <>
+              <h4 className="q-subhead">Questions nobody settled</h4>
               <ul className="q-rows">
-                {answered.map((question, index) => (
+                {unanswered.map((question, index) => (
                   <li key={index} className="q-row">
-                    <span className="q-pill is-agreed">Answered</span>
+                    <span className="q-pill is-open">{question.answer ? "Partly answered" : "Open"}</span>
                     <div className="q-row-main">
                       <p>{t(question.question)}</p>
                       {question.answer ? (
                         <p className="q-row-meta">
-                          {t(question.answer)}
-                          {question.answerMs !== null ? <> · <Moment ms={question.answerMs} onPlay={onPlay} label="the answer" /></> : null}
+                          <span>{t(question.answer)}</span>
+                          {question.answerMs !== null ? <Moment ms={question.answerMs} onPlay={onPlay} label="the partial reply" /> : null}
                         </p>
                       ) : null}
+                      <p className="q-row-meta">
+                        {question.askedBy ? <span>Asked by {who(question.askedBy)}</span> : null}
+                        {fromTopic(question.startMs)}
+                      </p>
                     </div>
                     <Moment ms={question.startMs} onPlay={onPlay} label={question.question} />
                   </li>
                 ))}
               </ul>
-            </details>
+            </>
           ) : null}
-        </Section>
-      ) : null}
-
-      {argued.length ? (
-        <Section id="perspectives" icon={<Users size={16} />} title="Who argued what">
-          <div className="q-who">
-            {argued.map((group) => (
-              <article key={group.speaker ?? "unknown"} className="q-who-card">
-                <header>
-                  {group.speaker ? (
-                    <VoiceName id={group.speaker} name={who(group.speaker) ?? speakerName(null, group.speaker)} locked={locked.has(group.speaker)} onRename={rename} />
-                  ) : (
-                    <span className="q-voice-text">A participant</span>
-                  )}
-                  <span className="q-faint">{group.items.length} {group.items.length === 1 ? "point" : "points"}</span>
-                </header>
-                <ul>
-                  {group.items.map((item, index) => (
-                    <li key={index}>
-                      <p>{t(item.position)}</p>
-                      <Moment ms={item.startMs} onPlay={onPlay} label={item.position} />
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        </Section>
-      ) : null}
-
-      {digest.disagreements.length ? (
-        <Section id="disagreements" icon={<GitCompareArrows size={16} />} title="Where people disagreed">
-          {digest.disagreements.map((item, index) => (
-            <div key={index} className="q-dispute">
-              <p className="q-dispute-topic">{t(item.topic)}</p>
-              <ul className="q-positions">
-                {item.positions.map((position, inner) => (
-                  <li key={inner}>
-                    <p className="q-row-meta">{who(position.speaker) ?? "A participant"}</p>
-                    <p>{t(position.position)}</p>
-                    <Moment ms={position.startMs} onPlay={onPlay} label={position.position} />
+          {digest.disagreements.length ? (
+            <>
+              <h4 className="q-subhead">Where people disagreed</h4>
+              {digest.disagreements.map((item, index) => (
+                <div key={index} className="q-dispute">
+                  <p className="q-dispute-topic">{t(item.topic)} {fromTopic(item.startMs)}</p>
+                  <ul className="q-positions">
+                    {item.positions.map((position, inner) => (
+                      <li key={inner}>
+                        <p className="q-row-meta">{who(position.speaker) ?? "A participant"}</p>
+                        <p>{t(position.position)}</p>
+                        <Moment ms={position.startMs} onPlay={onPlay} label={position.position} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </>
+          ) : null}
+          {digest.risks.length ? (
+            <>
+              <h4 className="q-subhead">{digest.contentType === "lecture" || digest.contentType === "presentation" ? "Pitfalls to watch for" : "Risks and concerns"}</h4>
+              <ul className="q-rows">
+                {digest.risks.map((risk, index) => (
+                  <li key={index} className="q-row">
+                    <div className="q-row-main">
+                      <p><Flag size={14} aria-hidden="true" className="q-inline-icon" /> {t(risk.risk)} <Likely basis={risk.basis} /></p>
+                      <p className="q-row-meta">{fromTopic(risk.startMs)}</p>
+                    </div>
+                    <Moment ms={risk.startMs} onPlay={onPlay} label={risk.risk} />
                   </li>
                 ))}
               </ul>
-            </div>
-          ))}
+            </>
+          ) : null}
+          {unanswered.length === 0 && !storyline && answered.length > 0 ? <p className="q-faint">Every question that came up was answered.</p> : null}
         </Section>
       ) : null}
 
-      {digest.concepts.length ? (
-        <Section icon={<Sigma size={16} />} title="Key ideas explained">
-          <dl className="q-concepts">
-            {digest.concepts.map((concept, index) => (
-              <div key={index}>
-                <dt>{concept.term} <Likely basis={concept.basis} /> <Moment ms={concept.startMs} onPlay={onPlay} label={concept.term} /></dt>
-                <dd className="q-steps">{t(concept.explanation)}</dd>
+      {storyline ? (
+        <Section id="walkthrough" icon={<Route size={16} />} title="Walkthrough by topic">
+          <Storyline topics={topics} open={openTopics} onToggle={toggleTopic} onSetAll={setAllTopics} onPlay={onPlay} t={t} />
+        </Section>
+      ) : (
+        <>
+          {digest.concepts.length ? (
+            <Section icon={<Sigma size={16} />} title="Key ideas explained">
+              <dl className="q-concepts">
+                {digest.concepts.map((concept, index) => (
+                  <div key={index}>
+                    <dt>{concept.term} <Likely basis={concept.basis} /> <Moment ms={concept.startMs} onPlay={onPlay} label={concept.term} /></dt>
+                    <dd className="q-steps">{t(concept.explanation)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Section>
+          ) : null}
+          {digest.figures.length ? (
+            <Section icon={<Sigma size={16} />} title="Key figures">
+              <table className="q-figures">
+                <tbody>
+                  {digest.figures.map((figure, index) => (
+                    <tr key={index}>
+                      <th scope="row">{figure.value}</th>
+                      <td>{t(figure.what)}</td>
+                      <td className="q-cell-end"><Moment ms={figure.startMs} onPlay={onPlay} label={figure.what} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
+          ) : null}
+          {digest.diagram ? (
+            <Section icon={<GitCompareArrows size={16} />} title={digest.diagram.title || "How it fits together"}>
+              <Diagram source={digest.diagram.mermaid} />
+            </Section>
+          ) : null}
+          {cards.filter((card) => !card.folded).length > 0 ? (
+            <Section icon={<Route size={16} />} title="What was shown">
+              <ul className="q-story-rows">
+                {cards.filter((card) => !card.folded).map((card) => (
+                  <li key={card.id} className="q-story-row is-screen"><ScreenCardView card={card} onPlay={onPlay} /></li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
+        </>
+      )}
+
+      {participation.length >= 2 || argued.length ? (
+        <Section id="people" icon={<Users size={16} />} title="People">
+          {participation.length >= 2 ? (
+            <>
+              <h4 className="q-subhead">Who spoke</h4>
+              <ul className="q-hbars is-editable">
+                {participation.map((row) => (
+                  <li key={row.id}>
+                    <div className="q-who-line">
+                      <VoiceName id={row.id} name={row.name} locked={locked.has(row.id)} onRename={rename} />
+                      {unknownSet.has(row.id) && onIdentify ? <UnknownVoiceButton label={row.name} onOpen={() => onIdentify(row.id)} /> : null}
+                      {!locked.has(row.id) && identities[row.id] ? (
+                        <span className="q-faint q-from" title={identities[row.id].conflict ? `The ${identities[row.id].source.includes("visual") ? "audio" : "video"} suggested "${identities[row.id].conflict}" instead.` : undefined}>
+                          {identities[row.id].source === "audio" ? "named in the talk" : identities[row.id].source === "user" ? "" : "named from the video"}
+                          {identities[row.id].conflict ? " · check" : ""}
+                        </span>
+                      ) : null}
+                    </div>
+                    <strong className="q-num">{percentText(row.share)}</strong>
+                    <span className="q-hbar-track" aria-hidden="true"><span className="q-hbar-fill" style={{ width: `${row.share * 100}%` }} /></span>
+                  </li>
+                ))}
+              </ul>
+              <p className="q-faint">Speakers are told apart automatically, using the video when it shows names. Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
+            </>
+          ) : null}
+          {argued.length ? (
+            <>
+              <h4 className="q-subhead">Who argued what</h4>
+              <div className="q-who">
+                {argued.map((group) => (
+                  <article key={group.speaker ?? "unknown"} className="q-who-card">
+                    <header>
+                      {group.speaker ? (
+                        <VoiceName id={group.speaker} name={who(group.speaker) ?? speakerName(null, group.speaker)} locked={locked.has(group.speaker)} onRename={rename} />
+                      ) : (
+                        <span className="q-voice-text">A participant</span>
+                      )}
+                      <span className="q-faint">{group.items.length} {group.items.length === 1 ? "point" : "points"}</span>
+                    </header>
+                    <ul>
+                      {group.items.map((item, index) => (
+                        <li key={index}>
+                          <p>{t(item.position)}</p>
+                          <Moment ms={item.startMs} onPlay={onPlay} label={item.position} />
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                ))}
               </div>
-            ))}
-          </dl>
+            </>
+          ) : null}
         </Section>
       ) : null}
-
-      {digest.figures.length ? (
-        <Section icon={<Sigma size={16} />} title="Key figures">
-          <table className="q-figures">
-            <tbody>
-              {digest.figures.map((figure, index) => (
-                <tr key={index}>
-                  <th scope="row">{figure.value}</th>
-                  <td>{t(figure.what)}</td>
-                  <td className="q-cell-end"><Moment ms={figure.startMs} onPlay={onPlay} label={figure.what} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Section>
-      ) : null}
-
-      {digest.risks.length ? (
-        <Section icon={<Flag size={16} />} title={digest.contentType === "lecture" || digest.contentType === "presentation" ? "Pitfalls to watch for" : "Risks and concerns"}>
-          <ul className="q-rows">
-            {digest.risks.map((risk, index) => (
-              <li key={index} className="q-row">
-                <div className="q-row-main"><p>{t(risk.risk)} <Likely basis={risk.basis} /></p></div>
-                <Moment ms={risk.startMs} onPlay={onPlay} label={risk.risk} />
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
-
-      {digest.diagram ? (
-        <Section icon={<GitCompareArrows size={16} />} title={digest.diagram.title || "How it fits together"}>
-          <Diagram source={digest.diagram.mermaid} />
-        </Section>
-      ) : null}
-
-      {digest.chapters.length ? (
-        <Section icon={<ListChecks size={16} />} title="Topics">
-          <ol className="q-topics">
-            {digest.chapters.map((chapter, index) => (
-              <li key={index}>
-                <button type="button" className="q-topic" onClick={() => onPlay(chapter.startMs)} aria-label={`Play topic ${chapter.title} from ${formatMs(chapter.startMs)}`}>
-                  <span className="q-topic-time">{formatMs(chapter.startMs)}</span>
-                  <span className="q-topic-body">
-                    <strong>{chapter.title}</strong>
-                    {chapter.gist ? <span>{t(chapter.gist)}</span> : null}
-                  </span>
-                  <span className="q-topic-len">{durationText(chapter.endMs - chapter.startMs)}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-        </Section>
-      ) : null}
-
-      {participation.length >= 2 ? (
-        <Section icon={<Users size={16} />} title="Who spoke">
-          <ul className="q-hbars is-editable">
-            {participation.map((row) => (
-              <li key={row.id}>
-                <div className="q-who-line">
-                  <VoiceName id={row.id} name={row.name} locked={locked.has(row.id)} onRename={rename} />
-                  {unknownSet.has(row.id) && onIdentify ? <UnknownVoiceButton label={row.name} onOpen={() => onIdentify(row.id)} /> : null}
-                  {!locked.has(row.id) && identities[row.id] ? (
-                    <span className="q-faint q-from" title={identities[row.id].conflict ? `The ${identities[row.id].source.includes("visual") ? "audio" : "video"} suggested "${identities[row.id].conflict}" instead.` : undefined}>
-                      {identities[row.id].source === "audio" ? "named in the talk" : identities[row.id].source === "user" ? "" : "named from the video"}
-                      {identities[row.id].conflict ? " · check" : ""}
-                    </span>
-                  ) : null}
-                </div>
-                <strong className="q-num">{percentText(row.share)}</strong>
-                <span className="q-hbar-track" aria-hidden="true"><span className="q-hbar-fill" style={{ width: `${row.share * 100}%` }} /></span>
-              </li>
-            ))}
-          </ul>
-          <p className="q-faint">Speakers are told apart automatically, using the video when it shows names. Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
-        </Section>
-      ) : null}
-
-      {screens.length > 0 ? <OnScreen screens={screens} onPlay={onPlay} /> : null}
 
       <ContextUsed context={context} />
 
@@ -472,48 +497,6 @@ function Section({ id, icon, title, children }: { id?: string; icon: ReactNode; 
   );
 }
 
-
-const SCREEN_LABEL: Record<string, string> = {
-  slide: "Slide",
-  screen_share: "Shared screen",
-  diagram: "Diagram",
-  whiteboard: "Whiteboard",
-  document: "Document",
-  spreadsheet: "Spreadsheet",
-  code: "Code",
-  ui: "App screen",
-  chart: "Chart",
-  other: "On screen",
-};
-
-/** What the picture showed, as read from the video: text copied as shown, and how a diagram or screen was laid out. */
-function OnScreen({ screens, onPlay }: { screens: ScreenView[]; onPlay: (ms: number) => void }) {
-  const rows = screens.filter((screen) => screen.text.trim() || screen.details.trim() || screen.title.trim());
-  if (rows.length === 0) return null;
-  return (
-    <Section icon={<MonitorPlay size={16} />} title="On screen">
-      <ul className="q-screens">
-        {rows.map((screen) => (
-          <li key={screen.id} className="q-screen">
-            <div className="q-screen-head">
-              <span className="q-chip">{SCREEN_LABEL[screen.kind] ?? "On screen"}</span>
-              <strong>{screen.title || ""}</strong>
-              <Moment ms={screen.start_ms} onPlay={onPlay} />
-            </div>
-            {screen.text.trim() ? <pre className="q-screen-text">{screen.text}</pre> : null}
-            {screen.details.trim() ? (
-              <details>
-                <summary>How it is laid out</summary>
-                <pre className="q-screen-text">{screen.details}</pre>
-              </details>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <p className="q-faint">Read from the video by a model, so check anything that matters against the recording.</p>
-    </Section>
-  );
-}
 
 function talkTime(spans: Span[], names: Map<string, string>): { id: string; name: string; share: number }[] {
   const totals = new Map<string, number>();

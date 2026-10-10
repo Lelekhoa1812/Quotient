@@ -277,6 +277,18 @@
       "schema": "schemas/meeting.answer_check.v1.json"
     },
     {
+      "route": "screen_use",
+      "pass": "screen_use",
+      "prompt_id": "meeting.screen_use.v1",
+      "schema_id": "meeting.screen_use.v1",
+      "version": 1,
+      "active": true,
+      "model_role": "llm",
+      "dimension": null,
+      "prompt": "prompts/meeting.screen_use.v1.yaml",
+      "schema": "schemas/meeting.screen_use.v1.json"
+    },
+    {
       "route": "dissent",
       "pass": "dissent",
       "prompt_id": "meeting.dissent.v1",

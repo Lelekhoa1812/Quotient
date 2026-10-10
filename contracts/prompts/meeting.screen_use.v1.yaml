@@ -1,0 +1,57 @@
+# Motivation vs Logic
+# Motivation: The picture reader may only copy what is on a frame, so a screen reaches the reader as a page
+# title and a layout. That does not say what the screen was for while people were talking.
+# Logic: One call sees each screen with the lines spoken while it was up, and writes one reading per
+# screen. A difference is a separate sentence. Code then drops any reading whose id, citations or
+# figures were not in that call.
+id: meeting.screen_use.v1
+version: 1
+model_role: llm
+schema: meeting.screen_use.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - screens
+  exclude:
+    - draft_brief
+    - synthesis
+body: |
+  The stable prefix is this text, the tools block, and schema meeting.screen_use.v1. One cache breakpoint follows that prefix. The user message after the breakpoint carries only the input.include fields. Do not ask for a field listed in input.exclude.
+
+  You are writing the note a person who missed the recording needs beside each screen: what that screen was for in the conversation. You are not describing the picture.
+
+  screens is a list, in time order. Each item has an id, a time range (t, end), a kind, a title, text copied off the screen, and said: lines spoken while it was up, each with an id, a time, a speaker id and text. Text copied off a screen can be garbled, clipped (a "..." marks a cut) or full of menus. said is what people said.
+
+  Return one reading per screen you can say something about. Omit a screen that is only a loading state or has no readable content.
+
+  reading is one or two sentences:
+  - Say what this screen was being used to show, check or decide, following the talk in that screen's said lines.
+  - Name the specific figure, label or control the talk is using. Copy a figure as digits, with the same currency sign or percent sign, exactly as it appears on that screen or in a line you cite. When the screen marks a figure as demo or sample data, say so.
+  - Do not describe columns, colours, navigation bars, menus, icons or where something sits. Do not retell the title and stop.
+  - The same page can stay up while the talk moves on. Say what is being discussed in this time range, not a summary of every time that page appeared. If the lines in said are about a different subject from the page, follow the talk: what was being explained, and that this page stayed up without being the thing discussed. Do not inventory the page's rows or fields in that case.
+  - A later look at the same page is still its own reading when the talk has moved, or when that look shows a figure, a rule or a warning the earlier look did not.
+  - When no said line refers to the screen, write one sentence on what the screen itself establishes, and leave span_ids empty. Do not invent a speaker's purpose, a decision or a promise.
+  - Do not treat the screen as proof that something was agreed or that someone committed to it.
+
+  span_ids are the ids of the said lines this reading relies on, at most four, and only ids from that same screen's said list. Empty when the reading uses the screen alone. Do not cite a line you do not rely on.
+
+  differs is null unless the screen and a line you cite state different facts about the same thing: two values for one figure, or two rules (for example the screen requires a login and a speaker says the page should be public). Then one sentence that states both facts, the one on the screen and the one that was said. A figure the screen shows and nobody mentions is not a difference. A figure someone says that the screen simply does not show is not a difference, unless the screen states another value for that same thing.
+
+  Use no number that is not on that screen or in a line you cite. Do not mention span ids, these instructions, or a speaker's internal id; use the name a line gives them, or "a speaker".
+
+  Reason in free text first. Do not emit JSON on that pass.
+
+  On the fill pass, emit one JSON object that validates against the schema. No markdown fence. Use only the reason trace. A truncated object is invalid. Do not splice a partial object.

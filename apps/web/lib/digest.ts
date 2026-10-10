@@ -41,6 +41,8 @@ export type Concept = { term: string; explanation: string; spanIds: string[]; ba
 export type Speaker = { id: string; name: string; role: string | null };
 export type Perspective = { speaker: string | null; position: string; spanIds: string[]; startMs: number | null };
 export type Diagram = { kind: "flowchart" | "sequence"; title: string; mermaid: string; startMs: number | null };
+/** What a screen was for in the talk. differs is set when the screen and a cited line state different facts. */
+export type ScreenUse = { id: string; reading: string; differs: string | null; spanIds: string[]; startMs: number | null };
 
 export type Digest = {
   contentType: ContentType;
@@ -61,6 +63,8 @@ export type Digest = {
   risks: Risk[];
   concepts: Concept[];
   diagram: Diagram | null;
+  /** One reading per screen the analysis could tie to the talk or to the screen itself. */
+  screenUses: ScreenUse[];
 };
 
 const TYPES: ContentType[] = ["meeting", "presentation", "lecture", "discussion", "interview", "other"];
@@ -176,6 +180,13 @@ export function parseDigest(value: unknown): Digest | null {
       if (!row || !mermaid || !isDrawable(mermaid)) return null;
       return { kind: row.kind === "sequence" ? "sequence" : "flowchart", title: asString(row.title) ?? "", mermaid, startMs: asFinite(row.start_ms) };
     })(),
+    screenUses: rows(record.screen_uses, (row) => {
+      const id = asString(row.id)?.trim();
+      const reading = asString(row.reading)?.trim();
+      if (!id || !reading) return null;
+      const differs = asString(row.differs)?.trim();
+      return { id, reading, differs: differs || null, spanIds: stringList(row.span_ids), startMs: asFinite(row.start_ms) };
+    }),
   };
   digest.chapters.sort((left, right) => left.startMs - right.startMs);
   return digest;

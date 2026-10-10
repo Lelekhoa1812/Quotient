@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.screen_use.v1.json",
+  "title": "ScreenUse",
+  "description": "What each shown screen was for in the conversation, and where the screen and the talk state different facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["readings"],
+  "properties": {
+    "readings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "reading", "span_ids", "differs"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 96 },
+          "reading": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "span_ids": {
+            "type": "array",
+            "maxItems": 4,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "differs": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "minLength": 1, "maxLength": 300 }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
