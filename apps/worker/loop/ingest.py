@@ -17,16 +17,22 @@ from bedrock.wire import Transport, invalidate_iam
 from graph.span import Span
 from loop.pool import map_ordered
 from loop.quality import Ledger
+from bedrock.limits import PEGASUS_WINDOW_MS
+from media.artifacts import ArtifactCache
 from media.clock import build_table
 from media.compact import IndexedSpan
 from media.pcm import write_pcm
 from media.probe import classify_file, probe
-from pegasus.client import PegasusClient, VisualNote
-from pegasus.parts import pack_scenes
+from pegasus.client import Observation, PegasusClient, PegasusResult, Screen, Sighting, VisualNote
+from pegasus.parts import window_parts
 from registry.load import Registry
 from sonic.client import SonicClient
 
 _BUCKET = "axion-meeting-local"
+# Change either of these when the prompt, schema or settings behind a cached artefact change.
+SCAN_VERSION = "scan-3"
+FRAME_VERSION = "frames-2"
+DIARIZER_VERSION = "pyannote-3.1-t0.5-m12"
 
 
 def repo_root() -> Path:
@@ -133,7 +139,7 @@ def _assemble(
     local_endpoint = os.environ.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
     if progress_callback:
         if kind == "video" and local_endpoint and not pegasus_bucket:
-            progress_callback("Streaming audio transcription; visual analysis is unavailable on local MinIO")
+            progress_callback("Streaming audio transcription and reading the picture from video frames")
         elif kind == "video":
             progress_callback("Transcribing audio and analyzing video in parallel")
         else:
@@ -162,21 +168,30 @@ def _assemble(
             note = VisualNote(
                 id=f"{meeting_id}-note-local-s3",
                 statement=(
-                    "Visual analysis was skipped because the media is stored in a local S3-compatible "
-                    "endpoint that Bedrock cannot access."
+                    "Video event descriptions were skipped because the media is stored in a local S3-compatible "
+                    "endpoint that Bedrock cannot access; on-screen text and names are still read from frames."
                 ),
             )
-            return [], [note]
+            return [], [note], [], []
         _stage("pegasus")
-        scenes = [(0, duration_ms)]
-        parts = pack_scenes(scenes)
+        cache = ArtifactCache.for_audio(cache_scope, "pegasus", pcm, SCAN_VERSION, PEGASUS_WINDOW_MS)
+        hit = _restore_scan(cache.get())
+        if hit is not None:
+            _stage("pegasus_cached")
+            return hit
+        parts = window_parts(duration_ms)
 
         def upload(part):
-            # The playback copy on MinIO is not readable by Bedrock, so it is only reused for AWS input.
-            if uploaded and part.index == 0 and part.source_start_ms == 0 and not pegasus_bucket:
+            # The playback copy on MinIO is not readable by Bedrock, so it is only reused for AWS input,
+            # and only when this window is the whole recording (a longer file would exceed the vendor cap).
+            if uploaded and part.source_start_ms == 0 and part.duration_ms >= duration_ms and not pegasus_bucket:
                 return uploaded
             piece = _cut(path, part)
-            return _put_object(piece, f"derivatives/{meeting_id}-{part.index}.mp4", aws_bucket=pegasus_bucket or None)
+            try:
+                return _put_object(piece, f"derivatives/{meeting_id}-{part.index}.mp4", aws_bucket=pegasus_bucket or None)
+            finally:
+                if piece != path:
+                    piece.unlink(missing_ok=True)
 
         client = PegasusClient(registry, transport)
         observed = client.analyze(parts, upload, meeting_id)
@@ -187,27 +202,85 @@ def _assemble(
         # raw_transcript.video was empty while Pegasus had described the scene.
         # Fix: Return timed observations and untimed notes. Cross-modal pairing
         # still uses only the timed observations.
-        return list(observed.observations), list(observed.notes)
+        result = (list(observed.observations), list(observed.notes), list(observed.screens), list(observed.sightings))
+        if not observed.failed_windows:
+            cache.put(_scan_payload(*result))  # a scan with a failed window is not kept: a retry gets another go
+        return result
 
     def run_diarization():
         _stage("diarization")
         from media.diarize import diarize_pcm
 
-        return diarize_pcm(pcm, should_stop=should_stop)
+        # The diarizer numbers voices by first appearance on every run, and a name a person gave a voice is
+        # keyed to that id, so a re-analysis replays the first run's turns to keep the ids the same.
+        cache = ArtifactCache.for_audio(cache_scope, "diarization", pcm, DIARIZER_VERSION)
+        saved = cache.get()
+        if isinstance(saved, list):
+            restored = [tuple(item) for item in saved if isinstance(item, list) and len(item) == 3]
+            if restored:
+                _stage("diarization_cached")
+                return restored
+        found = diarize_pcm(pcm, should_stop=should_stop)
+        if found:
+            cache.put([list(item) for item in found])
+        return found
+
+    def run_frames():
+        # What is on screen and whose name is shown are read from sampled frames (see visual.frames), not
+        # taken from the video model's free text, which invented placeholder names and table contents.
+        from bedrock.reason import _MODELS
+        from visual.frames import FRAME_INTERVAL_MS, MAX_FRAMES, FrameReader
+
+        _stage("frames")
+        cache = ArtifactCache.for_audio(cache_scope, "frames", pcm, FRAME_VERSION, FRAME_INTERVAL_MS, MAX_FRAMES)
+        from visual.frames import merge_readings
+
+        saved = cache.get()
+        if isinstance(saved, dict) and isinstance(saved.get("readings"), list) and isinstance(saved.get("interval"), int):
+            _stage("frames_cached")
+            screens, sightings = merge_readings([(int(at), data) for at, data in saved["readings"]], saved["interval"], duration_ms, meeting_id)
+            return screens, sightings, []
+        model, cap, fallback = _MODELS["llm"]
+        from bedrock.limits import REASON_REGION
+
+        try:
+            reader = FrameReader(registry, transport, model=model, fallback=fallback, region=REASON_REGION, cap=cap)
+            readings, interval, failed = reader.read_frames(path, duration_ms, should_stop=should_stop)
+        except Exception as exc:  # reading the picture is an enrichment: the transcript must still complete
+            print(f"frames skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+            return [], [], [VisualNote(id=f"{meeting_id}-note-frames-unavailable", statement=f"On-screen text and names could not be read from the video ({type(exc).__name__}).")]
+        screens, sightings = merge_readings(readings, interval, duration_ms, meeting_id)
+        notes = []
+        if failed:
+            notes.append(VisualNote(id=f"{meeting_id}-note-frames-failed", statement=f"{failed} video frames could not be read, so on-screen text and names may be missing for those moments."))
+        if not failed:
+            cache.put({"readings": [[at, data] for at, data in readings], "interval": interval})
+        return screens, sightings, notes
 
     # Diarization runs beside transcription (seconds versus real-time streaming) and is optional.
     if kind == "video":
-        spoken_pack, pegasus_pack, turns = map_ordered(lambda fn: fn(), (run_sonic, run_pegasus, run_diarization))
+        spoken_pack, pegasus_pack, turns, frames_pack = map_ordered(lambda fn: fn(), (run_sonic, run_pegasus, run_diarization, run_frames))
         spoken, _seams = spoken_pack
-        observations, notes = pegasus_pack
+        observations, notes, _unused_screens, _unused_sightings = pegasus_pack
+        screens, sightings, frame_notes = frames_pack
+        notes = list(notes) + list(frame_notes)
     else:
         spoken_pack, turns = map_ordered(lambda fn: fn(), (run_sonic, run_diarization))
         spoken, _seams = spoken_pack
         observations = []
         notes = []
+        screens = []
+        sightings = []
     _clamp(spoken, duration_ms)
+    from identity.resolve import resolve_visual
     from media.diarize import attach_speakers
 
+    # Names the video shows are matched to the diarizer's voices before lines are attached, so two ids
+    # that the picture shows are one person are one voice from the start.
+    identities, merges = resolve_visual(turns or [], sightings) if turns and sightings else ([], [])
+    if merges:
+        gone = {other: keep for keep, other in merges}
+        turns = [(start, end, gone.get(voice, voice)) for start, end, voice in turns]
     attach_speakers(spoken, turns)
     spans = list(spoken) + silence
     return Ledger(
@@ -227,6 +300,11 @@ def _assemble(
         ],
         observations=observations,
         notes=notes,
+        screens=screens,
+        sightings=sightings,
+        visual_identities=identities,
+        visual_merges=merges,
+        turns=list(turns or []),
     )
 
 
@@ -337,7 +415,37 @@ def _clamp(spans: list, duration_ms: int) -> None:
         span.end_ms = max(span.start_ms + 1, min(duration_ms, span.end_ms))
 
 
+def _scan_payload(observations, notes, screens, sightings) -> dict:
+    from dataclasses import asdict
+
+    return {
+        "observations": [asdict(item) for item in observations],
+        "notes": [asdict(item) for item in notes],
+        "screens": [asdict(item) for item in screens],
+        "sightings": [asdict(item) for item in sightings],
+    }
+
+
+def _restore_scan(saved):
+    """A saved visual scan, or None when it is missing or does not have the expected shape."""
+    if not isinstance(saved, dict):
+        return None
+    try:
+        return (
+            [Observation(**row) for row in saved["observations"]],
+            [VisualNote(**row) for row in saved["notes"]],
+            [Screen(**row) for row in saved["screens"]],
+            [Sighting(**row) for row in saved["sightings"]],
+        )
+    except (KeyError, TypeError):
+        return None
+
+
 def _cut(path: Path, part) -> Path:
+    # Bugs vs Fixes
+    # Bug: "-ss" before "-i" with "-c copy" starts at the keyframe before the requested time, so a
+    # window's picture could begin seconds early while its observation times were offset by the requested
+    # start. Fix: re-encode the short window (frame-accurate), which also guarantees a decodable clip.
     dest = path.with_name(f"{path.stem}-{part.index}{path.suffix}")
     start = part.source_start_ms / 1000
     duration = part.duration_ms / 1000
@@ -347,12 +455,20 @@ def _cut(path: Path, part) -> Path:
             "-y",
             "-ss",
             f"{start:.3f}",
-            "-t",
-            f"{duration:.3f}",
             "-i",
             str(path),
-            "-c",
-            "copy",
+            "-t",
+            f"{duration:.3f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "24",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
             str(dest),
         ],
         check=True,

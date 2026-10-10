@@ -4,6 +4,7 @@
 
 SONIC = "meeting.sonic.v1"
 PEGASUS = "meeting.pegasus.v1"
+FRAME = "meeting.frame.v1"
 PEGASUS_CONTINUE = "meeting.pegasus.continue.v1"
 COMPACTION = "meeting.compaction.v1"
 CROSSMODAL = "meeting.crossmodal.v1"

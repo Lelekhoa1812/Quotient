@@ -48,6 +48,14 @@ class Ledger:
     cells: dict = field(default_factory=dict)
     observations: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    # What the picture showed (slides, shared screens, diagrams) and the names it displayed. See identity.resolve.
+    screens: list = field(default_factory=list)
+    sightings: list = field(default_factory=list)
+    visual_identities: list = field(default_factory=list)
+    visual_merges: list = field(default_factory=list)
+    # Voice id -> name, from the person (locked) and from the picture. Given to the digest writer.
+    known_names: dict = field(default_factory=dict)
+    turns: list = field(default_factory=list)
     anchor_date: str | None = None
     previous_actions: list = field(default_factory=list)
     # Reference material the person supplied (context.library.ContextLibrary), or None. It is never evidence.
@@ -761,7 +769,7 @@ def _require_speech(ledger) -> None:
 
 def _digest(ledger, call, claims, actions):
     """Walkaway pass. Never fails the analysis: any error leaves the meeting without a digest."""
-    from graph.digest import claim_rows, ground_digest, transcript_lines
+    from graph.digest import claim_rows, ground_digest, screen_rows, transcript_lines
 
     def speaker_of(span) -> str:
         return span.speaker_hypothesis_id or "unknown"
@@ -778,6 +786,12 @@ def _digest(ledger, call, claims, actions):
                 for index, action in enumerate(actions)
             ],
         }
+        on_screen = screen_rows(getattr(ledger, "screens", None) or [])
+        if on_screen:
+            payload["on_screen"] = on_screen
+        known_names = {label: name for label, name in (getattr(ledger, "known_names", None) or {}).items() if label in {row.get("speaker") for row in lines}}
+        if known_names:
+            payload["known_names"] = known_names
         # Reference material the person supplied: an index in the prompt, the documents on demand.
         library = getattr(ledger, "context", None)
         handlers = {}
@@ -803,8 +817,8 @@ def _digest(ledger, call, claims, actions):
             print("digest skipped: no answer", file=sys.stderr, flush=True)
             return None
         speakers = {row["speaker"] for row in lines if row.get("speaker") not in (None, "unknown")}
-        digest = ground_digest(turn.output, ledger.spans, claims, actions, speakers)
-        digest = _reviewed(call, payload, turn.output, digest, lambda raw: ground_digest(raw, ledger.spans, claims, actions, speakers), handlers)
+        digest = ground_digest(turn.output, ledger.spans, claims, actions, speakers, known_names)
+        digest = _reviewed(call, payload, turn.output, digest, lambda raw: ground_digest(raw, ledger.spans, claims, actions, speakers, known_names), handlers)
         digest = _verify_questions(ledger, call, digest)
         from jev.rank import rank_digest
 

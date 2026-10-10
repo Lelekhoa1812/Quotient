@@ -14,6 +14,10 @@ PEGASUS_REGION = "ap-southeast-2"
 PEGASUS_MAX_OUTPUT_TOKENS = 4096
 PEGASUS_BUCKET_OWNER = "255834078973"
 PEGASUS_PART_MAX_MS = 50 * 60 * 1000
+# A window is short on purpose: one call has a fixed output budget, so a shorter window gets more
+# detail per minute of video (screens, text, names) than one call for the whole recording.
+PEGASUS_WINDOW_MS = 3 * 60 * 1000
+PEGASUS_WINDOW_MIN_TAIL_MS = 45 * 1000
 
 SOL_MODEL = "global.openai.gpt-6.1-sol"
 SOL_FALLBACK = "global.openai.gpt-6-sol"

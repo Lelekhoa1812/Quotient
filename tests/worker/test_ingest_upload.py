@@ -105,13 +105,22 @@ def test_local_s3_video_ingest_records_skipped_visual_analysis(monkeypatch, tmp_
 
     monkeypatch.setattr(ingest, "SonicClient", FakeSonic)
 
+    class FakeFrames:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def read_frames(self, *_args, **_kwargs):
+            return [], 8000, 0
+
+    monkeypatch.setattr("visual.frames.FrameReader", FakeFrames)
+
     stages = []
     ledger = ingest.assemble(source, "local-meeting", progress_callback=stages.append)
 
     assert ledger.observations == []
     assert len(ledger.notes) == 1
-    assert "Visual analysis was skipped" in ledger.notes[0].statement
-    assert stages == ["Streaming audio transcription; visual analysis is unavailable on local MinIO"]
+    assert "Video event descriptions were skipped" in ledger.notes[0].statement
+    assert stages == ["Streaming audio transcription and reading the picture from video frames"]
     assert temporary_dirs and not temporary_dirs[0].exists()
 
 
@@ -155,7 +164,7 @@ def test_pegasus_parts_go_to_the_aws_bucket_when_media_is_on_minio(monkeypatch, 
 
         def analyze(self, parts, upload, meeting_id):
             uris.extend(upload(part) for part in parts)
-            return SimpleNamespace(observations=[], notes=[], incomplete=False)
+            return SimpleNamespace(observations=[], notes=[], screens=[], sightings=[], failed_windows=0, incomplete=False)
 
     monkeypatch.setattr(ingest, "SonicClient", FakeSonic)
     monkeypatch.setattr(ingest, "PegasusClient", FakePegasus)

@@ -44,11 +44,45 @@ class VisualNote:
         return False
 
 
+SCREEN_KINDS = ("slide", "screen_share", "diagram", "whiteboard", "document", "spreadsheet", "code", "ui", "chart", "other")
+MAX_SCREEN_TEXT = 4000
+MAX_SCREEN_DETAILS = 3000
+
+
+@dataclass(frozen=True)
+class Screen:
+    """Something shown on screen: a slide, a shared window, a diagram. Text is copied as shown, details say how it is laid out."""
+
+    id: str
+    kind: str
+    title: str
+    text: str
+    details: str
+    start_ms: int
+    end_ms: int
+
+
+@dataclass(frozen=True)
+class Sighting:
+    """A person whose name is shown on screen over a stretch of time; speaking is true when the picture marks them as the active speaker."""
+
+    id: str
+    name: str
+    speaking: bool
+    cue: str
+    start_ms: int
+    end_ms: int
+
+
 @dataclass
 class PegasusResult:
     observations: list[Observation] = field(default_factory=list)
     notes: list[VisualNote] = field(default_factory=list)
+    screens: list[Screen] = field(default_factory=list)
+    sightings: list[Sighting] = field(default_factory=list)
     incomplete: bool = False
+    # Windows whose visual analysis failed; each is reported as a note, so the meeting still completes.
+    failed_windows: int = 0
 
 
 def _vendor_schema(schema):
@@ -118,15 +152,80 @@ def classify_observations(data: dict, part: Part, meeting_id: str) -> tuple[list
     return observations, notes
 
 
+def _span_in_part(item: dict, part: Part) -> tuple[int, int] | None:
+    """A window-local time range made absolute. A small overshoot is clamped; a range that is not inside
+    the window at all is dropped (the picture reading is kept only when its time can be trusted)."""
+    try:
+        start, end = int(item["start_ms"]), int(item["end_ms"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    slack = 3000
+    if end <= start or start < -slack or start >= part.duration_ms or end > part.duration_ms + slack:
+        return None
+    start, end = max(0, start), min(part.duration_ms, end)
+    if end <= start:
+        return None
+    return start + part.source_start_ms, end + part.source_start_ms
+
+
+def _text(value: object, limit: int) -> str:
+    return value.strip()[:limit] if isinstance(value, str) else ""
+
+
+def classify_screens(data: dict, part: Part, meeting_id: str) -> tuple[list[Screen], list[Sighting]]:
+    screens: list[Screen] = []
+    for item in data.get("screens") or []:
+        if not isinstance(item, dict):
+            continue
+        when = _span_in_part(item, part)
+        text, details, title = _text(item.get("text"), MAX_SCREEN_TEXT), _text(item.get("details"), MAX_SCREEN_DETAILS), _text(item.get("title"), 200)
+        if when is None or not (text or details or title):
+            continue
+        kind = _text(item.get("kind"), 40).lower().replace(" ", "_").replace("-", "_")
+        screens.append(
+            Screen(
+                id=f"{meeting_id}-screen-{part.index}-{len(screens)}",
+                kind=kind if kind in SCREEN_KINDS else "other",
+                title=title,
+                text=text,
+                details=details,
+                start_ms=when[0],
+                end_ms=when[1],
+            )
+        )
+    sightings: list[Sighting] = []
+    for item in data.get("people") or []:
+        if not isinstance(item, dict):
+            continue
+        when = _span_in_part(item, part)
+        name = _text(item.get("name"), 120)
+        if when is None or not name:
+            continue
+        cue = _text(item.get("cue"), 20).lower()
+        sightings.append(
+            Sighting(
+                id=f"{meeting_id}-sight-{part.index}-{len(sightings)}",
+                name=name,
+                speaking=item.get("speaking") is True,
+                cue=cue if cue in {"label", "highlight", "caption"} else "other",
+                start_ms=when[0],
+                end_ms=when[1],
+            )
+        )
+    return screens, sightings
+
+
 def _reason(response: dict) -> str:
     return str(response.get("finishReason") or response.get("stopReason") or "stop")
 
 
 class PegasusClient:
-    def __init__(self, registry, transport, *, continuation_ceiling: int = 8):
+    def __init__(self, registry, transport, *, continuation_ceiling: int = 8, strict: bool = False):
         self.registry = registry
         self.transport = transport
         self.continuation_ceiling = continuation_ceiling
+        # strict: a window that fails raises (the old behaviour), instead of becoming a note.
+        self.strict = strict
 
     def analyze(self, parts: list[Part], upload, meeting_id: str) -> PegasusResult:
         prompt = self.registry.prompt(PEGASUS)
@@ -136,34 +235,54 @@ class PegasusClient:
         # call before the next upload started.
         # Fix: Parts run together. A length continuation stays inside its part,
         # and results are merged in part order.
-        def one(part: Part) -> tuple[list[Observation], list[VisualNote], bool]:
-            uri = upload(part)
-            body = build_body(prompt.body, schema, uri)
-            response = self._invoke(body)
-            turns = 1
-            while _reason(response) == "length":
-                if turns > self.continuation_ceiling:
-                    return [], [], True
-                continuation = self.registry.prompt(PEGASUS_CONTINUE)
-                body = build_body(continuation.body, schema, uri)
+        # Bug: One window that Pegasus could not read (an unprocessable clip, a timestamp
+        # outside the window) failed the whole meeting, though the speech was fine.
+        # Fix: A failed window becomes a note and the other windows still count. The
+        # error is kept only as its class name, never copied into the note.
+        def one(part: Part):
+            try:
+                uri = upload(part)
+                body = build_body(prompt.body, schema, uri)
                 response = self._invoke(body)
-                turns += 1
-            if _reason(response) != "stop":
-                raise SchemaRejected(f"Pegasus finishReason {_reason(response)!r} is not a complete object")
-            message = response.get("message")
-            if not isinstance(message, str):
-                raise SchemaRejected("Pegasus stop response has no JSON message")
-            data = validate_json(message, schema)
-            observations, notes = classify_observations(data, part, meeting_id)
-            return observations, notes, False
+                turns = 1
+                while _reason(response) == "length":
+                    if turns > self.continuation_ceiling:
+                        return [], [], [], [], True, False
+                    continuation = self.registry.prompt(PEGASUS_CONTINUE)
+                    body = build_body(continuation.body, schema, uri)
+                    response = self._invoke(body)
+                    turns += 1
+                if _reason(response) != "stop":
+                    raise SchemaRejected(f"Pegasus finishReason {_reason(response)!r} is not a complete object")
+                message = response.get("message")
+                if not isinstance(message, str):
+                    raise SchemaRejected("Pegasus stop response has no JSON message")
+                data = validate_json(message, schema)
+                observations, notes = classify_observations(data, part, meeting_id)
+                screens, sightings = classify_screens(data, part, meeting_id)
+                return observations, notes, screens, sightings, False, False
+            except (SchemaRejected, TimestampOutside, RuntimeError, TimeoutError, OSError) as exc:
+                if self.strict:
+                    raise
+                note = VisualNote(
+                    id=f"{meeting_id}-note-{part.index}-failed",
+                    statement=(
+                        f"Visual analysis of {part.source_start_ms // 60000}:{part.source_start_ms // 1000 % 60:02d} to "
+                        f"{part.source_end_ms // 60000}:{part.source_end_ms // 1000 % 60:02d} was not available ({type(exc).__name__})."
+                    ),
+                )
+                return [], [note], [], [], False, True
 
         result = PegasusResult()
-        for observations, notes, incomplete in map_ordered(one, parts):
+        for observations, notes, screens, sightings, incomplete, failed in map_ordered(one, parts):
             if incomplete:
                 result.incomplete = True
                 return result
             result.observations.extend(observations)
             result.notes.extend(notes)
+            result.screens.extend(screens)
+            result.sightings.extend(sightings)
+            result.failed_windows += 1 if failed else 0
         return result
 
     def _invoke(self, body: dict) -> dict:

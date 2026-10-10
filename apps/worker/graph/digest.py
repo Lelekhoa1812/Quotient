@@ -149,6 +149,42 @@ def transcript_lines(spans: list, speaker_of) -> list[dict]:
     return rows
 
 
+# Screens go to the writer as evidence of what was shown. A cap keeps a long slide-heavy recording from
+# crowding out the transcript: the budget is characters of text and details, spent in time order.
+SCREEN_CHARS = 60_000
+SCREEN_MAX = 120
+
+
+def screen_rows(screens: list) -> list[dict]:
+    """The on_screen payload: one row per distinct screen, in time order. A screen that repeats the one before
+    (the same slide shown again after a cut) is folded into it, so the writer reads each thing once."""
+    rows: list[dict] = []
+    budget = SCREEN_CHARS
+    previous = None
+    for screen in sorted(screens, key=lambda item: item.start_ms):
+        text = (getattr(screen, "text", "") or "").strip()
+        details = (getattr(screen, "details", "") or "").strip()
+        title = (getattr(screen, "title", "") or "").strip()
+        signature = (screen.kind, title.casefold(), text.casefold())
+        if previous is not None and signature == previous["sig"]:
+            previous["row"]["end"] = _clock(screen.end_ms)
+            continue
+        cost = len(text) + len(details) + len(title)
+        if len(rows) >= SCREEN_MAX or cost > budget:
+            break
+        budget -= cost
+        row = {"t": _clock(screen.start_ms), "end": _clock(screen.end_ms), "kind": screen.kind}
+        if title:
+            row["title"] = title
+        if text:
+            row["text"] = text
+        if details:
+            row["details"] = details
+        rows.append(row)
+        previous = {"sig": signature, "row": row}
+    return rows
+
+
 def claim_rows(claims: list) -> list[dict]:
     rows = []
     for claim in claims:
@@ -168,7 +204,7 @@ def claim_rows(claims: list) -> list[dict]:
     return rows
 
 
-def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, speakers: set[str]) -> dict | None:
+def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, speakers: set[str], known_names: dict | None = None) -> dict | None:
     if not isinstance(raw, dict):
         return None
     raw = _clean(raw)
@@ -192,6 +228,7 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
             return None  # one ledger action backs one digest action
         return action_id if _words(str(item.get("task") or "")) & _words(statements[action_id]) else None
 
+    known = {label: name.strip() for label, name in (known_names or {}).items() if isinstance(label, str) and isinstance(name, str) and name.strip()}
     ordered = sorted(by_span.values(), key=lambda span: span.start_ms)
     where = {span.id: index for index, span in enumerate(ordered)}
 
@@ -244,12 +281,26 @@ def ground_digest(raw: dict | None, spans: list, claims: list, actions: list, sp
         if label not in speakers or label in seen_ids or not name or not ids:
             continue
         needle = name.casefold().split()[-1]
-        if not any(re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", by_span[span_id].text.casefold()) for span_id in ids):
+        given = known.get(label)
+        if given:
+            # The picture or the person already named this voice: the writer may use it but not rename it.
+            if given.casefold().split()[0] != name.casefold().split()[0] and needle != given.casefold().split()[-1]:
+                continue
+            name = given
+        elif not any(re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", by_span[span_id].text.casefold()) for span_id in ids):
             continue
         seen_ids.add(label)
         # Transcripts are lower-case; a name shown to a reader should read like a name.
         shown = name.title() if name == name.lower() else name
         named.append({"id": label, "name": shown, "role": text(item.get("role")) or None, "span_ids": ids})
+    # A voice with a known name is listed even when the writer did not list it, on its own first lines.
+    for label, given in known.items():
+        if label in seen_ids or label not in speakers:
+            continue
+        lines = [span.id for span in ordered if span.speaker_hypothesis_id == label][:2]
+        if lines:
+            seen_ids.add(label)
+            named.append({"id": label, "name": given, "role": None, "span_ids": lines})
     out["speakers"] = named
     known = {row["id"] for row in named}
 

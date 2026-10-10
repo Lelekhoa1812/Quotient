@@ -109,6 +109,23 @@ def _observation_row(observation: object) -> dict:
     }
 
 
+SCREEN_ROWS = 300
+
+
+def _screen_row(screen: object) -> dict:
+    if isinstance(screen, dict):
+        return copy.deepcopy(screen)
+    return {
+        "id": getattr(screen, "id", None),
+        "kind": getattr(screen, "kind", "other"),
+        "title": getattr(screen, "title", ""),
+        "text": getattr(screen, "text", ""),
+        "details": getattr(screen, "details", ""),
+        "start_ms": getattr(screen, "start_ms", None),
+        "end_ms": getattr(screen, "end_ms", None),
+    }
+
+
 def _claim_row(claim: object) -> dict:
     if isinstance(claim, dict):
         return copy.deepcopy(claim)
@@ -410,7 +427,7 @@ class Port:
     def _set_progress(self, meeting_id: str, message: str) -> None:
         with self._lock:
             row = self._rows.get(meeting_id)
-            if row is None or row.get("status") in {"cancelled", "failed"} or row.get("progress_message") == message:
+            if row is None or row.get("status") in {"cancelled", "failed"} or _reindex_stopped(row) or row.get("progress_message") == message:
                 return
             row["progress_message"] = message
             row["updated_at"] = _now()
@@ -607,14 +624,59 @@ class Port:
                 names = tuple(
                     name for name in row.get("context_names") or [] if isinstance(name, str) and name.strip()
                 )
+                reindex = bool(row.get("reindexing"))
                 row["status"] = "working"
                 row["updated_at"] = _now()
                 self._save_locked()
-            self._run_meeting(meeting_id, object_key, names)
+            self._run_meeting(meeting_id, object_key, names, reindex=reindex)
         except Exception as exc:
-            self._fail(meeting_id, _public_failure(exc))
+            message = _public_failure(exc)
+            if not self._restore_after_reindex(meeting_id, message):
+                self._fail(meeting_id, message)
 
-    def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...]) -> None:
+    def _restore_after_reindex(self, meeting_id: str, message: str) -> bool:
+        """A reindex that fails leaves the meeting as it was: the brief it already had is not lost to a retry."""
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            if row is None or not row.get("reindexing"):
+                return False
+            row["reindexing"] = False
+            if row["status"] != "cancelled":
+                row["status"] = row.pop("previous_status", None) or "needs_review"
+                row["progress_message"] = "Reindex did not finish; the earlier analysis is kept."
+            row["reindex_error"] = message
+            row["updated_at"] = _now()
+            self._save_locked()
+            return True
+
+    def reindex(self, meeting_id: str, subject: str) -> dict:
+        """Run the analysis again on the same recording so a name a person has since given (or a voice they
+        merged) reaches the whole analysis. Transcript, voices and the visual scan are replayed from the
+        local cache when they are there; the language-model stages run again."""
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            if row["status"] in {"queued", "working"}:
+                _raise("conflict", "The analysis is still running.")
+            if row["status"] == "cancelled":
+                _raise("conflict", "This meeting was stopped. Upload the recording again.")
+            row["previous_status"] = row["status"]
+            row["reindexing"] = True
+            row["reindex_error"] = None
+            row["reindex_count"] = int(row.get("reindex_count") or 0) + 1
+            row["status"] = "queued"
+            row["progress_message"] = "Reindexing identities"
+            row["updated_at"] = _now()
+            self._save_locked()
+            result = copy.deepcopy(row)
+        threading.Thread(
+            target=self._analyze,
+            args=(meeting_id,),
+            name="quotient-reindex",
+            daemon=True,
+        ).start()
+        return result
+
+    def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...], reindex: bool = False) -> None:
         from bedrock.reason import Reasoner
         from bedrock.wire import Transport
         from loop.ingest import assemble, resolve_object
@@ -645,6 +707,7 @@ class Port:
             if scratch is not None:
                 shutil.rmtree(scratch, ignore_errors=True)
         ledger.context = self._load_context(meeting_id)
+        self._apply_identity_state(meeting_id, ledger)
         registry = Registry()
         reasoner = Reasoner(registry, Transport())
         print("analysis stage: quality", file=sys.stderr, flush=True)
@@ -652,6 +715,8 @@ class Port:
             ledger,
             reasoner,
             registry,
+            # A reindex has to run the analysis again, so it gets a checkpoint key of its own.
+            f"{self._subject_of(meeting_id)}:{meeting_id}:{self._reindex_count(meeting_id)}" if reindex else None,
             stage_callback=lambda message: self._set_progress(meeting_id, message),
             should_stop=lambda: self._is_cancelled(meeting_id),
         )
@@ -662,6 +727,30 @@ class Port:
                 file=sys.stderr,
                 flush=True,
             )
+
+    def _reindex_count(self, meeting_id: str) -> int:
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            return int((row or {}).get("reindex_count") or 0)
+
+    def _apply_identity_state(self, meeting_id: str, ledger) -> None:
+        """What a person decided about voices outranks a fresh run: merges are replayed on the new voice ids,
+        and the names they typed and the names the picture gave are handed to the analysis."""
+        with self._lock:
+            row = self._rows.get(meeting_id) or {}
+            merges = dict(row.get("speaker_merges") or {})
+            locked = dict(row.get("speaker_names") or {})
+        resolve = lambda voice: _final_voice(merges, voice)
+        for span in getattr(ledger, "spans", []) or []:
+            voice = getattr(span, "speaker_hypothesis_id", None)
+            if voice and resolve(voice) != voice:
+                span.speaker_hypothesis_id = resolve(voice)
+        known: dict[str, str] = {}
+        for identity in getattr(ledger, "visual_identities", []) or []:
+            voice = resolve(identity.speaker)
+            known.setdefault(voice, identity.name)
+        known.update({resolve(voice): name for voice, name in locked.items() if isinstance(name, str) and name.strip()})
+        ledger.known_names = known
 
     def meeting(self, meeting_id: str, subject: str) -> dict | None:
         with self._lock:
@@ -734,6 +823,8 @@ class Port:
                     "at": _now(),
                 }
             )
+            # The analysis was written before this name existed, so it is stale until a reindex.
+            row["identity_revision"] = int(row.get("identity_revision") or 0) + 1
             # Speaker labels are a presentation edit; no analysis rerun is queued.
             row["updated_at"] = _now()
             self._save_locked()
@@ -766,6 +857,14 @@ class Port:
             names = row.setdefault("speaker_names", {})
             names.pop(gone, None)
             names[keep] = display_name
+            # Remembered by voice id so that a fresh analysis of the same recording (same ids) merges them again.
+            merges = row.setdefault("speaker_merges", {})
+            for earlier, target in list(merges.items()):
+                if target == gone:
+                    merges[earlier] = keep
+            if gone != keep:
+                merges[gone] = keep
+            row["identity_revision"] = int(row.get("identity_revision") or 0) + 1
             row.setdefault("revisions", []).append(
                 {
                     "span_id": span_id,
@@ -797,6 +896,15 @@ class Port:
             if row["status"] in {"ready", "needs_review", "failed"}:
                 # A finished meeting is not "stopped": cancelling it would hide the brief it already produced.
                 _raise("conflict", "This meeting has already finished.")
+            if row.get("reindexing"):
+                # Stopping a reindex keeps the analysis the meeting already had.
+                row["reindexing"] = False
+                row["reindex_stopped_run"] = int(row.get("reindex_count") or 0)
+                row["status"] = row.pop("previous_status", None) or "needs_review"
+                row["progress_message"] = "Reindex stopped; the earlier analysis is kept."
+                row["updated_at"] = _now()
+                self._save_locked()
+                return copy.deepcopy(row)
             row["status"] = "cancelled"
             row["progress_message"] = "Stopped before it finished."
             row["updated_at"] = _now()
@@ -969,14 +1077,14 @@ class Port:
     def _is_cancelled(self, meeting_id: str) -> bool:
         with self._lock:
             row = self._rows.get(meeting_id)
-            return row is None or row["status"] == "cancelled"
+            return row is None or row["status"] == "cancelled" or _reindex_stopped(row)
 
     def _fail(self, meeting_id: object, message: str) -> None:
         if not isinstance(meeting_id, str):
             return
         with self._lock:
             row = self._rows.get(meeting_id)
-            if row is None or row["status"] == "cancelled":
+            if row is None or row["status"] == "cancelled" or _reindex_stopped(row):
                 return
             row["status"] = "failed"
             row["failure_message"] = message
@@ -988,7 +1096,7 @@ class Port:
         if not isinstance(meeting_id, str):
             return
         row = self._rows.get(meeting_id)
-        if row is None or row["status"] == "cancelled":
+        if row is None or row["status"] == "cancelled" or _reindex_stopped(row):
             return
         displays = {
             span.get("span_id"): span.get("speaker_display")
@@ -1044,6 +1152,10 @@ class Port:
         row["charts"] = _worker_charts(result, ledger)
         digest = getattr(result, "digest", None)
         row["digest"] = digest if isinstance(digest, dict) else None
+        self._project_identity(row, ledger, row["digest"])
+        row["reindexing"] = False
+        row["reindex_error"] = None
+        row.pop("previous_status", None)
         artifacts = dict(result.artifacts) if isinstance(result.artifacts, dict) else {}
         for key in _ARTIFACT_KEYS:
             artifacts.setdefault(key, "pending")
@@ -1053,6 +1165,49 @@ class Port:
         row["updated_at"] = _now()
         self._save_locked()
 
+    def _project_identity(self, row: dict, ledger, digest) -> None:
+        """Who is who after this analysis, and what the picture showed. The names a person typed stay in
+        speaker_names; this is the machine's answer, kept apart so the portal can tell them apart."""
+        from identity.resolve import reconcile
+
+        merges = dict(row.get("speaker_merges") or {})
+        visual = []
+        for item in getattr(ledger, "visual_identities", []) or []:
+            keep = _final_voice(merges, item.speaker)
+            if keep != item.speaker:
+                item = copy.copy(item)
+                item.speaker = keep
+            visual.append(item)
+        audio: dict[str, str] = {}
+        for entry in (digest or {}).get("speakers") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str) and isinstance(entry.get("name"), str):
+                audio[entry["id"]] = entry["name"]
+        # A merged-in voice no longer exists; keep any audio name it carried only if the kept voice has none.
+        for gone, keep in merges.items():
+            if gone in audio:
+                audio.setdefault(_final_voice(merges, gone), audio[gone])
+                audio.pop(gone, None)
+        locked = {voice: name for voice, name in (row.get("speaker_names") or {}).items() if isinstance(name, str) and name.strip()}
+        final = reconcile(visual, audio, locked)
+        row["identities"] = {
+            voice: {
+                "name": item.name,
+                "source": item.source,
+                "confidence": item.confidence,
+                "conflict": item.conflict,
+                "merged": list(item.merged),
+            }
+            for voice, item in sorted(final.items())
+        }
+        row["screens"] = [_screen_row(item) for item in (getattr(ledger, "screens", None) or [])][:SCREEN_ROWS]
+        row["visual"] = {
+            "screens": len(getattr(ledger, "screens", None) or []),
+            "sightings": len(getattr(ledger, "sightings", None) or []),
+            "named_from_picture": len(visual),
+        }
+        # Everything the person decided so far is now in the analysis.
+        row["analysed_identity_revision"] = int(row.get("identity_revision") or 0)
+
     def _owned(self, meeting_id: str, subject: str) -> dict:
         row = self._rows.get(meeting_id)
         if row is None or row["subject"] != subject:
@@ -1061,6 +1216,21 @@ class Port:
 
 
 MAX_REVISIONS = 5000
+
+
+def _reindex_stopped(row: dict) -> bool:
+    """True once a person stopped the reindex that is (still) running on this row."""
+    count = int(row.get("reindex_count") or 0)
+    return count > 0 and row.get("reindex_stopped_run") == count and not row.get("reindexing")
+
+
+def _final_voice(merges: dict, voice: str) -> str:
+    """Follow merge links to the voice that was kept (a chain is possible, a loop is not trusted)."""
+    seen = set()
+    while voice in merges and voice not in seen:
+        seen.add(voice)
+        voice = merges[voice]
+    return voice
 
 
 def _record_text_edit(row: dict, span_id: str, text: str) -> None:

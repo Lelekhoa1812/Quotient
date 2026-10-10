@@ -7,6 +7,7 @@ from registry.ids import (
     COMPACTION,
     COUNTEREVIDENCE,
     CHART,
+    FRAME,
     COVERAGE,
     CROSSMODAL,
     DISSENT,
@@ -49,6 +50,7 @@ PROMPT_ROLE = {
     ANSWER_CHECK: "slm",
     DISSENT: "slm",
     CHART: "slm",
+    FRAME: "llm",
 }
 
 for _dimension, _role in LENS_ROLE.items():
