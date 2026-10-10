@@ -34,7 +34,7 @@ body: |
   Do not repair a partial JSON value.
   Do not concatenate a partial JSON value.
   Do not continue an open bracket or an open string from any previous message.
-  Use observations and notes.
+  Use observations and notes, as in the first request, with times in milliseconds from the start of this part. Describe only what you can actually see; never invent names, text or data.
   When you know the time, start_ms and end_ms are both present and are milliseconds from the start of this part.
   A statement with no time range cannot support a claim. Put that statement in notes.
   Do not emit character offsets. Quote resolution stays in code.

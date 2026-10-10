@@ -53,6 +53,7 @@ PINS = {
     "pegasus": "pegasus",
     "pegasus.continue": "pegasus",
     "crossmodal": "llm",
+    "frame": "llm",
     # Motivation vs Logic
     # Motivation: Jev only sorts the review queue and is not a Sol or Luna role.
     # Logic: Leave model_role unset so the pin set stays llm, slm, sonic, and pegasus.

@@ -358,6 +358,18 @@
       "dimension": null,
       "prompt": "prompts/meeting.review_sort.v1.yaml",
       "schema": "schemas/meeting.review_sort.v1.json"
+    },
+    {
+      "route": "frame",
+      "pass": "frame",
+      "prompt_id": "meeting.frame.v1",
+      "schema_id": "meeting.frame.v1",
+      "version": 1,
+      "active": true,
+      "model_role": "llm",
+      "dimension": null,
+      "prompt": "prompts/meeting.frame.v1.yaml",
+      "schema": "schemas/meeting.frame.v1.json"
     }
   ]
 }

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.frame.v1.json",
+  "title": "FrameReading",
+  "description": "What one video frame shows: the shared content, and the people whose names are on screen.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["screen", "people"],
+  "properties": {
+    "screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shown", "kind", "title", "text", "details"],
+      "properties": {
+        "shown": { "type": "boolean" },
+        "kind": {
+          "type": "string",
+          "enum": ["slide", "screen_share", "diagram", "whiteboard", "document", "spreadsheet", "code", "ui", "chart", "other"]
+        },
+        "title": { "type": "string" },
+        "text": { "type": "string" },
+        "details": { "type": "string" }
+      }
+    },
+    "people": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "speaking", "cue"],
+        "properties": {
+          "name": { "type": "string" },
+          "speaking": { "type": "boolean" },
+          "cue": { "type": "string", "enum": ["label", "highlight", "caption", "other"] }
+        }
+      }
+    }
+  }
+}

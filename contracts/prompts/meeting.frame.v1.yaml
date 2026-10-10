@@ -1,0 +1,49 @@
+# Motivation vs Logic
+# Motivation: A video model asked to describe a whole window invented text and names (placeholder people, a
+# table of made-up contacts) and stamped every screen at the start of its window. One frame read on its own
+# is checkable: the reader can only report what is in the picture.
+# Logic: One frame in, one object out. Text is copied, never completed; an unreadable part is marked; a
+# person is named only by a label that is on screen.
+id: meeting.frame.v1
+version: 1
+model_role: llm
+schema: meeting.frame.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - frame
+  exclude:
+    - char_offsets
+body: |
+  You are reading one frame from a recorded video meeting. Report only what is visible in this frame, as one JSON object that validates against the schema. No markdown fence.
+
+  Never invent. Copy text exactly as you can read it; do not correct, complete, translate or summarise it. If a piece of text is too small or blurred to read, write [unreadable] in its place. If you are not sure of a figure, a name or a word, leave it out or mark it [unreadable]. Never use a placeholder (for example John Doe, Jane Smith, Lorem ipsum) unless those exact words are on the screen.
+
+  screen: the content being shared or presented in this frame: a slide, a shared screen or application window, a document, a spreadsheet, a code editor, a chart, a diagram, a whiteboard.
+    shown: true when such content fills the stage or a large part of the frame. false when the frame shows only people (camera tiles) and the meeting application's own interface; then the other fields are empty strings.
+    kind: slide, screen_share, diagram, whiteboard, document, spreadsheet, code, ui, chart, or other. Use ui for a product's own screens (a web app, a CRM, a dashboard) and screen_share when the content is a desktop, a browser page or several windows.
+    title: the slide heading, the page heading or the window title as shown, or empty.
+    text: all legible text of the shared content, in reading order: headings, menu and tab labels of the shared application, table headers and cells, card labels with their figures and units, form fields with their values, bullet points. Leave out the meeting application's own interface (Chat, People, Raise, React, View, Camera, Mic, Share, Leave, the clock and recording indicator) and leave out the participant tiles.
+    details: how the content is laid out and what it conveys, so a reader who cannot see the frame can rebuild it. A diagram: every box or node by its label and every arrow or line as "A -> B", with the label on it. A chart: type, axes, series and the values that can be read. A table: the column headings and the rows you can read. An application screen: the product, the page or view, the sections, the controls and fields, their values, what is selected, highlighted, hovered or being clicked, and any error or warning. A whiteboard: what is drawn or written and how it connects.
+
+  people: one entry for each person whose name is displayed in this frame, taken from a name label on a participant tile, a floating label, a caption or a lower third. name is the label exactly as shown, including a cut-off ending such as "Rafi Must..."; never a name from a face, from the voice, from the shared content or from your own knowledge.
+    speaking: true only when the frame marks this person as the active speaker, and the marks are different in the two common layouts:
+      Camera layout (no content is shared): the large stage tile is the active speaker, and its name label at the bottom-left of that tile names them. A tile with a coloured outline or a speaking indicator is also marked.
+      Shared-content layout (a screen, slide or document fills the stage): the people appear as small tiles at the side. The active speaker is the tile with the coloured outline or speaking indicator. The name label floating at the bottom-left of the whole frame names the person who is sharing, who is not necessarily the person speaking, so do not use it as a speaking mark; use it only to name the person who shares.
+      Captions that name the person also mark them. Small tiles with no outline or indicator are on the call but not speaking: speaking false. When no tile is marked, or two are, mark nobody. Do not guess from mouths or faces.
+    cue: label, highlight, caption or other, for the kind of mark that showed who is speaking (or label for a plain name label).
+    Do not list a recording bot or note-taking assistant (a name containing Notetaker, Fireflies, Otter, Fathom or similar), a phone number, a device or a generic label (Guest, iPhone).
+    An empty list is correct when no name is displayed.
