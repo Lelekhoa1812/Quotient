@@ -276,6 +276,24 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "reindex_meeting",
+        "title": "Reindex identity",
+        "description": (
+            "Run the analysis again on the same recording so that speaker names a person has given since (and voices "
+            "they merged) reach the summary, decisions and actions. The meeting keeps its earlier analysis if the "
+            "reindex fails. Returns at once with the meeting in progress; poll get_meeting."
+        ),
+        "inputSchema": _schema({"meeting_id": _MEETING}, ["meeting_id"]),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {
+            "title": "Reindex identity",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    },
+    {
         "name": "revise_text",
         "title": "Revise transcript text",
         "description": "Edit the synthesized text for one transcript span. The original raw_text is preserved; this edit does not rerun analysis.",
@@ -352,6 +370,7 @@ def _handlers() -> dict[str, Callable]:
         "accept_action": _accept_action,
         "revise_speaker": _revise_speaker,
         "merge_speakers": _merge_speakers,
+        "reindex_meeting": _reindex_meeting,
         "revise_text": _revise_text,
         "cancel_meeting": _cancel_meeting,
     }
@@ -453,6 +472,12 @@ def _merge_speakers(arguments: dict, subject: str, port: object) -> dict:
     if len(display_name) > 128:
         raise ValueError("display_name is too long")
     raw = port.merge_speakers(meeting_id, subject, span_id, other_span_id, display_name)  # type: ignore[attr-defined]
+    return summary(project_meeting(raw))
+
+
+def _reindex_meeting(arguments: dict, subject: str, port: object) -> dict:
+    meeting_id = _required_id(arguments, "meeting_id")
+    raw = port.reindex(meeting_id, subject)  # type: ignore[attr-defined]
     return summary(project_meeting(raw))
 
 

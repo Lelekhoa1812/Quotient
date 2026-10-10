@@ -57,6 +57,12 @@ EXPECTED = {
         "destructiveHint": False,
         "required": ["meeting_id", "span_id", "other_span_id", "display_name"],
     },
+    "reindex_meeting": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "required": ["meeting_id"],
+    },
     "revise_text": {
         "taskSupport": "forbidden",
         "readOnlyHint": False,

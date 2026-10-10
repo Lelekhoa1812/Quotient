@@ -160,6 +160,7 @@ class MemoryPort:
                     "at": _now(),
                 }
             )
+            row["identity_revision"] = row.get("identity_revision", 0) + 1
             row["updated_at"] = _now()
             return copy.deepcopy(row)
 
@@ -199,6 +200,16 @@ class MemoryPort:
                     "at": _now(),
                 }
             )
+            row["updated_at"] = _now()
+            return copy.deepcopy(row)
+
+    def reindex(self, meeting_id: str, subject: str) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            if row["status"] in {"queued", "working"}:
+                raise PortError("conflict", "The analysis is still running.")
+            row["identity_revision"] = row.get("identity_revision", 0)
+            row["analysed_identity_revision"] = row["identity_revision"]
             row["updated_at"] = _now()
             return copy.deepcopy(row)
 

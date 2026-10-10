@@ -102,12 +102,15 @@ def project_meeting(raw: dict) -> dict:
         else f"meetings/{meeting_id}"
     )
     release = _release(cleaned.get("prompt_release"))
+    identities = _identities(cleaned.get("identities"))
     graph = {
         "meeting_id": meeting_id,
         "status": status,
         "prompt_release": release,
         "playback": playback,
-        "spans": [_span_view(span, meeting_id) for span in spans],
+        "spans": [_span_view(span, meeting_id, identities) for span in spans],
+        "identities": identities,
+        "screens": _screens(cleaned.get("screens")),
         "claims": published + review_claims,
         "findings": findings,
         "synthesis": synthesis,
@@ -166,6 +169,7 @@ def project_meeting(raw: dict) -> dict:
         "task_id": _task_id(raw.get("object_key")),
         "context": _context_view(raw.get("context")),
         "failure_message": _safe_failure(cleaned.get("failure_message")),
+        "identity": _identity_state(cleaned),
         "graph": graph,
         "brief": brief,
         "review": {
@@ -196,6 +200,10 @@ def summary(projected: dict) -> dict:
         result["task_id"] = projected["task_id"]  # additive: lets a client tie its own submission to this meeting
     if projected.get("context"):
         result["context"] = projected["context"]  # additive: what reference material the analysis was given
+    identity = projected.get("identity") or {}
+    if identity.get("stale") or identity.get("reindexing") or identity.get("error"):
+        # Additive: a name was changed after the analysis ran, or a reindex is running or has just failed.
+        result["identity"] = identity
     digest = (projected.get("graph") or {}).get("digest")
     if isinstance(digest, dict):
         # Additive: what a meeting list needs to say what the meeting was and what came out of it.
@@ -231,6 +239,8 @@ def page_graph(graph: dict, offset: int, page_size: int) -> tuple[dict, int | No
                 "digest": graph.get("digest"),
                 "captions": graph.get("captions"),
                 "dissent_omissions": graph.get("dissent_omissions") or [],
+                "identities": graph.get("identities") or {},
+                "screens": graph.get("screens") or [],
             }
         )
     more = False
@@ -592,7 +602,63 @@ def _offsets(citation: dict, quote: str, text: str) -> tuple[int, int] | None:
     return found, found + len(quote)
 
 
-def _span_view(span: dict, meeting_id: str) -> dict:
+_IDENTITY_SOURCES = frozenset({"visual", "audio", "visual+audio", "user"})
+
+
+def _identities(raw: object) -> dict:
+    """Who the analysis decided each voice is: a name, where it came from, and how sure it was. The names a
+    person typed are not here; they are on the lines themselves."""
+    out: dict[str, dict] = {}
+    if not isinstance(raw, dict):
+        return out
+    for voice, item in raw.items():
+        if not isinstance(voice, str) or not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
+            continue
+        confidence = item.get("confidence")
+        out[voice[:64]] = {
+            "name": item["name"].strip()[:128],
+            "source": item.get("source") if item.get("source") in _IDENTITY_SOURCES else "audio",
+            "confidence": round(float(confidence), 3) if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) else 0.0,
+            "conflict": item["conflict"].strip()[:128] if isinstance(item.get("conflict"), str) and item["conflict"].strip() else None,
+            "merged": [str(other)[:64] for other in item.get("merged") or [] if isinstance(other, str)][:20],
+        }
+    return out
+
+
+def _screens(raw: object) -> list[dict]:
+    """What the picture showed, as the worker read it (text copied as shown). Bounded, and typed field by field."""
+    rows: list[dict] = []
+    if not isinstance(raw, list):
+        return rows
+    for item in raw[:300]:
+        if not isinstance(item, dict) or not _ints(item.get("start_ms")) or not _ints(item.get("end_ms")):
+            continue
+        rows.append(
+            {
+                "id": str(item.get("id") or "")[:96],
+                "kind": str(item.get("kind") or "other")[:24],
+                "title": str(item.get("title") or "")[:200],
+                "text": str(item.get("text") or "")[:4000],
+                "details": str(item.get("details") or "")[:3000],
+                "start_ms": item["start_ms"],
+                "end_ms": item["end_ms"],
+            }
+        )
+    return rows
+
+
+def _identity_state(cleaned: dict) -> dict:
+    revision = cleaned.get("identity_revision") if _ints(cleaned.get("identity_revision")) else 0
+    analysed = cleaned.get("analysed_identity_revision") if _ints(cleaned.get("analysed_identity_revision")) else 0
+    error = cleaned.get("reindex_error")
+    return {
+        "stale": revision > analysed,
+        "reindexing": cleaned.get("reindexing") is True,
+        "error": error[:300] if isinstance(error, str) and error else None,
+    }
+
+
+def _span_view(span: dict, meeting_id: str, identities: dict | None = None) -> dict:
     start_ms = span.get("start_ms") if _ints(span.get("start_ms")) else None
     playback = f"meetings/{meeting_id}?t={start_ms}" if isinstance(start_ms, int) else f"meetings/{meeting_id}"
     return {
@@ -608,6 +674,8 @@ def _span_view(span: dict, meeting_id: str) -> dict:
         "session_id": span.get("session_id"),
         "speaker_hypothesis_id": span.get("speaker_hypothesis_id"),
         "speaker_display": span.get("speaker_display"),
+        # The name the analysis gave this voice (from the picture or from what was said), never a typed one.
+        "speaker_identity": (identities or {}).get(span.get("speaker_hypothesis_id"), {}).get("name") if isinstance(span.get("speaker_hypothesis_id"), str) else None,
         "playback": playback,
     }
 
