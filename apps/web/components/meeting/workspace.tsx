@@ -11,12 +11,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, AudioLines, BarChart3, Download, Inbox, Sparkles, Trash2 } from "lucide-react";
+import { Activity, AudioLines, BarChart3, Download, Inbox, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { friendlyError } from "@/lib/present";
 import { Player, type PlayerHandle } from "@/components/meeting/player";
 import { Transcript } from "@/components/meeting/transcript";
 import { SameVoiceDialog } from "@/components/meeting/same-voice";
+import { UnknownVoiceDialog } from "@/components/meeting/unknown-voice";
 import { Overview } from "@/components/meeting/overview";
 import { Insights } from "@/components/meeting/insights";
 import { Review } from "@/components/meeting/review";
@@ -27,6 +28,7 @@ import { meetingTitle, statusLabel } from "@/lib/format";
 import { durationText, speakerName, voiceNames } from "@/lib/present";
 import { emptyGraph, firstCitation } from "@/lib/graph";
 import { hideLibrary, readLibrary } from "@/lib/library";
+import { registerTargets, topSlices, unknownVoices } from "@/lib/voices";
 import { McpDisconnected, mcp } from "@/lib/mcp/client";
 import {
   isView,
@@ -79,6 +81,9 @@ export function Workspace({ meetingId }: { meetingId: string }) {
   const [notice, setNotice] = useState("");
   const [clash, setClash] = useState<VoiceClash | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmReindex, setConfirmReindex] = useState(false);
+  const [identifying, setIdentifying] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [libraryName, setLibraryName] = useState({ title: "", filename: "" });
   const taskId = searchParams.get("task");
@@ -275,7 +280,33 @@ export function Workspace({ meetingId }: { meetingId: string }) {
   const speakers = new Set(graph.spans.map((span) => span.speaker_hypothesis_id).filter(Boolean)).size;
   const spokenMs = Math.max(0, ...graph.spans.map((span) => span.end_ms ?? 0));
   const playAt = (ms: number) => seek(ms);
-  const names = voiceNames(graph.spans, digest?.speakers ?? []);
+  const names = voiceNames(graph.spans, digest?.speakers ?? [], graph.identities);
+  const unknown = unknownVoices(graph.spans, names);
+  const identity = meeting?.identity ?? null;
+  const canReindex = finished && !identity?.reindexing;
+
+  /** Name a voice nobody could name: the page saves it, and a name that matches someone else still asks the merge question. */
+  async function nameUnknown(voiceId: string, name: string) {
+    const anchor = graph.spans.find((span) => span.speaker_hypothesis_id === voiceId);
+    setIdentifying(null);
+    if (anchor) await renameVoice(anchor, name).catch(() => undefined);
+  }
+
+  /** Register an unknown voice as a person who was already detected: their voice is kept, this one folds into it. */
+  async function registerUnknown(voiceId: string, targetId: string, targetName: string) {
+    const unknownSpan = graph.spans.find((span) => span.speaker_hypothesis_id === voiceId);
+    const targetSpan = graph.spans.find((span) => span.speaker_hypothesis_id === targetId);
+    if (!unknownSpan || !targetSpan) return;
+    setSaving(true);
+    try {
+      await run(() => mcp.mergeSpeakers(meetingId, targetSpan.id, unknownSpan.id, targetName));
+      setIdentifying(null);
+    } catch {
+      // run() has shown the notice; the dialog stays open so the person can try again.
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="q-review">
@@ -325,6 +356,17 @@ export function Workspace({ meetingId }: { meetingId: string }) {
                 <Activity size={16} aria-hidden="true" />
               </button>
             ) : null}
+            {canReindex ? (
+              <button
+                type="button"
+                className={identity?.stale ? "q-icon-btn is-stale" : "q-icon-btn"}
+                data-tip={identity?.stale ? "Reindex identity: names changed since the analysis" : "Reindex identity: run the analysis again with the names you set"}
+                aria-label="Reindex identity"
+                onClick={() => setConfirmReindex(true)}
+              >
+                <RotateCw size={16} aria-hidden="true" />
+              </button>
+            ) : null}
             <button type="button" className={view === "exports" ? "q-icon-btn is-on" : "q-icon-btn"} title="Downloads" aria-label="Downloads" onClick={() => setQuery("view", "exports")}>
               <Download size={16} aria-hidden="true" />
             </button>
@@ -356,6 +398,12 @@ export function Workspace({ meetingId }: { meetingId: string }) {
               synthesis={graph.synthesis}
               status={meeting?.status ?? null}
               context={meeting?.context ?? null}
+              identities={graph.identities}
+              screens={graph.screens}
+              identity={identity}
+              unknown={unknown}
+              onIdentify={setIdentifying}
+              onReindex={() => setConfirmReindex(true)}
               onPlay={playAt}
               onAccept={(actionId) => fire(() => mcp.acceptAction(meetingId, actionId))}
               onGo={(next) => setQuery("view", next)}
@@ -411,6 +459,29 @@ export function Workspace({ meetingId }: { meetingId: string }) {
           router.push("/");
         }}
         onCancel={() => setConfirmRemove(false)}
+      />
+      <ConfirmDialog
+        open={confirmReindex}
+        title="Reindex identity?"
+        message="The analysis runs again with the names you have set, so the summary, decisions and actions use them. It takes a few minutes and uses the AI model. If it fails, the current analysis is kept."
+        confirmLabel="Reindex"
+        cancelLabel="Not now"
+        onConfirm={() => {
+          setConfirmReindex(false);
+          fire(() => mcp.reindexMeeting(meetingId));
+        }}
+        onCancel={() => setConfirmReindex(false)}
+      />
+      <UnknownVoiceDialog
+        open={identifying !== null}
+        label={identifying ? names.get(identifying) ?? speakerName(null, identifying) : ""}
+        slices={identifying ? topSlices(graph.spans, identifying, 3) : []}
+        candidates={identifying ? registerTargets(names, identifying) : []}
+        source={graph.playback.original || graph.playback.burned}
+        busy={saving}
+        onName={(name) => identifying && void nameUnknown(identifying, name)}
+        onRegister={(candidate) => identifying && void registerUnknown(identifying, candidate.id, candidate.name)}
+        onClose={() => setIdentifying(null)}
       />
       <SameVoiceDialog
         open={clash !== null}

@@ -59,8 +59,8 @@ export function VoiceName({
     setEditing(true);
   }
 
-  async function save() {
-    const next = draft.trim();
+  async function save(value: string) {
+    const next = value.trim();
     if (!next || next === name) {
       finish();
       return;
@@ -88,11 +88,19 @@ export function VoiceName({
           aria-label={`Name for ${name}`}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") void save();
+            // Enter during an input-method composition only confirms the composed text; the next Enter saves.
+            if (event.nativeEvent.isComposing) return;
+            // Read the field itself: the state copy can lag a keystroke behind the text on screen.
+            if (event.key === "Enter") {
+              // A name already used by another voice opens the "Same person?" dialog during this keydown and
+              // moves focus to its Cancel button; without this the same Enter press would reach Cancel and close the editor.
+              event.preventDefault();
+              void save(event.currentTarget.value);
+            }
             if (event.key === "Escape") finish();
           }}
         />
-        <IconButton label="Save name" onClick={() => void save()} disabled={busy}>
+        <IconButton label="Save name" onClick={() => void save(draft)} disabled={busy}>
           <Check size={15} aria-hidden="true" />
         </IconButton>
         <IconButton label="Cancel" onClick={finish} disabled={busy}>

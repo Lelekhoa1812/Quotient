@@ -2393,3 +2393,102 @@ label:has(input[type="file"]:focus-visible) {
 .q-skip:focus-visible { top: 0.75rem; }
 /* The skip target is a container, not a control: it takes focus so the next Tab starts inside it, without a ring round the whole pane. */
 #main:focus, #main:focus-visible, main:focus { outline: none; }
+
+/* ---- Unknown speakers, identity and on-screen content ---- */
+.q-who-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.25rem 0.5rem; min-width: 0; }
+.q-who-line .q-voice-name { min-width: 0; }
+.q-from { font-size: 0.75rem; padding-top: 0.2rem; }
+
+/* Red for "needs a person": readable on the dark and the light theme (both pass 4.5:1 against the surface). */
+:root { --unknown-red: #FF6B5B; }
+:root[data-theme="light"] { --unknown-red: #C0201A; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --unknown-red: #C0201A; } }
+
+.q-unknown-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  background: transparent;
+  color: var(--unknown-red);
+  border: 1px solid color-mix(in srgb, var(--unknown-red) 55%, transparent);
+  cursor: pointer;
+}
+.q-unknown-btn:hover, .q-unknown-btn:focus-visible { background: color-mix(in srgb, var(--unknown-red) 14%, transparent); border-color: var(--unknown-red); }
+
+/* A short text tip for icon buttons: the native title shows late and not on touch. */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 16rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--ms-200) var(--ease);
+}
+[data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; visibility: visible; }
+.q-tab-tools [data-tip]::after { left: auto; right: 0; transform: none; }
+@media (prefers-reduced-motion: reduce) { [data-tip]::after { transition: none; } }
+
+.q-icon-btn.is-stale { border-color: var(--mark); color: var(--mark); }
+.q-icon-btn.is-stale::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mark);
+}
+
+.q-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--mark);
+  background: color-mix(in srgb, var(--mark) 9%, transparent);
+}
+.q-stale p { margin: 0; flex: 1 1 16rem; }
+
+.q-voice-dialog { width: min(40rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); }
+.q-voice-dialog .q-dialog-body { max-height: calc(100vh - 2rem); overflow-y: auto; }
+.q-clips { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.q-clip { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+.q-clip-video { width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.q-clip-text { font-size: 0.875rem; overflow-wrap: anywhere; }
+.q-voice-form { display: grid; gap: 0.3rem; }
+.q-voice-form label { font-size: 0.8125rem; color: var(--muted); }
+.q-voice-form-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.q-voice-form-row input { flex: 1 1 12rem; min-width: 0; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--ink); border: 1px solid var(--line); font: inherit; }
+.q-voice-form-row input:focus-visible { border-color: var(--mark); }
+.q-chips { list-style: none; margin: 0.35rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.q-chip-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.6rem; background: transparent; color: var(--ink); border: 1px solid var(--line); font: inherit; cursor: pointer; }
+.q-chip-btn:hover:not(:disabled), .q-chip-btn:focus-visible { border-color: var(--mark); }
+.q-chip-btn:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 34rem) { .q-clip { grid-template-columns: minmax(0, 1fr); } }
+
+.q-screens { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.q-screen { border: 1px solid var(--line); padding: 0.6rem 0.75rem; display: grid; gap: 0.4rem; min-width: 0; }
+.q-screen-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.q-screen-head strong { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.q-screen-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.875rem; }
+.q-screen summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }

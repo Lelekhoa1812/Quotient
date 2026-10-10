@@ -23,14 +23,17 @@ import {
   type Finding,
   type ContextUse,
   type GraphPage,
+  type IdentityState,
   type MeetingContext,
   type MeetingStatus,
   type Playback,
   type RawTranscript,
+  type ScreenView,
   type ReviewCounts,
   type Seam,
   type SpeakerHypothesis,
   type Span,
+  type VoiceIdentity,
   type SpeechOmission,
   type SynthesisOmission,
   type SynthesisSentence,
@@ -80,6 +83,8 @@ export function emptyGraph(): GraphPage {
     playback: { original: "", burned: "", sidecar: "" },
     rawTranscript: { audio: "", video: "" },
     observations: [],
+    identities: {},
+    screens: [],
     next_cursor: null,
   };
 }
@@ -158,6 +163,8 @@ export function parseGraph(result: unknown, meetingId: string): GraphPage {
     })(),
     rawTranscript: parseRawTranscript(graph),
     observations: parseObservations(graph),
+    identities: parseIdentities(graph.identities),
+    screens: parseScreens(graph.screens),
     next_cursor: asString(graph.next_cursor) ?? asString(graph.nextCursor),
   };
 }
@@ -194,6 +201,8 @@ export function mergeGraph(base: GraphPage, page: GraphPage): GraphPage {
       video: page.rawTranscript.video || base.rawTranscript.video,
     },
     observations: dedupeObservations([...base.observations, ...page.observations]),
+    identities: Object.keys(page.identities).length > 0 ? page.identities : base.identities,
+    screens: page.screens.length > 0 ? page.screens : base.screens,
     next_cursor: page.next_cursor,
   };
 }
@@ -232,6 +241,7 @@ export function parseMeetingStatus(result: unknown, fallbackId: string): Meeting
       };
     })(),
     context: parseMeetingContext(meeting.context),
+    identity: parseIdentityState(meeting.identity),
   };
 }
 
@@ -338,7 +348,51 @@ function parseSpan(value: unknown): Span | null {
     seam: record.seam === true,
     speaker_hypothesis_id: asString(record.speaker_hypothesis_id),
     speaker_label: asString(record.speaker_display) ?? asString(record.speaker_label) ?? asString(record.display_name),
+    speaker_identity: asString(record.speaker_identity)?.trim() || null,
   };
+}
+
+const IDENTITY_SOURCES = new Set(["visual", "audio", "visual+audio", "user"]);
+
+export function parseIdentities(value: unknown): Record<string, VoiceIdentity> {
+  const record = asRecord(value);
+  const out: Record<string, VoiceIdentity> = {};
+  if (!record) return out;
+  for (const [voice, raw] of Object.entries(record)) {
+    const row = asRecord(raw);
+    const name = asString(row?.name)?.trim();
+    if (!row || !name) continue;
+    const source = asString(row.source) ?? "audio";
+    out[voice] = {
+      name,
+      source: (IDENTITY_SOURCES.has(source) ? source : "audio") as VoiceIdentity["source"],
+      confidence: asFinite(row.confidence) ?? 0,
+      conflict: asString(row.conflict)?.trim() || null,
+      merged: asArray(row.merged).map(asString).filter((id): id is string => id !== null),
+    };
+  }
+  return out;
+}
+
+export function parseScreens(value: unknown): ScreenView[] {
+  return asArray(value).flatMap((item) => {
+    const row = asRecord(item);
+    const start = asFinite(row?.start_ms);
+    const end = asFinite(row?.end_ms);
+    if (!row || start === null || end === null) return [];
+    const text = asString(row.text) ?? "";
+    const details = asString(row.details) ?? "";
+    const title = asString(row.title) ?? "";
+    if (!text && !details && !title) return [];
+    return [{ id: asString(row.id) ?? `screen-${start}`, kind: asString(row.kind) ?? "other", title, text, details, start_ms: start, end_ms: end }];
+  });
+}
+
+function parseIdentityState(value: unknown): IdentityState | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const state = { stale: row.stale === true, reindexing: row.reindexing === true, error: asString(row.error)?.trim() || null };
+  return state.stale || state.reindexing || state.error ? state : null;
 }
 
 function parseCitation(value: unknown): Citation | null {

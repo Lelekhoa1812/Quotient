@@ -159,17 +159,23 @@ export function speakerName(label: string | null | undefined, hypothesisId: stri
 }
 
 /**
- * Display names for voices. A name a person typed (span.speaker_label) wins; otherwise a name the
+ * Display names for voices, strongest first: a name a person typed (span.speaker_label), then the name the
+ * analysis settled on (from the picture and from what was said, see `identities`), then a name the
  * transcript itself gave (the digest's speakers); otherwise "Speaker N". Never a guess.
  */
 export function voiceNames(
   spans: { speaker_hypothesis_id: string | null; speaker_label: string | null }[],
   named: { id: string; name: string; role: string | null }[] = [],
+  identities: Record<string, { name: string }> = {},
 ): Map<string, string> {
   const names = new Map<string, string>();
+  const title = (name: string) => (name === name.toLowerCase() ? name.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : name);
   for (const speaker of named) {
-    const shown = speaker.name === speaker.name.toLowerCase() ? speaker.name.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : speaker.name;
+    const shown = title(speaker.name);
     names.set(speaker.id, speaker.role ? `${shown} (${speaker.role})` : shown);
+  }
+  for (const [voice, identity] of Object.entries(identities)) {
+    if (identity.name.trim()) names.set(voice, title(identity.name.trim()));
   }
   for (const span of spans) {
     if (span.speaker_hypothesis_id && span.speaker_label?.trim()) names.set(span.speaker_hypothesis_id, span.speaker_label.trim());

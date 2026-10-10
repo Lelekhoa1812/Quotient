@@ -11,16 +11,17 @@
  * "likely" evidence carry a small marker; confirmed items carry none. A meeting analysed before
  * digests existed shows its confirmed brief sentences and offers nothing invented.
  */
-import { Check, CircleHelp, Flag, GitCompareArrows, ListChecks, Scale, Sigma, Users } from "lucide-react";
+import { Check, CircleHelp, Flag, GitCompareArrows, ListChecks, MonitorPlay, RotateCw, Scale, Sigma, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Diagram } from "@/components/diagram";
 import { Markdown } from "@/components/markdown";
 import { IconButton, Likely, Moment } from "@/components/ui/moment";
+import { UnknownVoiceButton } from "@/components/meeting/unknown-voice";
 import { VoiceName } from "@/components/meeting/voices";
 import { hasOutcomes, promisedByOwner, type Digest } from "@/lib/digest";
 import { formatMs } from "@/lib/format";
 import { durationText, percentText, readable, speakerName } from "@/lib/present";
-import type { ActionItem, Claim, ContextUse, MeetingContext, Span, SynthesisSentence } from "@/lib/types";
+import type { ActionItem, Claim, ContextUse, IdentityState, MeetingContext, ScreenView, Span, SynthesisSentence, VoiceIdentity } from "@/lib/types";
 
 const TYPE_LABEL: Record<string, string> = {
   meeting: "Meeting",
@@ -42,10 +43,16 @@ export function Overview({
   synthesis,
   status,
   context = null,
+  identities = {},
+  screens = [],
+  identity = null,
+  unknown = [],
   onPlay,
   onAccept,
   onGo,
   onRenameVoice,
+  onIdentify,
+  onReindex,
 }: {
   digest: Digest | null;
   names: Map<string, string>;
@@ -56,10 +63,20 @@ export function Overview({
   status: string | null;
   /** The reference material the analysis was given; nothing is shown when there is none. */
   context?: MeetingContext | null;
+  /** What the analysis decided about each voice (from the picture and from what was said). */
+  identities?: Record<string, VoiceIdentity>;
+  /** What the picture showed: slides, shared screens, diagrams. */
+  screens?: ScreenView[];
+  /** Set when a name was saved after the analysis ran, or a reindex failed. */
+  identity?: IdentityState | null;
+  /** Voices nobody has named. */
+  unknown?: string[];
   onPlay: (ms: number) => void;
   onAccept: (actionId: string) => void;
   onGo: (view: "transcript" | "review") => void;
   onRenameVoice: (voiceId: string, displayName: string) => Promise<void>;
+  onIdentify?: (voiceId: string) => void;
+  onReindex?: () => void;
 }) {
   const who = (id: string | null) => (id ? names.get(id) ?? speakerName(null, id) : null);
   const voices = new Set(spans.map((span) => span.speaker_hypothesis_id).filter(Boolean)).size;
@@ -112,8 +129,20 @@ export function Overview({
   const rename = (id: string, name: string) => onRenameVoice(id, name);
   const argued = groupBySpeaker(digest.perspectives);
 
+  const unknownSet = new Set(unknown);
   return (
     <section className="q-overview" aria-label="Meeting overview">
+      {identity && !identity.reindexing && (identity.stale || identity.error) ? (
+        <div className="q-stale" role="status">
+          <RotateCw size={16} aria-hidden="true" />
+          <p>
+            {identity.error
+              ? "The reindex did not finish, so the earlier analysis is kept."
+              : "You have changed who spoke since this analysis was written, so the summary, decisions and actions may still use the old names."}
+          </p>
+          {onReindex ? <button type="button" className="q-btn" onClick={onReindex}>Reindex identity</button> : null}
+        </div>
+      ) : null}
       <header className="q-hero">
         <p className="q-kicker">{TYPE_LABEL[digest.contentType] ?? "Recording"}</p>
         <h2 className="q-sr">{digest.title || "Summary"}</h2>
@@ -361,15 +390,26 @@ export function Overview({
           <ul className="q-hbars is-editable">
             {participation.map((row) => (
               <li key={row.id}>
-                <VoiceName id={row.id} name={row.name} locked={locked.has(row.id)} onRename={rename} />
+                <div className="q-who-line">
+                  <VoiceName id={row.id} name={row.name} locked={locked.has(row.id)} onRename={rename} />
+                  {unknownSet.has(row.id) && onIdentify ? <UnknownVoiceButton label={row.name} onOpen={() => onIdentify(row.id)} /> : null}
+                  {!locked.has(row.id) && identities[row.id] ? (
+                    <span className="q-faint q-from" title={identities[row.id].conflict ? `The ${identities[row.id].source.includes("visual") ? "audio" : "video"} suggested "${identities[row.id].conflict}" instead.` : undefined}>
+                      {identities[row.id].source === "audio" ? "named in the talk" : identities[row.id].source === "user" ? "" : "named from the video"}
+                      {identities[row.id].conflict ? " · check" : ""}
+                    </span>
+                  ) : null}
+                </div>
                 <strong className="q-num">{percentText(row.share)}</strong>
                 <span className="q-hbar-track" aria-hidden="true"><span className="q-hbar-fill" style={{ width: `${row.share * 100}%` }} /></span>
               </li>
             ))}
           </ul>
-          <p className="q-faint">Speakers are told apart automatically. Use the pencil to name someone; the name is kept and used everywhere, including the charts.</p>
+          <p className="q-faint">Speakers are told apart automatically, using the video when it shows names. Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
         </Section>
       ) : null}
+
+      {screens.length > 0 ? <OnScreen screens={screens} onPlay={onPlay} /> : null}
 
       <ContextUsed context={context} />
 
@@ -432,6 +472,48 @@ function Section({ id, icon, title, children }: { id?: string; icon: ReactNode; 
   );
 }
 
+
+const SCREEN_LABEL: Record<string, string> = {
+  slide: "Slide",
+  screen_share: "Shared screen",
+  diagram: "Diagram",
+  whiteboard: "Whiteboard",
+  document: "Document",
+  spreadsheet: "Spreadsheet",
+  code: "Code",
+  ui: "App screen",
+  chart: "Chart",
+  other: "On screen",
+};
+
+/** What the picture showed, as read from the video: text copied as shown, and how a diagram or screen was laid out. */
+function OnScreen({ screens, onPlay }: { screens: ScreenView[]; onPlay: (ms: number) => void }) {
+  const rows = screens.filter((screen) => screen.text.trim() || screen.details.trim() || screen.title.trim());
+  if (rows.length === 0) return null;
+  return (
+    <Section icon={<MonitorPlay size={16} />} title="On screen">
+      <ul className="q-screens">
+        {rows.map((screen) => (
+          <li key={screen.id} className="q-screen">
+            <div className="q-screen-head">
+              <span className="q-chip">{SCREEN_LABEL[screen.kind] ?? "On screen"}</span>
+              <strong>{screen.title || ""}</strong>
+              <Moment ms={screen.start_ms} onPlay={onPlay} />
+            </div>
+            {screen.text.trim() ? <pre className="q-screen-text">{screen.text}</pre> : null}
+            {screen.details.trim() ? (
+              <details>
+                <summary>How it is laid out</summary>
+                <pre className="q-screen-text">{screen.details}</pre>
+              </details>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <p className="q-faint">Read from the video by a model, so check anything that matters against the recording.</p>
+    </Section>
+  );
+}
 
 function talkTime(spans: Span[], names: Map<string, string>): { id: string; name: string; share: number }[] {
   const totals = new Map<string, number>();

@@ -5,7 +5,7 @@ import type { Digest } from "@/lib/digest";
 import type { Claim, Span } from "@/lib/types";
 
 function span(id: string, start: number, end: number, voice: string | null, text = "one two three four"): Span {
-  return { id, kind: "speech", start_ms: start, end_ms: end, raw_text: text, text, coarse: false, overlap: false, session_id: null, seam: false, speaker_hypothesis_id: voice, speaker_label: null };
+  return { id, kind: "speech", start_ms: start, end_ms: end, raw_text: text, text, coarse: false, overlap: false, session_id: null, seam: false, speaker_hypothesis_id: voice, speaker_label: null, speaker_identity: null };
 }
 
 function claim(id: string, text: string, confidence: Claim["confidence"], at: number | null, kind = "figure"): Claim {

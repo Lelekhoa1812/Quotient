@@ -415,6 +415,23 @@ async function callTool(name: string, args: Record<string, unknown>, timeoutMs =
 
 /**
  * Motivation vs Logic
+ * Motivation: A rejected change must not look saved. The server answers a refused write with a
+ * tool result flagged isError rather than a JSON-RPC error, so the page would close the editor
+ * and show the old name with no message.
+ * Logic: Write calls throw on isError, carrying the server's message, so the caller keeps the
+ * editor open and reports the failure.
+ */
+async function callWrite(name: string, args: Record<string, unknown>): Promise<void> {
+  const result = asRecord(await callTool(name, args));
+  if (result?.isError !== true) return;
+  const text = asArray(result.content)
+    .map((block) => asString(asRecord(block)?.text)?.trim())
+    .find((line) => Boolean(line));
+  throw new Error(text || "The change was not saved.");
+}
+
+/**
+ * Motivation vs Logic
  * Motivation: Reference material has to reach the analysis before the meeting starts, and one bad
  * file must not stop a meeting.
  * Logic: prepare_context returns a signed target per file. Upload two at a time, each retried once.
@@ -687,7 +704,7 @@ export const mcp = {
     await callTool("accept_action", { meeting_id: meetingId, action_id: actionId });
   },
   async reviseSpeaker(meetingId: string, spanId: string, scope: "span" | "hypothesis", displayName: string): Promise<void> {
-    await callTool("revise_speaker", {
+    await callWrite("revise_speaker", {
       meeting_id: meetingId,
       span_id: spanId,
       scope,
@@ -695,12 +712,16 @@ export const mcp = {
     });
   },
   async mergeSpeakers(meetingId: string, spanId: string, otherSpanId: string, displayName: string): Promise<void> {
-    await callTool("merge_speakers", {
+    await callWrite("merge_speakers", {
       meeting_id: meetingId,
       span_id: spanId,
       other_span_id: otherSpanId,
       display_name: displayName,
     });
+  },
+  /** Run the analysis again so names saved since reach the whole analysis. Returns at once; the meeting then shows as working. */
+  async reindexMeeting(meetingId: string): Promise<void> {
+    await callWrite("reindex_meeting", { meeting_id: meetingId });
   },
   async reviseText(meetingId: string, spanId: string, text: string): Promise<void> {
     await callTool("revise_text", { meeting_id: meetingId, span_id: spanId, text });

@@ -5,7 +5,7 @@ import { emptyGraph } from "@/lib/graph";
 import type { Claim, Finding, Span } from "@/lib/types";
 
 function span(id: string, start: number, end: number, extra: Partial<Span> = {}): Span {
-  return { id, kind: "speech", start_ms: start, end_ms: end, raw_text: id, text: id, coarse: false, overlap: false, session_id: null, seam: false, speaker_hypothesis_id: null, speaker_label: null, ...extra };
+  return { id, kind: "speech", start_ms: start, end_ms: end, raw_text: id, text: id, coarse: false, overlap: false, session_id: null, seam: false, speaker_hypothesis_id: null, speaker_label: null, speaker_identity: null, ...extra };
 }
 
 function claim(id: string, text: string, status: string, startMs: number | null = null): Claim {

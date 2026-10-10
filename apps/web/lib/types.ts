@@ -54,7 +54,41 @@ export type Span = {
   session_id: string | null;
   seam: boolean;
   speaker_hypothesis_id: string | null;
+  /** A name a person typed for this line's voice. */
   speaker_label: string | null;
+  /** The name the analysis gave this voice (from the picture or from what was said); never a typed one. */
+  speaker_identity: string | null;
+};
+
+/** What the analysis decided about one voice. */
+export type VoiceIdentity = {
+  name: string;
+  source: "visual" | "audio" | "visual+audio" | "user";
+  confidence: number;
+  /** A different name the other source gave, so a person can look. */
+  conflict: string | null;
+  /** Other voice ids that are the same person. */
+  merged: string[];
+};
+
+/** Something the picture showed: a slide, a shared screen, a diagram. */
+export type ScreenView = {
+  id: string;
+  kind: string;
+  title: string;
+  /** Text copied as shown. */
+  text: string;
+  /** How it was laid out: diagram nodes and arrows, a table's rows, an app screen's controls. */
+  details: string;
+  start_ms: number;
+  end_ms: number;
+};
+
+export type IdentityState = {
+  /** A name or merge was saved after the analysis ran. */
+  stale: boolean;
+  reindexing: boolean;
+  error: string | null;
 };
 
 export type Citation = {
@@ -211,6 +245,8 @@ export type GraphPage = {
   playback: Playback;
   rawTranscript: RawTranscript;
   observations: VideoObservation[];
+  identities: Record<string, VoiceIdentity>;
+  screens: ScreenView[];
   /** The walkaway, grounded by the server; null for meetings analysed before it existed. */
   digest: Digest | null;
   /** quotient:// URI of the WebVTT captions, when the meeting has speech. */
@@ -235,6 +271,8 @@ export type MeetingStatus = {
   headline: MeetingHeadline | null;
   /** The reference material the analysis was given, when the person supplied any. */
   context: MeetingContext | null;
+  /** Present only when a name was saved after the analysis, or a reindex is running or has failed. */
+  identity: IdentityState | null;
 };
 
 export type ContextUseStatus = "pending" | "ready" | "skipped" | "failed";
