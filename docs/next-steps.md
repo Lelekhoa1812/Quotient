@@ -2,6 +2,9 @@
 
 Read this first. [quality-ledger.md](quality-ledger.md) holds the full evidence; this file says what to do next.
 
+## Update 2026-10-10 (identity and visual work)
+Read the last section of [quality-ledger.md](quality-ledger.md) first. Built and live-tested on 10-minute FoodFlow and SBC slices: names from the video (frame reader plus lift-based resolver), red marker and clip dialog for unnamed voices, Reindex identity, an On screen section, `known_names` and `on_screen` in the digest. Still open: completeness stays level; own-commitment actions are missed; an answered question can show as unanswered; the 55-minute and 84-minute recordings have not been run with the frame reader (cost cap 160 frames); the first live reindex result is recorded in the ledger. The budget cap was lifted by the owner on 2026-10-10.
+
 ## Where the walkaway stands
 - **Not enterprise-grade yet.** Latest blind scores (Round 13, SBC meeting and sales call): completeness 3, usefulness 3, no 5. Actions improved on the SBC meeting (7 to 14 listed, 11 of 14 valid, none wrong); the sales call did not change.
 - **Never completed:** the 84-minute soak. **Not re-run since round 11:** the lecture and the hearing.

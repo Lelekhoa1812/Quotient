@@ -682,3 +682,31 @@ A fresh reviewer, told the intent but given no conclusions, read `graph/digest.p
 - **Decision: not adopted, nothing built; the schema and prompts are unchanged.** That closes both ideas this diagnostic suggested (longer summary, separate conditions list). The proxy evidence now says that, with Haiku as the writer, adding output (words, sections, passes) does not raise the share of key points conveyed on the long meeting; it raises padding and sometimes faults.
 - **What is left, and cannot be tested offline:** (1) the production writer is a different, stronger model, so none of the proxy results transfer with confidence in either direction; (2) the live confirming run, scored the same way as Rounds 12 and 13, is the only measurement that counts; (3) if completeness stays at 3 there, the remaining candidates are model choice or splitting the writer into per-chapter passes (each pass reads one stretch with the whole meeting as context), which is a pipeline change and is not built.
 - **Limits:** Haiku writes and judges, two writers per condition, one recording, and the judge can see that some outputs have a conditions section, so it is not blind to the format.
+
+## Visual identity and on-screen reading: live runs on the FoodFlow and SBC slices (2026-10-10)
+
+**Question.** Speaker names were missing or wrong, and the visual side of the analysis was shallow. Round 16 (live, first model calls after the budget cap was lifted) used the Pegasus video model for on-screen text and names; Round 17 replaced that with a frame reader and an identity resolver. Both ran on 10-minute slices (FoodFlow minutes 10 to 20; SBC minutes 40 to 50), with the cached transcript and voices, so the only differences are the visual stages and what they feed.
+
+**Round 16 finding (Pegasus reads the screen): rejected.** On the two real recordings Pegasus invented content. On the SBC HubSpot screen it returned a table of "John Doe / Jane Smith / Bob Johnson" with example.com emails (the frames show a HubSpot Scouting list of real contacts); on FoodFlow it reported people named "Raj" and "Presenter" and missed the dashboard figures ($184,750, $96,320, $312,480). It also stamped most screens at the start of their 3-minute window. Worse, those names flowed on: the main FoodFlow speaker (53% of talk) was named "Raj" at confidence 1.0 ("visual+audio"), and the SBC main speaker "John Doe". Pegasus is now used only for a no-invention description of what happens on screen; nothing identity-related is taken from it.
+
+**Round 17 design.**
+- `visual/frames.py`: one frame about every 8 s (at most 160 frames; frame-accurate ffmpeg seek; 1280 px) is read alone by Sol (`meeting.frame.v1`, schema-constrained) under a "copy only what is legible, mark the rest [unreadable]" rule. A probe on one real frame read the FoodFlow dashboard exactly and named the outlined speaker. Frames of one screen are merged (cleaned word sets, URLs and unreadable fragments ignored, title must agree); the cleanest reading wins. Raw readings are cached, so a merge-rule change does not re-pay the model.
+- `identity/resolve.py`: names are matched to the diarizer's voices by time. A mark counts only if it discriminates: the share of a voice's talk carrying the mark minus the mark's rate while that voice is silent ("lift"). A person pinned to the stage is marked about 70% of the time whoever talks, and the first version let that name four voices (it merged a different speaker into the presenter). Competing voices are decided by lift, then by who talks at least three times more; otherwise nobody gets the name. Auto-merge needs two voices that each follow the mark strongly and never talk over each other. Notetaker bots, truncated labels, devices and placeholder names are dropped.
+- Teams specifics found in the real frames: the floating bottom-left label during a screen share names the person sharing, not the person speaking; only the outlined thumbnail marks the speaker.
+- Names and the screens go to the digest writer (`known_names`, `on_screen`, both prompts identical), and the portal shows an "On screen" section.
+
+**Results (blind Haiku evaluators, old against new in random order, 4 real frames as ground truth for the screen lists).**
+
+| | FoodFlow old | FoodFlow new | SBC old | SBC new |
+|---|---|---|---|---|
+| attribution | 1 | 5 | 1 | 5 |
+| actions | 2 | 4 | 3 | 2 (thin, owner correct) |
+| faithfulness | 3 | 4 | 3 | 4 |
+| key points of 8 | 7.5 | 7.5 | 6 | 6 |
+| screens consistent / contradicting the frames | 0 / 1 | 4 / 0 | 0 / 2 | 4 / 0 |
+| screens accuracy and detail | 1 | 4 | 1 | 5 |
+
+- Voices named from the picture: FoodFlow Ly Ho and Ravi Goyat; SBC Maddy and Jason Pham (talk shares 47% and 53% in the slice, matching the portal screenshot that prompted this work). The four FoodFlow voices nothing could name (including the presenter's other id and a voice that says "pass the floor to Lee") stay unnamed on purpose and carry the red marker; registering one of them as Ly Ho through the dialog merged it into his voice (53% + 2.5%), raised the stale banner, and a live Reindex started.
+- Screen entries: 30 became 10 (FoodFlow) and 21 became 8 (SBC) after the merge fix, replayed on freshly read frames.
+- **Not improved:** completeness is level (the same 6 to 7.5 of 8 points); Maddy's own commitments (staging test, sending the URL) are still not listed as actions; a question that was answered is still sometimes shown unanswered (both versions, an older defect); the digest can repeat on-screen wording that the frames cannot confirm ("View, Manage and Allow" on a roles screen).
+- **Limits:** two 10-minute slices, one evaluator model (Haiku) and one run each; "attribution 1 to 5" is large enough to trust, the smaller deltas are within the single-writer noise floor recorded in the ninth proxy experiment. Visual cost: about 76 Sol calls per 10 minutes of video (about 4 minutes wall clock), which scales to the 160-frame cap.
