@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import shutil
 import json
 import os
@@ -1289,7 +1290,7 @@ def load_port() -> Port:
     if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
         configured = os.environ.get("QUOTIENT_LOCAL_STATE_PATH", "").strip()
         local_state = Path(configured) if configured else Path(__file__).resolve().parents[3] / ".local" / "run" / "meetings.json"
-    return Port(
+    port = Port(
         quality_run,
         checkpoints,
         classify_file,
@@ -1297,3 +1298,25 @@ def load_port() -> Port:
         state_path=local_state,
         resume_interrupted=local_state is not None,
     )
+    # Motivation vs Logic
+    # Motivation: Staging keeps each meeting in this process. Replacing the
+    # task opens an empty portal, so the review examples have to be reloaded.
+    # Logic: Read seed/meetings.json from the artifacts bucket. A local boot
+    # already restored the file ledger and skips this.
+    if local_state is None:
+        _load_seed(port)
+    return port
+
+
+def _load_seed(port: Port) -> None:
+    path = Path(__file__).with_name("seed.py")
+    spec = importlib.util.spec_from_file_location("quotient_worker_seed", path)
+    if spec is None or spec.loader is None:
+        print("meeting seed skipped: seed module is missing", file=sys.stderr, flush=True)
+        return
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+        module.load_into(port)
+    except Exception as exc:
+        print(f"meeting seed skipped: {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr, flush=True)
