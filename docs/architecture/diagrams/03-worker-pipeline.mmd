@@ -1,0 +1,60 @@
+flowchart TB
+  subgraph port["Port — quotient/port.py"]
+    SUBMIT["submit"]
+    ANALYZE["_analyze thread"]
+    RUN["_run_meeting"]
+    PROJ["_project"]
+  end
+
+  subgraph ingest["loop/ingest.py assemble"]
+    PROBE["media/probe classify_file"]
+    PCM["media/pcm write_pcm"]
+    PAR["parallel: Sonic Pegasus diarize frames"]
+    LEDGER["Ledger spans index"]
+  end
+
+  subgraph sonic_pkg["sonic/client.py"]
+    SONIC["SonicClient.transcribe"]
+    TCACHE["TranscriptCache"]
+  end
+
+  subgraph pegasus_pkg["pegasus/"]
+    PEG["PegasusClient.analyze"]
+    PARTS["window_parts"]
+  end
+
+  subgraph quality["loop/quality.py run"]
+    COMPACT["compaction"]
+    CROSS["graph/cross"]
+    CLAIMS["_extract + _finish_claims"]
+    COV["_coverage"]
+    LENSES["graph/lenses run_lenses"]
+    SYNTH["graph/synth"]
+    ACT["graph/actions ground_action"]
+    DIG["_digest ground_digest"]
+    CHART["_chart"]
+    GATE["graph/publish gate"]
+    JEV["jev/sort apply_order"]
+  end
+
+  subgraph bedrock["bedrock/"]
+    REASON["Reasoner.complete"]
+    WIRE["Transport respond invoke"]
+    REG["registry/load Registry"]
+  end
+
+  SUBMIT --> ANALYZE --> RUN
+  RUN --> ingest
+  PROBE --> PAR
+  PAR --> SONIC
+  PAR --> PEG
+  PAR --> LEDGER
+  SONIC --> TCACHE
+  PEG --> PARTS
+  RUN --> quality
+  quality --> REASON
+  REASON --> WIRE
+  REASON --> REG
+  GATE --> JEV
+  quality --> GATE
+  GATE --> PROJ

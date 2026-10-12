@@ -1,0 +1,17 @@
+flowchart LR
+  REG["contracts/registry.json"] --> LOAD["Registry.load<br/>registry/load.py"]
+  LOAD --> REASON["Reasoner.complete<br/>bedrock/reason.py"]
+  LOAD --> CHECK["validate_json<br/>registry/check.py"]
+
+  subgraph passes["Active routes by pass"]
+    P1["compaction claim counterevidence"]
+    P2["entailment x2 coverage supplement"]
+    P3["lens x10 dimensions"]
+    P4["synthesis dissent"]
+    P5["digest digest_review answer_check"]
+    P6["chart screen_use crossmodal"]
+    P7["sonic pegasus frame review_sort"]
+  end
+
+  REG --> passes
+  REASON --> CHECK

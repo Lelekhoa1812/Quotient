@@ -413,6 +413,7 @@ Benchmark runs are reproducible with `.venv/bin/python scripts/bench_meeting.py 
 | [docs/staging.md](docs/staging.md) | The AWS staging stack, network and compute layout. |
 | [docs/quality-ledger.md](docs/quality-ledger.md) | Defects, fixes, evaluations and open items, with dates. |
 | [docs/next-steps.md](docs/next-steps.md) | Hand-over: current walkaway status, what is blocking, the exact confirming-run and scoring steps, revert criteria and open defects in priority order. |
+| [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Evidence-backed architecture maps (Mermaid diagrams, component inventory, execution traces, gaps). |
 
 ---
 

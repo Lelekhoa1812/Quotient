@@ -1,0 +1,86 @@
+flowchart TB
+  subgraph clients["Clients"]
+    PORTAL["apps/web Portal<br/>Next.js 15"]
+    MCP_PARTNER["MCP partners<br/>MCP.md contract"]
+    V1_CLIENT["Integration clients<br/>/v1/jobs + bearer key"]
+  end
+
+  subgraph api_proc["API process — apps/api/quotient"]
+    STARLETTE["create_app<br/>app.py"]
+    MCP_SRV["MCP Streamable HTTP<br/>mcp/server.py"]
+    PUB_HTTP["Public routes<br/>public/routes.py"]
+    WORKER_IF["WorkerPort protocol<br/>worker/port.py"]
+    PROJ["project_meeting gate<br/>graph/gate.py"]
+    EXPORT["render_local exports<br/>export/project.py"]
+    AUTH["CognitoVerifier / bypass<br/>auth/"]
+  end
+
+  subgraph worker_thr["Worker — in-process thread"]
+    PORT["Port.load_port<br/>quotient/port.py"]
+    INGEST["assemble<br/>loop/ingest.py"]
+    QUALITY["run<br/>loop/quality.py"]
+    GATE_W["gate<br/>graph/publish.py"]
+  end
+
+  subgraph contracts["contracts/ — source of truth"]
+    REG["registry.json"]
+    PROMPTS["prompts/*.yaml"]
+    SCHEMAS["schemas/*.json"]
+  end
+
+  subgraph external["External services"]
+    BEDROCK_TYO["Bedrock ap-northeast-1<br/>Nova Sonic"]
+    BEDROCK_SYD["Bedrock ap-southeast-2<br/>Sol / Luna / Pegasus"]
+    JEV["api.typesafe.ai<br/>optional rank/sort"]
+    HF["huggingface.co<br/>diarizer model fetch"]
+    S3["S3 / MinIO<br/>media + uploads"]
+  end
+
+  subgraph local_state["Local / in-memory state"]
+    MEET_JSON[".local/run/meetings.json<br/>QUOTIENT_ENVIRONMENT=local"]
+    MEM_ROW["In-process meeting rows<br/>non-local API process"]
+    TASKS["TaskBoard<br/>mcp/tasks.py"]
+    CKPT["MemoryStore checkpoints<br/>loop/store.py"]
+  end
+
+  subgraph cdk_staging["infra/cdk — synthesized staging"]
+    FARGATE["ECS Fargate<br/>api / web / worker"]
+    DDB["DynamoDB tables<br/>jobs checkpoints audit keys"]
+    SFN["MeetingMachine Step Functions<br/>workflow/machine.py"]
+    COGNITO["Cognito pool<br/>auth/pool.py"]
+  end
+
+  PORTAL -->|"POST/GET /mcp rewrite"| MCP_SRV
+  MCP_PARTNER --> MCP_SRV
+  V1_CLIENT --> PUB_HTTP
+
+  STARLETTE --> MCP_SRV
+  STARLETTE --> PUB_HTTP
+  STARLETTE --> AUTH
+  MCP_SRV --> WORKER_IF
+  PUB_HTTP --> WORKER_IF
+  MCP_SRV --> PROJ
+  MCP_SRV --> EXPORT
+
+  WORKER_IF -->|"load_worker_port → Port"| PORT
+  PORT --> INGEST --> QUALITY --> GATE_W
+  PORT --> MEET_JSON
+  PORT --> MEM_ROW
+  QUALITY --> CKPT
+  MCP_SRV --> TASKS
+
+  INGEST --> BEDROCK_TYO
+  INGEST --> BEDROCK_SYD
+  QUALITY --> BEDROCK_SYD
+  QUALITY --> REG
+  REG --> PROMPTS
+  REG --> SCHEMAS
+  GATE_W --> JEV
+  INGEST --> HF
+  INGEST --> S3
+  PORT --> S3
+
+  FARGATE -.->|"deployed stack"| MCP_SRV
+  DDB -.->|"env vars; partial wiring"| api_proc
+  SFN -.->|"STATE_MACHINE_ARN env only<br/>not referenced in apps/"| FARGATE
+  COGNITO -.-> AUTH

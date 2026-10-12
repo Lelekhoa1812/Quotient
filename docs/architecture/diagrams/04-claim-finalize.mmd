@@ -1,0 +1,18 @@
+flowchart TD
+  START(["finalize_claim graph/claim.py"]) --> UNCITED{uncited_note?}
+  UNCITED -->|yes| UNRES1["status: unresolved"]
+  UNCITED -->|no| QUOTE["resolve_quote graph/quote.py"]
+  QUOTE --> ONE{exactly one span?}
+  ONE -->|no| UNRES2["status: unresolved"]
+  ONE -->|yes| SEARCH{searched_ids == opened_ids?}
+  SEARCH -->|no| UNRES3["status: unresolved"]
+  SEARCH -->|yes| CONTRA{contradiction or dual contradicts?}
+  CONTRA -->|yes| CONTR["status: contradicted"]
+  CONTRA -->|no| ENTAIL{both models entails?}
+  ENTAIL -->|no| GAP["status: gap"]
+  ENTAIL -->|yes| NUMS["numbers.grounded"]
+  NUMS -->|no| UNRES4["status: unresolved"]
+  NUMS -->|yes| SUP["status: supported"]
+  SUP --> CONF["confidence_of: confirmed"]
+  GAP --> UNVER["confidence: unverified/likely rules"]
+  CONTR --> CONFC["confidence: contradicted"]

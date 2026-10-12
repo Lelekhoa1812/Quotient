@@ -1,0 +1,17 @@
+flowchart TB
+  HOME["home.tsx submitMeeting"] --> MCP_C["lib/mcp/client.ts"]
+  TASK["task-screen.tsx watchTask"] --> MCP_C
+  WS["workspace.tsx"] --> MCP_C
+
+  MCP_C -->|"rewrite POST/GET"| PROXY["next.config /mcp"]
+  PROXY --> API["Quotient :8080/mcp"]
+
+  WS --> PARSE["lib/graph.ts parseGraph"]
+  PARSE --> VIEWS["overview insights transcript review"]
+
+  WS --> MUT["accept revise reindex cancel"]
+  MUT --> MCP_C
+  MUT --> RELOAD["reload getMeeting readGraph"]
+
+  SETTINGS["settings.tsx"] --> ENV["api/settings/route.ts .env"]
+  KEYS["api/keys"] --> V1["API /v1/keys"]

@@ -1,0 +1,16 @@
+stateDiagram-v2
+  [*] --> queued: Port.submit
+  queued --> working: _analyze starts
+  working --> ready: gate ready
+  working --> needs_review: gate needs_review
+  working --> failed: _fail or resume ceiling
+  working --> cancelled: cancel_meeting
+  ready --> queued: reindex_meeting
+  needs_review --> queued: reindex_meeting
+  failed --> queued: new submit idempotency
+  cancelled --> queued: new submit
+
+  note right of working
+    MAX_RESUMES=2 on interrupt
+    reindex restores previous_status on stop
+  end note

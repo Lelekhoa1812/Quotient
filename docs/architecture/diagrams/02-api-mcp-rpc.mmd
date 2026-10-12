@@ -1,0 +1,42 @@
+flowchart LR
+  subgraph entry["Entry"]
+    MAIN["__main__.py main"]
+    APP["create_app app.py"]
+  end
+
+  subgraph runtime["_Runtime"]
+    VER["verifier"]
+    PORT["port: WorkerPort"]
+    SESS["SessionStore"]
+    BOARD["TaskBoard"]
+    JOBS["JobBoard integration"]
+    BG["background asyncio tasks"]
+  end
+
+  subgraph mcp_routes["mcp/server.py"]
+    EP["/mcp endpoint"]
+    DISPATCH["_dispatch JSON-RPC"]
+    TOOLS["_tools_call"]
+    RES["resources/read"]
+    TASK_RPC["tasks/get result cancel"]
+  end
+
+  subgraph tool_layer["mcp/tools.py + jobs.py"]
+    SUBMIT["submit_meeting → run_submit"]
+    IMM["call_immediate handlers"]
+    POLL["poll port.meeting 0.25s"]
+  end
+
+  MAIN --> APP --> runtime
+  EP --> DISPATCH
+  DISPATCH --> TOOLS
+  DISPATCH --> RES
+  DISPATCH --> TASK_RPC
+  TOOLS --> SUBMIT
+  TOOLS --> IMM
+  SUBMIT --> BG
+  BG --> POLL
+  SUBMIT --> PORT
+  IMM --> PORT
+  RES --> PROJ["project_meeting gate.py"]
+  SESS --> EP

@@ -1,0 +1,34 @@
+erDiagram
+  MEETING_ROW ||--o{ SPAN : contains
+  MEETING_ROW ||--o{ CLAIM : contains
+  MEETING_ROW ||--o{ FINDING : contains
+  MEETING_ROW ||--o{ ACTION : contains
+  MEETING_ROW ||--o| SYNTHESIS : has
+  MEETING_ROW ||--o| DIGEST : has
+  CLAIM ||--o{ CITATION : cites
+  CITATION }o--|| SPAN : quote_in
+  FINDING }o--o{ CLAIM : references
+  SENTENCE }o--o{ FINDING : cites
+  SYNTHESIS ||--o{ SENTENCE : brief
+  LEDGER ||--o{ SPAN : ingest
+  LEDGER ||--o{ OBSERVATION : pegasus
+  LEDGER ||--o{ SCREEN : frames
+
+  MEETING_ROW {
+    string meeting_id PK
+    string subject FK
+    string status
+    json artifacts
+    json speaker_names
+  }
+  SPAN {
+    string span_id PK
+    string voice_id
+    int start_ms
+    string raw_text
+  }
+  CLAIM {
+    string claim_id PK
+    string status
+    string confidence
+  }

@@ -1,0 +1,19 @@
+stateDiagram-v2
+  [*] --> Evaluate: gate() graph/publish.py
+
+  Evaluate --> needs_review: review_queue non-empty
+  Evaluate --> needs_review: not speech_covered
+  Evaluate --> needs_review: hidden conflict finding
+  Evaluate --> needs_review: any Gap
+  Evaluate --> needs_review: dimension not_evaluated
+  Evaluate --> needs_review: iteration ceiling_hit brief=None
+
+  Evaluate --> ready: all checks pass
+  ready --> [*]: status ready full brief
+  needs_review --> [*]: status needs_review partial brief allowed
+
+  note right of Evaluate
+    keep_findings: all cited claims supported
+    keep_sentences: surviving finding ids
+    brief ∩ review_queue → RuntimeError
+  end note

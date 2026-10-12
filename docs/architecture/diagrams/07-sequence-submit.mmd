@@ -1,0 +1,26 @@
+sequenceDiagram
+  participant P as Portal / Partner
+  participant M as MCP server.py
+  participant T as TaskBoard
+  participant J as run_submit jobs.py
+  participant W as Port quotient/port.py
+  participant Q as loop/quality.run
+
+  P->>M: tools/call submit_meeting
+  M->>T: create task working
+  M->>J: asyncio.create_task
+  J->>W: submit(subject, object_key, ...)
+  W-->>J: meeting_id queued
+  loop poll 0.25s
+    J->>W: meeting(id, subject)
+    W-->>J: status working / progress
+    J->>T: sync_task progress
+  end
+  W->>W: daemon thread _analyze
+  W->>Q: run_quality
+  Q-->>W: GateResult
+  W->>W: _project ready|needs_review
+  J->>W: meeting terminal
+  J->>T: completed + result
+  P->>M: tasks/result SSE until done
+  P->>M: get_meeting / read_graph

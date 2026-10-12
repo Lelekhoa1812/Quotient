@@ -1,0 +1,29 @@
+flowchart TB
+  subgraph stack["StagingStack quotient/stack.py"]
+    VPC["MeetingVpc 10.50.0.0/16"]
+    LOGS["MeetingLogs S3"]
+    BUCK["MeetingBuckets media artifacts logs"]
+    TBL["MeetingTables jobs checkpoints audit keys"]
+    Q["WorkQueue + DLQ"]
+    AUTH["MeetingAuth Cognito"]
+    ROLES["TaskRoles IAM"]
+    COMP["MeetingCompute ECS"]
+    MACH["MeetingMachine SFN"]
+    ALM["BillingAlarms"]
+  end
+
+  VPC --> COMP
+  BUCK --> COMP
+  TBL --> ROLES
+  Q --> MACH
+  ROLES --> COMP
+  AUTH --> COMP
+  COMP --> ALB["ALB :80"]
+  ALB --> API_SVC["service api"]
+  ALB --> WEB_SVC["service web"]
+  ALB --> MCP_PATH["/mcp SSE → api"]
+  COMP --> WORK_SVC["service worker scale 0-10"]
+  MACH --> Q
+
+  note1["apps/ has no STATE_MACHINE client<br/>local analysis uses Port thread"]
+  MACH -.-> note1
