@@ -1266,17 +1266,20 @@ def apply_locked_names(row: dict, spans: list[dict]) -> None:
 
 
 def _load_entrypoints():
+    # Bugs vs Fixes
+    # Bug: The worker tree was added to sys.path only while these three
+    # modules loaded, then removed. The analysis thread later imports
+    # bedrock, loop, and registry as top-level names and raised
+    # ModuleNotFoundError, so every staging job failed at submit.
+    # Fix: Leave apps/worker on the path. Append it so the API's quotient
+    # package, already first on the path, is not shadowed by
+    # apps/worker/quotient.
     root = str(Path(__file__).resolve().parents[1])
-    inserted = root not in sys.path
-    if inserted:
-        sys.path.insert(0, root)
-    try:
-        from loop.quality import run as quality_run
-        from loop.store import MemoryStore
-        from media.probe import classify_file, model_plan
-    finally:
-        if inserted and sys.path and sys.path[0] == root:
-            sys.path.pop(0)
+    if root not in sys.path:
+        sys.path.append(root)
+    from loop.quality import run as quality_run
+    from loop.store import MemoryStore
+    from media.probe import classify_file, model_plan
     return quality_run, MemoryStore(), classify_file, model_plan
 
 

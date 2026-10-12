@@ -1,0 +1,23 @@
+{
+  "media": {
+    "filename": "sbc-20m.mp4",
+    "media_type": "video/mp4",
+    "byte_size": 26959902
+  },
+  "context": {
+    "purpose": "This recording is the SBC end-of-week checkpoint on 9 October 2026. The file is the first 20 minutes. Note decisions, commitments, and unresolved questions. Do not add people or figures that are not in the recording.",
+    "files": [
+      {
+        "filename": "sbc-context.txt",
+        "media_type": "text/plain",
+        "byte_size": 217
+      }
+    ]
+  },
+  "outputs": {
+    "transcript": true,
+    "analysis": true
+  },
+  "stream": false,
+  "idempotency_key": "sbc-20m-2026-10-09-r3"
+}

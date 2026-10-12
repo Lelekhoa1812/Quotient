@@ -9,6 +9,7 @@
  */
 
 import { emptyGraph, mergeGraph, parseGraph, parseMeetingId, parseMeetingStatus, unwrapTool } from "@/lib/graph";
+import { apiMcpUrl } from "@/lib/origin";
 import { asArray, asFinite, asRecord, asString } from "@/lib/json";
 import { meetingIdFromUri, readLibrary, upsertLibrary } from "@/lib/library";
 import {
@@ -560,8 +561,9 @@ export const mcp = {
   detail(): string {
     return detail;
   },
-  parameters(): typeof parameters {
-    return parameters;
+  parameters(): { endpointPath: string; protocolVersion: string; protocolHeader: string; sessionHeader: string; apiUrl: string } {
+    const location = typeof window === "undefined" ? null : window.location;
+    return { ...parameters, apiUrl: apiMcpUrl(location) };
   },
   getSessionId(): string | null {
     return sessionId;

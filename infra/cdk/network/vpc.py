@@ -1,7 +1,7 @@
 # Motivation vs Logic
 # Motivation: Place Quotient in its own Sydney VPC so staging traffic cannot
 # land in an Engine subnet.
-# Logic: Allocate 10.40.0.0/16 as two public /24s and two private /24s across
+# Logic: Allocate 10.50.0.0/16 as two public /24s and two private /24s across
 # two AZs. One NAT in the first public subnet. An S3 gateway endpoint on the
 # private route tables so object transfer does not hairpin through the NAT.
 # The endpoint policy stays open because Fargate pulls ECR layers from

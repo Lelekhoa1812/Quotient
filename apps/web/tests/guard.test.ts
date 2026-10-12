@@ -10,6 +10,8 @@ test("only this portal's own loopback origin may change settings", () => {
   assert.equal(trustedOrigin("null", "127.0.0.1:3000"), false);
   assert.equal(trustedOrigin("http://127.0.0.1:9999", "127.0.0.1:3000"), false);
   assert.equal(trustedOrigin("http://evil.example:3000", "evil.example:3000"), false);
+  assert.equal(trustedOrigin("http://alb.example", "alb.example", true), true);
+  assert.equal(trustedOrigin("http://evil.example", "alb.example", true), false);
 });
 
 test("a cross-site simple request (text/plain, foreign origin) is refused; the page's own JSON post passes", () => {

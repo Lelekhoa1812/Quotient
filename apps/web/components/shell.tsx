@@ -24,12 +24,13 @@ export function useMcpPhase(): Phase {
 
 /**
  * Motivation vs Logic
- * Motivation: Meetings, Assistants, and Settings must stay one tap away without crowding the logo, and the same three links have to fit a narrow viewport.
+ * Motivation: Meetings, MCP, API, and Settings must stay one tap away without crowding the logo, and the same four links have to fit a narrow viewport.
  * Logic: One link list feeds the inline bar and the dropdown. Below 768px a Menu button toggles the panel, which closes on a link, Escape, or a resize back to desktop.
  */
 const PRIMARY_LINKS = [
   { href: "/", label: "Meetings" },
-  { href: "/mcp", label: "Assistants" },
+  { href: "/mcp", label: "MCP" },
+  { href: "/api", label: "API" },
   { href: "/settings", label: "Settings" },
 ] as const;
 
@@ -38,6 +39,7 @@ function isCurrent(pathname: string, href: (typeof PRIMARY_LINKS)[number]["href"
     return pathname === "/" || pathname.startsWith("/meetings") || pathname.startsWith("/tasks");
   }
   if (href === "/mcp") return pathname === "/mcp" || pathname.startsWith("/mcp/");
+  if (href === "/api") return pathname === "/api";
   return pathname === "/settings" || pathname.startsWith("/settings/");
 }
 

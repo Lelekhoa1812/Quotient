@@ -1,0 +1,443 @@
+{
+  "job_id": "b3c3654369ead2d98f417632",
+  "meeting_id": "_yn-Q-6gUzoOaQKr",
+  "status": "needs_review",
+  "analysis": {
+    "title": "Cohort lookup redesign and scouting workflow reuse",
+    "summary": [
+      {
+        "text": "The participants reviewed CRM table improvements and identified the cohort lookup interface as the main remaining work.",
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-0-18",
+          "_yn-Q-6gUzoOaQKr-sonic-3-324"
+        ],
+        "claim_ids": [
+          "claim-260-4"
+        ],
+        "basis": "confirmed",
+        "start_ms": 60089
+      },
+      {
+        "text": "They settled on matching source-table names to tab names and discussed a simpler lookup workflow: select a linked record, choose its field, and optionally rename it.",
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-1-121",
+          "_yn-Q-6gUzoOaQKr-sonic-1-188",
+          "_yn-Q-6gUzoOaQKr-sonic-1-190",
+          "_yn-Q-6gUzoOaQKr-sonic-1-191"
+        ],
+        "claim_ids": [
+          "claim-120-1"
+        ],
+        "basis": "confirmed",
+        "start_ms": 402226
+      },
+      {
+        "text": "A lookup mockup was promised for today and an explanatory video after implementation; the developer guessed that 80% of the feedback had been addressed.",
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-291",
+          "_yn-Q-6gUzoOaQKr-sonic-2-292",
+          "_yn-Q-6gUzoOaQKr-sonic-2-304",
+          "_yn-Q-6gUzoOaQKr-sonic-2-305",
+          "_yn-Q-6gUzoOaQKr-sonic-3-325",
+          "_yn-Q-6gUzoOaQKr-sonic-3-326"
+        ],
+        "claim_ids": [
+          "claim-280-0"
+        ],
+        "basis": "confirmed",
+        "start_ms": 966118
+      },
+      {
+        "text": "They also discussed reusing the table and view functionality for scouting, which currently uses Airtable with an AI workflow connected to it.",
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-3-335",
+          "_yn-Q-6gUzoOaQKr-sonic-3-338",
+          "_yn-Q-6gUzoOaQKr-sonic-3-345"
+        ],
+        "claim_ids": [
+          "supplement-5-8",
+          "claim-340-0"
+        ],
+        "basis": "likely",
+        "start_ms": 1110370
+      }
+    ],
+    "outcome": {
+      "text": "Lookup improvements remain unfinished, with a mockup to be sent today and a video to follow implementation of the requested approach; custom-tab functionality was parked in the plan. Scouting was discussed as another use for the platform, but no migration decision or schedule was settled.",
+      "span_ids": [
+        "_yn-Q-6gUzoOaQKr-sonic-2-271",
+        "_yn-Q-6gUzoOaQKr-sonic-2-272",
+        "_yn-Q-6gUzoOaQKr-sonic-2-273",
+        "_yn-Q-6gUzoOaQKr-sonic-2-304",
+        "_yn-Q-6gUzoOaQKr-sonic-2-305",
+        "_yn-Q-6gUzoOaQKr-sonic-3-325",
+        "_yn-Q-6gUzoOaQKr-sonic-3-326",
+        "_yn-Q-6gUzoOaQKr-sonic-3-347",
+        "_yn-Q-6gUzoOaQKr-sonic-3-350"
+      ],
+      "start_ms": 904972
+    },
+    "decisions": [
+      {
+        "statement": "Lookup source-table names should match the names of the corresponding tabs.",
+        "status": "agreed",
+        "decided_by": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-1-117",
+          "_yn-Q-6gUzoOaQKr-sonic-1-118",
+          "_yn-Q-6gUzoOaQKr-sonic-1-121"
+        ],
+        "claim_ids": [
+          "claim-120-1"
+        ],
+        "basis": "confirmed",
+        "start_ms": 392985
+      },
+      {
+        "statement": "Prefill the lookup label with the selected field's actual name while allowing the user to change it.",
+        "status": "tentative",
+        "decided_by": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-1-122",
+          "_yn-Q-6gUzoOaQKr-sonic-1-123",
+          "_yn-Q-6gUzoOaQKr-sonic-1-124",
+          "_yn-Q-6gUzoOaQKr-sonic-1-125",
+          "_yn-Q-6gUzoOaQKr-sonic-1-126"
+        ],
+        "claim_ids": [
+          "claim-120-2"
+        ],
+        "basis": "confirmed",
+        "start_ms": 409120
+      },
+      {
+        "statement": "Keep optional linking available because there might be planning use cases and future uses involving custom tabs.",
+        "status": "agreed",
+        "decided_by": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-239",
+          "_yn-Q-6gUzoOaQKr-sonic-2-244",
+          "_yn-Q-6gUzoOaQKr-sonic-2-253",
+          "_yn-Q-6gUzoOaQKr-sonic-2-254",
+          "_yn-Q-6gUzoOaQKr-sonic-2-256",
+          "_yn-Q-6gUzoOaQKr-sonic-2-258",
+          "_yn-Q-6gUzoOaQKr-sonic-2-259"
+        ],
+        "claim_ids": [
+          "claim-220-6",
+          "claim-240-5"
+        ],
+        "basis": "confirmed",
+        "start_ms": 790609
+      },
+      {
+        "statement": "Park custom-tab functionality in the plan rather than pursue it in the current discussion.",
+        "status": "deferred",
+        "decided_by": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-258",
+          "_yn-Q-6gUzoOaQKr-sonic-2-264",
+          "_yn-Q-6gUzoOaQKr-sonic-2-271",
+          "_yn-Q-6gUzoOaQKr-sonic-2-272"
+        ],
+        "claim_ids": [
+          "claim-260-3",
+          "supplement-4-18"
+        ],
+        "basis": "confirmed",
+        "start_ms": 850238
+      }
+    ],
+    "actions": [
+      {
+        "task": "Improve the cohort lookup interface, including rearranging its controls to make setup more intuitive.",
+        "assignee": null,
+        "due": null,
+        "agreed": true,
+        "action_id": "a0",
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-1-174",
+          "_yn-Q-6gUzoOaQKr-sonic-1-175",
+          "_yn-Q-6gUzoOaQKr-sonic-2-273",
+          "_yn-Q-6gUzoOaQKr-sonic-2-303",
+          "_yn-Q-6gUzoOaQKr-sonic-3-324"
+        ],
+        "claim_ids": [
+          "claim-260-4",
+          "claim-300-0"
+        ],
+        "basis": "confirmed",
+        "start_ms": 573450
+      },
+      {
+        "task": "Check whether to continue providing user-created linked-record fields.",
+        "assignee": null,
+        "due": null,
+        "agreed": false,
+        "action_id": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-223",
+          "_yn-Q-6gUzoOaQKr-sonic-2-224",
+          "_yn-Q-6gUzoOaQKr-sonic-2-225",
+          "_yn-Q-6gUzoOaQKr-sonic-2-226",
+          "_yn-Q-6gUzoOaQKr-sonic-2-227"
+        ],
+        "claim_ids": [],
+        "basis": "transcript",
+        "start_ms": 726885
+      },
+      {
+        "task": "Expand the available linked-record sources to include meetings.",
+        "assignee": null,
+        "due": null,
+        "agreed": false,
+        "action_id": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-1-162",
+          "_yn-Q-6gUzoOaQKr-sonic-1-163",
+          "_yn-Q-6gUzoOaQKr-sonic-1-164",
+          "_yn-Q-6gUzoOaQKr-sonic-1-165"
+        ],
+        "claim_ids": [],
+        "basis": "transcript",
+        "start_ms": 541426
+      },
+      {
+        "task": "Put the custom-tab idea in the plan.",
+        "assignee": null,
+        "due": null,
+        "agreed": false,
+        "action_id": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-258",
+          "_yn-Q-6gUzoOaQKr-sonic-2-271",
+          "_yn-Q-6gUzoOaQKr-sonic-2-272"
+        ],
+        "claim_ids": [
+          "supplement-4-18",
+          "claim-260-3"
+        ],
+        "basis": "confirmed",
+        "start_ms": 850238
+      },
+      {
+        "task": "Create and send a mockup of the lookup interface.",
+        "assignee": null,
+        "due": "today",
+        "agreed": true,
+        "action_id": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-282",
+          "_yn-Q-6gUzoOaQKr-sonic-2-283",
+          "_yn-Q-6gUzoOaQKr-sonic-2-284",
+          "_yn-Q-6gUzoOaQKr-sonic-2-288",
+          "_yn-Q-6gUzoOaQKr-sonic-3-325",
+          "_yn-Q-6gUzoOaQKr-sonic-3-326",
+          "_yn-Q-6gUzoOaQKr-sonic-3-329"
+        ],
+        "claim_ids": [
+          "claim-280-0"
+        ],
+        "basis": "confirmed",
+        "start_ms": 947171
+      },
+      {
+        "task": "Send an explanatory video after implementing the requested lookup approach.",
+        "assignee": null,
+        "due": null,
+        "agreed": false,
+        "action_id": null,
+        "span_ids": [
+          "_yn-Q-6gUzoOaQKr-sonic-2-303",
+          "_yn-Q-6gUzoOaQKr-sonic-2-304",
+          "_yn-Q-6gUzoOaQKr-sonic-2-305",
+          "_yn-Q-6gUzoOaQKr-sonic-2-306"
+        ],
+        "claim_ids": [],
+        "basis": "transcript",
+        "start_ms": 1014440
+      }
+    ],
+    "questions": [
+      {
+        "question": "What would normally be looked up in the startup table?",
+        "asked_by": null,
+        "asked_span_id": "_yn-Q-6gUzoOaQKr-sonic-1-145",
+        "start_ms": 481407,
+        "answered": true,
+        "answer": "You select the mentor.",
+        "answer_span_id": "_yn-Q-6gUzoOaQKr-sonic-2-242",
+        "answer_ms": 805462
+      },
+      {
+        "question": "Why does the deliverable-assignment lookup count records?",
+        "asked_by": null,
+        "asked_span_id": "_yn-Q-6gUzoOaQKr-sonic-1-180",
+        "start_ms": 592555,
+        "answered": true,
+        "answer": "CRM can have multiple records for one field, so they put a cap there.",
+        "answer_span_id": "_yn-Q-6gUzoOaQKr-sonic-1-201",
+        "answer_ms": 658250
+      },
+      {
+        "question": "Does the end of scouting normally mark the start of the call, or does the sequence vary?",
+        "asked_by": null,
+        "asked_span_id": "_yn-Q-6gUzoOaQKr-sonic-3-354",
+        "start_ms": 1179910,
+        "answered": false,
+        "answer": "The reply said scouting is sometimes done for corporate programs, but its main aim is to push startups toward selection days; it did not explicitly confirm the proposed call sequence.",
+        "answer_span_id": "_yn-Q-6gUzoOaQKr-sonic-3-357",
+        "answer_ms": 1192980
+      }
+    ],
+    "findings": [
+      {
+        "finding_id": "decision-0",
+        "dimension": "decision",
+        "stance": "supports",
+        "text": "The topic was parked or deferred.",
+        "claim_ids": [
+          "claim-260-3",
+          "supplement-4-18"
+        ]
+      },
+      {
+        "finding_id": "commitment-0",
+        "dimension": "commitment",
+        "stance": "supports",
+        "text": "The speaker says they are next going to improve the lookup.",
+        "claim_ids": [
+          "claim-260-4"
+        ]
+      },
+      {
+        "finding_id": "commitment-1",
+        "dimension": "commitment",
+        "stance": "supports",
+        "text": "The speaker says they are working to improve the last bit.",
+        "claim_ids": [
+          "claim-300-0"
+        ]
+      },
+      {
+        "finding_id": "commitment-2",
+        "dimension": "commitment",
+        "stance": "supports",
+        "text": "The speaker offers to mock it up if wanted.",
+        "claim_ids": [
+          "claim-280-0"
+        ]
+      },
+      {
+        "finding_id": "temporal-0",
+        "dimension": "temporal",
+        "stance": "supports",
+        "text": "Improving the lookup is described as the next task.",
+        "claim_ids": [
+          "claim-260-4"
+        ]
+      },
+      {
+        "finding_id": "temporal-1",
+        "dimension": "temporal",
+        "stance": "supports",
+        "text": "The call starts at the end of scouting.",
+        "claim_ids": [
+          "claim-340-3"
+        ]
+      },
+      {
+        "finding_id": "stakeholder-0",
+        "dimension": "stakeholder",
+        "stance": "supports",
+        "text": "A participant wants table names to match tab names.",
+        "claim_ids": [
+          "claim-120-1"
+        ]
+      },
+      {
+        "finding_id": "stakeholder-1",
+        "dimension": "stakeholder",
+        "stance": "conflicts",
+        "text": "A participant objects to creating linked record types, saying it does not make sense.",
+        "claim_ids": [
+          "claim-220-0"
+        ]
+      },
+      {
+        "finding_id": "stakeholder-2",
+        "dimension": "stakeholder",
+        "stance": "supports",
+        "text": "A participant identifies improving the lookup as their next priority.",
+        "claim_ids": [
+          "claim-260-4"
+        ]
+      },
+      {
+        "finding_id": "stakeholder-3",
+        "dimension": "stakeholder",
+        "stance": "supports",
+        "text": "A participant offers to create a mockup if wanted.",
+        "claim_ids": [
+          "claim-280-0"
+        ]
+      },
+      {
+        "finding_id": "stakeholder-4",
+        "dimension": "stakeholder",
+        "stance": "supports",
+        "text": "A participant reports implementing the approach requested by another participant.",
+        "claim_ids": [
+          "supplement-5-1"
+        ]
+      },
+      {
+        "finding_id": "risk-0",
+        "dimension": "risk",
+        "stance": "supports",
+        "text": "The discussed concept is complex.",
+        "claim_ids": [
+          "claim-260-5"
+        ]
+      },
+      {
+        "finding_id": "risk-1",
+        "dimension": "risk",
+        "stance": "supports",
+        "text": "Creating linked record types does not make sense.",
+        "claim_ids": [
+          "claim-220-0"
+        ]
+      },
+      {
+        "finding_id": "gap-0",
+        "dimension": "gap",
+        "stance": "unknown",
+        "text": "The specific design of the lookup improvement remains unresolved; the speaker says they are working on it, describes the concept as complex, and offers to mock it up, but these claims do not specify the proposed changes.",
+        "claim_ids": [
+          "claim-260-4",
+          "claim-260-5",
+          "claim-280-0"
+        ]
+      },
+      {
+        "finding_id": "dependency-0",
+        "dimension": "dependency",
+        "stance": "supports",
+        "text": "The call's start is gated by scouting finishing.",
+        "claim_ids": [
+          "claim-340-3"
+        ]
+      },
+      {
+        "finding_id": "question-0",
+        "dimension": "question",
+        "stance": "supports",
+        "text": "Would you like a mockup?",
+        "claim_ids": [
+          "claim-280-0"
+        ]
+      }
+    ]
+  }
+}

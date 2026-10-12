@@ -17,7 +17,7 @@ export function hostName(host: string): string {
   return value.split(":")[0] ?? "";
 }
 
-export function trustedOrigin(origin: string | null, host: string): boolean {
+export function trustedOrigin(origin: string | null, host: string, allowDeployment = false): boolean {
   if (origin === null || origin === "") return true;
   let parsed: URL;
   try {
@@ -26,13 +26,20 @@ export function trustedOrigin(origin: string | null, host: string): boolean {
     return false;
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  return LOOPBACK.has(hostName(parsed.host)) && parsed.host.toLowerCase() === host.trim().toLowerCase();
+  const same = parsed.host.toLowerCase() === host.trim().toLowerCase();
+  if (LOOPBACK.has(hostName(parsed.host)) && same) return true;
+  // Bugs vs Fixes
+  // Bug: A matching public host was refused, so the staging settings page
+  // could not save or mint a key.
+  // Fix: The deployment flag accepts that same host. A foreign origin still
+  // fails, including when the flag is on.
+  return allowDeployment && same;
 }
 
 export function jsonContent(contentType: string | null): boolean {
   return (contentType ?? "").toLowerCase().split(";")[0]?.trim() === "application/json";
 }
 
-export function safeToMutate(headers: Headers): boolean {
-  return trustedOrigin(headers.get("origin"), headers.get("host") ?? "") && jsonContent(headers.get("content-type"));
+export function safeToMutate(headers: Headers, allowDeployment = false): boolean {
+  return trustedOrigin(headers.get("origin"), headers.get("host") ?? "", allowDeployment) && jsonContent(headers.get("content-type"));
 }

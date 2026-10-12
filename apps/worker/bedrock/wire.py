@@ -53,6 +53,16 @@ def iam_credentials():
         now = time.time()
         if _IAM is not None and _IAM[0] > now + 480:
             return _IAM[1]
+        # Bugs vs Fixes
+        # Bug: Fargate puts the task role on AWS_CONTAINER_CREDENTIALS_RELATIVE_URI.
+        # `aws configure export-credentials` only reads the login cache, so Sonic
+        # signed nothing and the bearer fallback had no API key.
+        # Fix: Read the container credential provider first. The CLI export stays
+        # the path for a local `aws login` session.
+        container = _container_credentials()
+        if container is not None:
+            _IAM = container
+            return container[1]
         completed = subprocess.run(
             ["aws", "configure", "export-credentials", "--format", "process"],
             capture_output=True,
@@ -119,6 +129,27 @@ def _auth_headers(url: str, body: bytes, *, content_type: str, accept: str, toke
     return signed
 
 
+def _container_credentials() -> tuple[float, object] | None:
+    if not (
+        os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+        or os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+    ):
+        return None
+    try:
+        import botocore.session
+        from botocore.credentials import Credentials
+    except ImportError:
+        return None
+    resolved = botocore.session.get_session().get_credentials()
+    if resolved is None:
+        return None
+    frozen = resolved.get_frozen_credentials()
+    if not frozen.access_key or not frozen.secret_key:
+        return None
+    creds = Credentials(frozen.access_key, frozen.secret_key, frozen.token)
+    return (time.time() + 600, creds)
+
+
 def bearer_token() -> str:
     raw = os.environ.get("AWS_BEARER_TOKEN_BEDROCK") or os.environ.get("AWS_BEDROCK_API_KEY") or ""
     token = raw.strip().strip('"').strip("'")
@@ -148,7 +179,18 @@ class Transport:
     """HTTPS adapter. respond() and invoke() match the worker client contracts."""
 
     def __init__(self, token: str | None = None, opener: Callable | None = None):
-        self._token = token if token is not None else bearer_token()
+        # Bugs vs Fixes
+        # Bug: Transport required a Bedrock API key before it looked at IAM, so a
+        # task role with no key raised at startup and never signed the call.
+        # Fix: An empty key is allowed when container or CLI credentials resolve.
+        if token is None:
+            try:
+                token = bearer_token()
+            except RuntimeError:
+                if iam_credentials() is None:
+                    raise
+                token = ""
+        self._token = token
         self._opener = opener
 
     def respond(self, request: dict) -> dict:

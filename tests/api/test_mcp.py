@@ -15,6 +15,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps" / "worker"))
 
 
+def test_health_is_ok_and_names_no_meeting():
+    app = create_app(auth_bypass=True, port=MemoryPort(), environ={})
+    with TestClient(app) as client:
+        response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_mcp_audit_records_method_and_tool_name(monkeypatch, tmp_path):
     path = tmp_path / "audit.log"
     monkeypatch.setenv("QUOTIENT_AUDIT_LOG", str(path))

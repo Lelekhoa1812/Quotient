@@ -7,7 +7,9 @@
 PREFIX = "axion-meeting-staging"
 ACCOUNT = "255834078973"
 REGION = "ap-southeast-2"
-VPC_CIDR = "10.40.0.0/16"
+# 10.40.0.0/16 is kollab-staging-vpc in this account. 10.50.0.0/16 is free
+# and is not peered with the Engine VPCs (10.20.0.0/16, 10.30.0.0/16).
+VPC_CIDR = "10.50.0.0/16"
 
 SONIC_MODEL_ID = "amazon.nova-2-5-sonic"
 SONIC_REGION = "ap-northeast-1"
@@ -47,6 +49,7 @@ IMAGE_TAG = "staging"
 DERIVATIVES_PREFIX = "derivatives/"
 SANDBOX_PREFIX = "sandbox/"
 API_PORT = 8080
+WEB_PORT = 3000
 PORTAL_ORIGIN = "http://localhost:3000"
 
 
@@ -66,3 +69,14 @@ def global_foundation_arns() -> list[str]:
         f"arn:aws:bedrock:*::foundation-model/{model_id}"
         for model_id in GLOBAL_FOUNDATION_MODELS
     ]
+
+
+def sydney_project_arn() -> str:
+    # Bugs vs Fixes
+    # Bug: POST /openai/v1/responses authorizes bedrock:InvokeModel on
+    # arn:aws:bedrock:REGION:ACCOUNT:project/default. Profile and
+    # foundation-model allows let Pegasus through and deny every Sol and
+    # Luna call, so frames and the digest skip.
+    # Fix: Allow that default project in this region. It is the resource
+    # the Responses endpoint checks, not a second model.
+    return f"arn:aws:bedrock:{REGION}:{ACCOUNT}:project/default"

@@ -37,7 +37,7 @@ class StagingStack(Stack):
         roles = TaskRoles(
             self,
             "Roles",
-            tables=[tables.jobs, tables.checkpoints, tables.audit],
+            tables=[tables.jobs, tables.checkpoints, tables.audit, tables.keys],
             media=buckets.media,
             artifacts=buckets.artifacts,
             partner_secret=auth.partner_secret,
@@ -76,6 +76,7 @@ class StagingStack(Stack):
             "ArtifactsBucketName": buckets.artifacts.bucket_name,
             "LogsBucketName": buckets.logs.bucket_name,
             "JobsTableName": tables.jobs.table_name,
+            "KeysTableName": tables.keys.table_name,
             "CheckpointsTableName": tables.checkpoints.table_name,
             "AuditTableName": tables.audit.table_name,
             "WorkQueueUrl": queue.queue.queue_url,

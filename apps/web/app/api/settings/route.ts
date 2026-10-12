@@ -10,6 +10,15 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { safeToMutate } from "@/lib/guard";
 import { applyEnv, isEditableKey, isSettingKey, readEnvValues, safeSettingValue, SETTINGS, settingField } from "@/lib/settings";
+import { deployment } from "@/lib/site";
+
+const RELEASE: Record<string, string> = {
+  AWS_BEDROCK_TRANSCRIBE: "amazon.nova-2-5-sonic",
+  AWS_BEDROCK_TRANSCRIBE_REGION: "ap-northeast-1",
+  AWS_BEDROCK_MEETING: "global.twelvelabs.pegasus-1-2-v1:0",
+  AWS_BEDROCK_LLM: "global.openai.gpt-6.1-sol",
+  AWS_BEDROCK_SLM: "global.openai.gpt-6-luna",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +39,29 @@ function localRequest(request: Request): boolean {
   return first === "127.0.0.1" || first === "::1" || first === "localhost";
 }
 
+function siteRequest(request: Request): boolean {
+  if (deployment()) return Boolean((request.headers.get("host") ?? "").trim());
+  return localRequest(request);
+}
+
+function releaseFields() {
+  return SETTINGS.filter((field) => !field.secret).map((field) => ({
+    key: field.key,
+    label: field.label,
+    secret: field.secret,
+    group: field.group,
+    editable: false,
+    set: Boolean(RELEASE[field.key]),
+    value: RELEASE[field.key] ?? "",
+  }));
+}
+
 export async function GET(request: Request) {
-  if (!localRequest(request)) {
+  if (!siteRequest(request)) {
     return NextResponse.json({ local: false, fields: [] }, { status: 403 });
+  }
+  if (deployment()) {
+    return NextResponse.json({ local: true, deployment: true, fields: releaseFields() });
   }
   try {
     const text = await readFile(envPath(), "utf8");
@@ -55,11 +84,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!localRequest(request)) {
+  if (!siteRequest(request)) {
     return NextResponse.json({ error: "Settings can be changed on this computer only." }, { status: 403 });
   }
-  if (!safeToMutate(request.headers)) {
+  const shared = deployment();
+  if (!safeToMutate(request.headers, shared)) {
     return NextResponse.json({ error: "This request did not come from the Quotient settings page." }, { status: 403 });
+  }
+  if (shared) {
+    return NextResponse.json({ saved: true, deployment: true });
   }
   let body: unknown;
   try {

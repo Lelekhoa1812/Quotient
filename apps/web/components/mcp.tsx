@@ -14,6 +14,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Check, Code, Copy, Download, FileText } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 import { McpDisconnected, mcp, type Phase, type ToolCatalog } from "@/lib/mcp/client";
+import { localHost } from "@/lib/origin";
 
 type View = "formatted" | "source";
 
@@ -52,6 +53,7 @@ export function McpScreen({ contract }: { contract: string }) {
   const phase = useSyncExternalStore(subscribe, () => mcp.phase(), () => "idle" as Phase);
   const sessionId = useSyncExternalStore(subscribe, () => mcp.getSessionId(), () => null);
   const origin = useSyncExternalStore(originSubscribe, () => window.location.origin, () => "");
+  const hostname = useSyncExternalStore(originSubscribe, () => window.location.hostname, () => "");
   const [view, setView] = useState<View>("formatted");
   const [copied, setCopied] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -128,7 +130,7 @@ export function McpScreen({ contract }: { contract: string }) {
 
   const rows: { id: string; label: string; value: string; note?: string; copyValue: string | null }[] = [
     { id: "url", label: "MCP URL", value: portalUrl, note: "Same origin", copyValue: portalUrl },
-    { id: "api", label: "API", value: link.apiUrl, note: "Local default", copyValue: link.apiUrl },
+    { id: "api", label: "API", value: link.apiUrl, note: hostname && !localHost(hostname) ? "This deployment." : "Local default.", copyValue: link.apiUrl },
     { id: "protocol", label: "Protocol", value: link.protocolVersion, copyValue: link.protocolVersion },
     { id: "protocol-header", label: "Protocol header", value: link.protocolHeader, copyValue: link.protocolHeader },
     { id: "session-header", label: "Session header", value: link.sessionHeader, copyValue: link.sessionHeader },

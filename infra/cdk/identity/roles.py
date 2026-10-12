@@ -1,12 +1,14 @@
 # Motivation vs Logic
-# Motivation: Split data-plane credentials so the API cannot call Bedrock, the
-# worker can call only the locked models, and the chart sandbox cannot call
-# Bedrock or write outside its prefix.
+# Motivation: Split data-plane credentials so the chart sandbox cannot call
+# Bedrock or write outside its prefix, and so model invokes stay on the locked
+# profiles. The meeting loop still runs inside the API process, so the API
+# role needs those same invokes or every recording fails at the first model call.
 # Logic: Three ECS task roles. Tokyo InvokeModel and
 # InvokeModelWithBidirectionalStream exist only on
 # amazon.nova-2-5-sonic. Sydney InvokeModel and InvokeModelWithResponseStream
-# cover the four global profiles plus the foundation-model ARNs those profiles
-# require. An explicit deny blocks every other Tokyo foundation-model invoke.
+# cover the four global profiles, the foundation-model ARNs those profiles
+# require, and the default Bedrock project the OpenAI Responses endpoint
+# authorizes. An explicit deny blocks every other Tokyo foundation-model invoke.
 # API and worker are denied writes under artifacts/sandbox/. The sandbox role
 # allows object I/O only on that prefix and denies bedrock, DynamoDB, Step
 # Functions, SQS, and Secrets Manager. SendTask* remains resource "*" because
@@ -23,6 +25,7 @@ from quotient.names import (
     SONIC_REGION,
     global_foundation_arns,
     sydney_profile_arns,
+    sydney_project_arn,
     tokyo_sonic_arn,
 )
 
@@ -64,7 +67,6 @@ class TaskRoles(Construct):
         self.api = self._role("Api", "api")
         self.worker = self._role("Worker", "worker")
         self.sandbox = self._role("Sandbox", "sandbox")
-        self._deny_bedrock(self.api)
         self._deny_bedrock(self.sandbox)
         for table in tables:
             table.grant_read_write_data(self.api)
@@ -83,7 +85,8 @@ class TaskRoles(Construct):
                 )
             )
         partner_secret.grant_read(self.api)
-        self._worker_models()
+        self._grant_models(self.api)
+        self._grant_models(self.worker)
         self._sandbox_prefix(sandbox_objects)
         self._sandbox_data_plane_deny()
 
@@ -161,9 +164,9 @@ class TaskRoles(Construct):
             )
         )
 
-    def _worker_models(self) -> None:
+    def _grant_models(self, role: iam.Role) -> None:
         sonic = tokyo_sonic_arn()
-        self.worker.add_to_policy(
+        role.add_to_policy(
             iam.PolicyStatement(
                 sid="TokyoSonicOnly",
                 actions=[
@@ -173,17 +176,17 @@ class TaskRoles(Construct):
                 resources=[sonic],
             )
         )
-        self.worker.add_to_policy(
+        role.add_to_policy(
             iam.PolicyStatement(
                 sid="SydneyGlobalProfiles",
                 actions=[
                     "bedrock:InvokeModel",
                     "bedrock:InvokeModelWithResponseStream",
                 ],
-                resources=[*sydney_profile_arns(), *global_foundation_arns()],
+                resources=[*sydney_profile_arns(), *global_foundation_arns(), sydney_project_arn()],
             )
         )
-        self.worker.add_to_policy(
+        role.add_to_policy(
             iam.PolicyStatement(
                 sid="DenyTokyoExceptSonic",
                 effect=iam.Effect.DENY,

@@ -32,7 +32,7 @@ These limits come from the code and from the recorded evaluations in [docs/quali
 | Area | Limitation |
 | --- | --- |
 | Media ingestion | Browser uploads work: the API issues a signed upload URL for `uploads/{task_id}/...`, the portal PUTs the file, and the worker downloads it before analysis. Files placed in `derivatives/` still work for command-line use. Each file is one recording; slides and notes picked alongside it are not yet analysed. |
-| Deployment | The AWS staging stack synthesises but has not been deployed. It creates DynamoDB tables that no application code uses. |
+| Deployment | The AWS staging stack is deployed in Sydney. Meeting state still lives in the API process, not in the DynamoDB tables the stack creates, so a new task starts empty. |
 | Meeting state | Locally, meetings are kept in `.local/run/meetings.json`. Outside local mode they are kept only in process memory and are lost on restart. |
 | Completeness | Independent evaluators scored the walkaway's completeness 3 of 5 on the recordings tested (see [Quality evidence](#quality-evidence)): the main threads are covered, detail and some positions are missed. Every meeting still ends `needs_review`, because the unanimity rule leaves roughly half of all statements unconfirmed. |
 | Speakers | Voices are separated automatically (pyannote 3.1, local) and shown as "Speaker N" until a name is given in the recording or typed by a person. The diarizer can merge two people or split one (it split one congressman into two voices on a hearing), and a voice is named only when the transcript itself names it. |
@@ -376,7 +376,7 @@ There is no automatic deletion of meetings or recordings. Treat `.local/` and `d
 
 ## Deployment
 
-The AWS staging stack in `infra/cdk/` synthesises an account-pinned template: a VPC, an application load balancer, Fargate services, DynamoDB tables, S3 buckets, Cognito and billing alarms. It has **not** been deployed. Before deploying, read [docs/staging.md](docs/staging.md) and the limits in [Known limitations](#known-limitations). The main gap is the durable state store, which is not implemented (uploaded recordings are downloaded from object storage, but meeting state is only a local file).
+The AWS staging stack in `infra/cdk/` is deployed in account `255834078973`, region `ap-southeast-2`. It is a VPC, an application load balancer, Fargate services, DynamoDB tables, S3 buckets, Cognito and billing alarms. Read [docs/staging.md](docs/staging.md) and the limits in [Known limitations](#known-limitations). The main gap is the durable state store, which is not implemented (uploaded recordings are downloaded from object storage, but meeting state is only in the API process).
 
 ```bash
 cd infra/cdk

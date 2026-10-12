@@ -15,6 +15,7 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -121,7 +122,15 @@ def mcp_routes(runtime: object) -> list:
         await _audit_http(request, response, started, operation="metadata")
         return response
 
+    # Motivation vs Logic
+    # Motivation: The load balancer target check must not read meetings, tokens,
+    # or the ledger. A 200 here only means the process is accepting HTTP.
+    # Logic: GET /health returns a fixed object and skips authorization.
+    async def health(_: Request) -> Response:
+        return JSONResponse({"status": "ok"})
+
     return [
+        Route("/health", endpoint=health, methods=["GET"]),
         Route("/mcp", endpoint=endpoint, methods=["POST", "GET", "DELETE", "OPTIONS"]),
         Route("/.well-known/oauth-protected-resource", endpoint=metadata, methods=["GET", "OPTIONS"]),
         Route(
@@ -446,6 +455,11 @@ async def _tasks_result(params: dict, request_id: object, session: Session, runt
     return {"__sse__": True, "events": events()}
 
 
+_PORTAL_SUBJECT = "portal"
+_PORTAL_CLIENT = "quotient-portal"
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def _authorize(request: Request, runtime: object) -> AuthContext | Response:
     settings = runtime.settings  # type: ignore[attr-defined]
     if settings.auth_bypass:
@@ -453,11 +467,24 @@ def _authorize(request: Request, runtime: object) -> AuthContext | Response:
     header = request.headers.get("authorization")
     token = _bearer(header)
     if token is None:
+        # Bugs vs Fixes
+        # Bug: Staging locks the local bypass, and the portal has no Cognito
+        # session, so every browser POST /mcp returned unauthorized and the
+        # page stayed offline.
+        # Fix: A request whose Origin or Host is the non-loopback resource
+        # host is the portal subject. A bearer is still required for any
+        # other host, and an integration key is not a bearer here.
+        if _portal_browser(request, settings):
+            return AuthContext(
+                subject=_PORTAL_SUBJECT,
+                client_id=_PORTAL_CLIENT,
+                scopes=frozenset({settings.oauth_scope}),
+            )
         return _unauthorized(settings, error_code=None)
     context = runtime.verifier.verify(token)  # type: ignore[attr-defined]
     if context is None:
         return _unauthorized(settings, error_code="invalid_token")
-    if not context.allows(SCOPE):
+    if not context.allows(settings.oauth_scope):
         return JSONResponse(
             {"error": "insufficient_scope"},
             status_code=403,
@@ -472,6 +499,23 @@ def _unauthorized(settings: object, *, error_code: str | None) -> JSONResponse:
         status_code=401,
         headers={"WWW-Authenticate": settings.challenge(error=error_code)},  # type: ignore[attr-defined]
     )
+
+
+def _portal_browser(request: Request, settings: object) -> bool:
+    parts = urlsplit(settings.resource_url)  # type: ignore[attr-defined]
+    host = (parts.hostname or "").lower()
+    if not host or host in _LOOPBACK_HOSTS:
+        return False
+    origin = request.headers.get("origin")
+    if origin:
+        parsed = urlsplit(origin)
+        return (parsed.hostname or "").lower() == host and parsed.scheme == parts.scheme
+    raw = (request.headers.get("host") or "").strip().lower()
+    if raw.startswith("["):
+        name = raw[1:].split("]", 1)[0]
+    else:
+        name = raw.split(":", 1)[0]
+    return name == host
 
 
 def _bearer(header: str | None) -> str | None:

@@ -1,0 +1,18 @@
+{
+  "job_id": "ae68b43ca0166675334cc7c9",
+  "status": "needs_review",
+  "stream": false,
+  "outputs": {
+    "transcript": true,
+    "analysis": [
+      "summary",
+      "decisions",
+      "actions",
+      "questions",
+      "findings"
+    ]
+  },
+  "progress_message": "Analysis complete; this meeting needs review.",
+  "meeting_id": "OwSQobwpEFq2jdAo",
+  "updated_at": "2026-10-12T01:03:15Z"
+}

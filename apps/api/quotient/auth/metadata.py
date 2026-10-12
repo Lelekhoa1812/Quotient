@@ -23,13 +23,20 @@ class AuthSettings:
     metadata_url: str
     allowed_origins: frozenset[str]
     auth_bypass: bool
+    # Bugs vs Fixes
+    # Bug: The process always challenged quotient:meetings. Cognito issues the
+    # resource-server scope quotient/mcp, so every staging access token was
+    # insufficient_scope.
+    # Fix: COGNITO_SCOPE, when set, is the scope in the metadata document, the
+    # challenge, and the allow check. Unset keeps quotient:meetings.
+    oauth_scope: str = SCOPE
 
     def document(self) -> dict:
         return {
             "resource": self.resource_url,
             "authorization_servers": [self.authorization_server],
             "bearer_methods_supported": ["header"],
-            "scopes_supported": [SCOPE],
+            "scopes_supported": [self.oauth_scope],
             "resource_name": "Quotient",
         }
 
@@ -37,7 +44,7 @@ class AuthSettings:
         parts = [
             "Bearer",
             f'resource_metadata="{self.metadata_url}"',
-            f'scope="{SCOPE}"',
+            f'scope="{self.oauth_scope}"',
         ]
         header = parts[0] + " " + ", ".join(parts[1:])
         if error:
@@ -47,6 +54,13 @@ class AuthSettings:
 
 def _csv_origins(raw: str) -> frozenset[str]:
     return frozenset(piece.strip() for piece in raw.split(",") if piece.strip())
+
+
+def _resource_origin(resource_url: str) -> str:
+    parts = urlsplit(resource_url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def _metadata_url(resource_url: str) -> str:
@@ -84,6 +98,15 @@ def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> A
                 "http://localhost:8080",
             }
         )
+    # Bugs vs Fixes
+    # Bug: The browser on the load balancer sends Origin http://<alb>. That
+    # origin was absent from the allow list, so a portal session died with
+    # origin_not_allowed after authorization.
+    # Fix: The resource URL's own origin is always allowed. Loopback defaults
+    # stay in the set for the local portal.
+    resource_origin = _resource_origin(resource)
+    if resource_origin:
+        origins = origins | frozenset({resource_origin})
     # Motivation vs Logic
     # Motivation: The bypass makes every caller the shared subject "local-dev". It was locked
     # only for staging and production, so an unset or misspelled QUOTIENT_ENVIRONMENT ("prod")
@@ -103,4 +126,5 @@ def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> A
         metadata_url=_metadata_url(resource),
         allowed_origins=origins,
         auth_bypass=enabled,
+        oauth_scope=env.get("COGNITO_SCOPE", "").strip() or SCOPE,
     )

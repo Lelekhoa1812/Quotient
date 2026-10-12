@@ -1,8 +1,8 @@
 # Quotient staging
 
-Sydney stack for account `255834078973`, region `ap-southeast-2`, prefix `axion-meeting-staging`. The template is synthesized from `infra/cdk`. This pass does not deploy it.
+Sydney stack for account `255834078973`, region `ap-southeast-2`, prefix `axion-meeting-staging`. The template is synthesized from `infra/cdk`.
 
-The stack creates a new VPC `10.40.0.0/16`. It does not reference, peer with, or modify `10.30.0.0/16` or `10.20.0.0/16`.
+The stack creates a new VPC `10.50.0.0/16`. `10.40.0.0/16` is already `kollab-staging-vpc` in this account. The stack does not reference, peer with, or modify `10.30.0.0/16` or `10.20.0.0/16`.
 
 ## Deploy
 
@@ -40,10 +40,12 @@ aws ecr get-login-password --region ap-southeast-2 \
   | docker login --username AWS --password-stdin 255834078973.dkr.ecr.ap-southeast-2.amazonaws.com
 
 docker buildx build --platform linux/arm64 \
-  -t 255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-api:staging --push apps/api
+  -f apps/api/Dockerfile \
+  -t 255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-api:staging --push .
 
 docker buildx build --platform linux/arm64 \
-  -t 255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-worker:staging --push apps/worker
+  -f apps/worker/Dockerfile \
+  -t 255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-worker:staging --push .
 
 aws ecs update-service --region ap-southeast-2 \
   --cluster axion-meeting-staging --service axion-meeting-staging-api \
@@ -60,10 +62,10 @@ The worker service rests at 0 tasks. Force its deployment anyway after the push 
 
 | Subnet | CIDR | Use |
 | --- | --- | --- |
-| public, AZ 1 | `10.40.0.0/24` | ALB, and the single NAT gateway |
-| public, AZ 2 | `10.40.1.0/24` | ALB |
-| private, AZ 1 | `10.40.2.0/24` | API, worker, chart sandbox |
-| private, AZ 2 | `10.40.3.0/24` | API, worker, chart sandbox |
+| public, AZ 1 | `10.50.0.0/24` | ALB, and the single NAT gateway |
+| public, AZ 2 | `10.50.1.0/24` | ALB |
+| private, AZ 1 | `10.50.2.0/24` | API, worker, chart sandbox |
+| private, AZ 2 | `10.50.3.0/24` | API, worker, chart sandbox |
 
 One NAT gateway, in the first public subnet. Private egress from the second AZ crosses availability zones. An S3 gateway endpoint is attached to the private route tables, so application object transfer does not go through the NAT. The endpoint policy is unrestricted because Fargate pulls image layers from AWS-owned S3 buckets through the same gateway. Task IAM limits which application buckets the credentials can use.
 
@@ -75,7 +77,7 @@ Cluster `axion-meeting-staging`. On-demand Fargate, ARM64, not Spot. Container I
 
 | Service | vCPU | Memory | Count |
 | --- | --- | --- | --- |
-| API | 0.25 | 0.5 GB | minimum 1, maximum 2, target 70% CPU |
+| API | 1 | 2 GB | minimum 1, maximum 2, target 70% CPU |
 | Worker | 2 | 4 GB | minimum 0, maximum 10, exact queue depth |
 | Chart sandbox | 1 | 2 GB | no service; `RunTask` only |
 
@@ -93,7 +95,7 @@ On-demand DynamoDB, AWS-managed encryption, retained if the stack is deleted. Pa
 | Checkpoints | `axion-meeting-staging-checkpoints` |
 | Audit | `axion-meeting-staging-audit` |
 
-S3, Block Public Access, TLS required, bucket-owner enforced, SSE-S3, retained on delete. No public read. The API role signs uploads and downloads; objects are not anonymous.
+S3, Block Public Access, TLS required, bucket-owner enforced, SSE-S3, retained on delete. No public read. The API role signs uploads and downloads; objects are not anonymous. The meeting loop still runs in the API process, so that role may invoke the same locked Bedrock models as the worker. The sandbox role may not.
 
 | Bucket | Name |
 | --- | --- |
@@ -143,7 +145,7 @@ Queue `axion-meeting-staging-work`. Eight receives, then `axion-meeting-staging-
 
 | Role | What it can do |
 | --- | --- |
-| `axion-meeting-staging-api` | Tables, presign on media and artifacts, start and stop executions, read the partner secret. Bedrock is denied. Writes under `sandbox/` are denied. |
+| `axion-meeting-staging-api` | Tables, presign on media and artifacts, start and stop executions, read the partner secret, and the locked Bedrock invokes (the meeting loop runs in this process). Writes under `sandbox/` are denied. |
 | `axion-meeting-staging-worker` | Tables, media and artifacts, consume the queue, heartbeat a task token, run the sandbox task. |
 | `axion-meeting-staging-sandbox` | Get and put objects under `artifacts/sandbox/` only. Bedrock, DynamoDB, Step Functions, SQS, and Secrets Manager are denied. Any other S3 action is denied. |
 | `axion-meeting-staging-exec` | ECR pull for the two repositories, and log streams for the three task groups. |
@@ -170,7 +172,7 @@ Two cost budgets notify the SNS topic `axion-meeting-staging-billing` when actua
 
 Activate the `Project` tag as a cost allocation tag in the payer billing console. Until it is active, the filter matches nothing and the alarms do not see charges. Activation can take about a day. Bedrock invocation lines in this shared account may not inherit the task tag. After the first 5-minute slice, check Cost Explorer for that tag before treating the alarms as closed.
 
-Idle staging is the NAT gateway, the public load balancer, one 0.25 vCPU API task, and empty on-demand tables. Using public list prices as a planning estimate, not a quote: NAT hourly charge is on the order of 45 USD per month, the load balancer on the order of 20 USD per month, and the API task on the order of 10 USD per month. Idle is on the order of 80 USD per month, under the monthly alarm, and a few dollars per day, under the daily alarm. Workers cost nothing while the queue is empty. A council fan-out can run up to 10 worker tasks of 2 vCPU and 4 GB. Bedrock token use is the spend the daily alarm is there to catch. The alarms do not change model output limits.
+Idle staging is the NAT gateway, the public load balancer, one 1 vCPU / 2 GB API task, and empty on-demand tables. Using public list prices as a planning estimate, not a quote: NAT hourly charge is on the order of 45 USD per month, the load balancer on the order of 20 USD per month, and the API task on the order of 30 USD per month. Idle is on the order of 100 USD per month, under the monthly alarm, and a few dollars per day, under the daily alarm. Workers cost nothing while the queue is empty. A council fan-out can run up to 10 worker tasks of 2 vCPU and 4 GB. Bedrock token use is the spend the daily alarm is there to catch. The alarms do not change model output limits.
 
 CloudWatch log groups `/axion-meeting-staging/{api,worker,sandbox,states}` retain events for 30 days.
 

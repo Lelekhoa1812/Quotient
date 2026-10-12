@@ -184,6 +184,24 @@ def test_bypass_off_by_default_and_metadata():
     assert document["resource"].endswith("/mcp")
     assert document["bearer_methods_supported"] == ["header"]
     assert document["scopes_supported"] == ["quotient:meetings"]
+
+
+def test_cognito_scope_env_is_the_challenged_scope():
+    app = create_app(
+        auth_bypass=False,
+        port=MemoryPort(),
+        environ={"COGNITO_SCOPE": "quotient/mcp", "QUOTIENT_ENVIRONMENT": "staging"},
+    )
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp",
+            headers=base_headers(),
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+        )
+        document = client.get("/.well-known/oauth-protected-resource").json()
+    assert denied.status_code == 401
+    assert 'scope="quotient/mcp"' in denied.headers["www-authenticate"]
+    assert document["scopes_supported"] == ["quotient/mcp"]
     assert document["authorization_servers"] == [
         "https://cognito-idp.ap-southeast-2.amazonaws.com/unconfigured"
     ]
@@ -239,6 +257,45 @@ def test_explicit_bypass_flag_from_env():
             },
         )
     assert allowed.status_code == 200
+
+
+def test_the_portal_origin_opens_mcp_and_any_other_host_stays_unauthorized():
+    resource = "http://quotient.example/mcp"
+    app = create_app(
+        auth_bypass=False,
+        port=MemoryPort(),
+        environ={
+            "QUOTIENT_ENVIRONMENT": "staging",
+            "MCP_RESOURCE_URL": resource,
+            "COGNITO_SCOPE": "quotient/mcp",
+        },
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "portal", "version": "0"},
+        },
+    }
+    with TestClient(app) as client:
+        denied = client.post("/mcp", headers=base_headers(), json=body)
+        assert denied.status_code == 401
+        foreign = client.post(
+            "/mcp",
+            headers={**base_headers(), "Origin": "http://evil.example"},
+            json=body,
+        )
+        assert foreign.status_code == 401
+        opened = client.post(
+            "/mcp",
+            headers={**base_headers(), "Origin": "http://quotient.example"},
+            json=body,
+        )
+        assert opened.status_code == 200, opened.text
+        assert opened.headers["mcp-session-id"]
 
 
 def test_an_oversized_request_body_is_rejected_without_being_buffered():

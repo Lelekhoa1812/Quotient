@@ -1,6 +1,6 @@
 # Quotient MCP
 
-This document is the partner contract for Quotient. The protocol revision is **2025-11-25**. The transport is Streamable HTTP. Partners and the Quotient portal use this server. There is no partner REST API for meetings.
+This document is the partner contract for Quotient over MCP. The protocol revision is **2025-11-25**. The transport is Streamable HTTP. Partners and the Quotient portal use this server. External apps that submit a recording and read a transcript or an analysis use the HTTP API in [API.md](API.md).
 
 Internal model prompts and JSON Schemas under `contracts/` are not part of this contract. They are not MCP prompts, they are not listed by `prompts/list`, and this server does not return their text.
 
@@ -10,6 +10,8 @@ Specification: [MCP 2025-11-25](https://modelcontextprotocol.io/specification/20
 
 | Item | Value |
 | --- | --- |
+| Local origin | `http://127.0.0.1:8080` |
+| Staging origin | `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com` |
 | MCP URL | `{origin}/mcp` |
 | Methods | `POST`, `GET`, `DELETE`, `OPTIONS` |
 | Protocol header | `MCP-Protocol-Version: 2025-11-25` |
@@ -24,7 +26,9 @@ Specification: [MCP 2025-11-25](https://modelcontextprotocol.io/specification/20
 
 `DELETE /mcp` ends the session.
 
-The local default origin is `http://127.0.0.1:8080`. Set `QUOTIENT_RESOURCE_URL` to the canonical MCP URL, including the `/mcp` path. That value is the OAuth resource indicator.
+The local default origin is `http://127.0.0.1:8080`. The AWS staging origin is the internet-facing load balancer in `ap-southeast-2`, `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com`, on HTTP port 80. Paths are the same on both origins. Staging MCP is `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp`.
+
+Set `QUOTIENT_RESOURCE_URL` to the canonical MCP URL, including the `/mcp` path. That value is the OAuth resource indicator. On staging it is the staging MCP URL above.
 
 Protected resource metadata, unauthenticated:
 
@@ -90,7 +94,7 @@ The session is bound to the authorization subject. A different subject on the sa
 
 ## External client
 
-An assistant outside this portal calls the canonical MCP URL. Locally that is `http://127.0.0.1:8080/mcp`. Set `QUOTIENT_RESOURCE_URL` to that URL, including `/mcp`. When the variable is unset, the server uses the local default. The portal's same-origin `/mcp` is a browser path. It is not the partner address.
+An assistant outside this portal calls the canonical MCP URL. Locally that is `http://127.0.0.1:8080/mcp`. On AWS staging that is `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp`. Set `QUOTIENT_RESOURCE_URL` to that URL, including `/mcp`. When the variable is unset, the server uses the local default. The portal's same-origin `/mcp` is a browser path. It is not the partner address.
 
 `initialize` is a JSON-RPC request with `protocolVersion` `2025-11-25` and `clientInfo`. It omits `MCP-Session-Id`. Every later request sends `MCP-Session-Id` from the initialize response and `MCP-Protocol-Version: 2025-11-25`. The next call is `notifications/initialized`. Other methods before that notification receive JSON-RPC `-32600`.
 

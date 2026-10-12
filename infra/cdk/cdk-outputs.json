@@ -1,0 +1,28 @@
+{
+  "axion-meeting-staging": {
+    "ApiRepositoryUri": "255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-api",
+    "PublicSubnetIds": "subnet-08147656f61eed1e6,subnet-079f3c6714396a3ab",
+    "MediaBucketName": "axion-meeting-staging-media",
+    "CheckpointsTableName": "axion-meeting-staging-checkpoints",
+    "WorkQueueUrl": "https://sqs.ap-southeast-2.amazonaws.com/255834078973/axion-meeting-staging-work",
+    "WorkerRepositoryUri": "255834078973.dkr.ecr.ap-southeast-2.amazonaws.com/axion-meeting-staging-worker",
+    "LogsBucketName": "axion-meeting-staging-logs",
+    "AuditTableName": "axion-meeting-staging-audit",
+    "StateMachineArn": "arn:aws:states:ap-southeast-2:255834078973:stateMachine:axion-meeting-staging",
+    "SandboxTaskDefinitionArn": "arn:aws:ecs:ap-southeast-2:255834078973:task-definition/axion-meeting-staging-sandbox:2",
+    "WorkerRoleArn": "arn:aws:iam::255834078973:role/axion-meeting-staging-worker",
+    "PrivateSubnetIds": "subnet-03c81e5f1215d53cb,subnet-086ebc3cdd03e9ee3",
+    "AlbDnsName": "axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com",
+    "CognitoUserPoolId": "ap-southeast-2_hW4sdJ93h",
+    "CognitoClientId": "4ahjkla5fshlcd8kvvc4s3lrhr",
+    "VpcId": "vpc-039b8cf587dad577b",
+    "ApiRoleArn": "arn:aws:iam::255834078973:role/axion-meeting-staging-api",
+    "SandboxRoleArn": "arn:aws:iam::255834078973:role/axion-meeting-staging-sandbox",
+    "BillingTopicArn": "arn:aws:sns:ap-southeast-2:255834078973:axion-meeting-staging-billing",
+    "ClusterName": "axion-meeting-staging",
+    "JobsTableName": "axion-meeting-staging-jobs",
+    "ArtifactsBucketName": "axion-meeting-staging-artifacts",
+    "McpResourceUrl": "http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp",
+    "CognitoDomain": "https://axion-meeting-staging.auth.ap-southeast-2.amazoncognito.com"
+  }
+}

@@ -15,7 +15,7 @@ StagingStack(
     "axion-meeting-staging",
     env=cdk.Environment(account=ACCOUNT, region=REGION),
     description=(
-        "Quotient staging. Sydney VPC 10.40.0.0/16, Fargate, DynamoDB, S3, "
+        "Quotient staging. Sydney VPC 10.50.0.0/16, Fargate, DynamoDB, S3, "
         "Cognito, and billing alarms. Does not reference Engine VPCs."
     ),
 )
