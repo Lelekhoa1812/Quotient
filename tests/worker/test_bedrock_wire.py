@@ -1,6 +1,6 @@
 import pytest
 
-from bedrock.wire import _SonicSession
+from bedrock.wire import _SonicSession, _pegasus_response
 
 
 def test_sonic_forbidden_response_has_safe_configuration_guidance():
@@ -96,3 +96,18 @@ def test_send_all_waits_for_readability_when_tls_needs_to_read_first():
     finally:
         wire.select.select = original
     assert waited == ["read"] and bytes(sock.received) == b"hello"
+
+
+def test_pegasus_1_5_stop_reason_becomes_finish_reason():
+    # Motivation vs Logic
+    # Motivation: Pegasus 1.5 returns stopReason. The client still branches on finishReason.
+    # Logic: Copy stopReason into finishReason and leave the JSON message untouched.
+    mapped = _pegasus_response(
+        {
+            "message": '{"observations":[]}',
+            "stopReason": "length",
+            "input_tokens": 10,
+            "output_tokens": 4,
+        }
+    )
+    assert mapped == {"finishReason": "length", "message": '{"observations":[]}'}

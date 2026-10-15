@@ -154,7 +154,7 @@ Tokyo `bedrock:InvokeModel` and `bedrock:InvokeModelWithBidirectionalStream` are
 
 From Sydney the worker may invoke these global profiles, plus the foundation-model ARNs behind them:
 
-- `global.twelvelabs.pegasus-1-2-v1:0`
+- `global.twelvelabs.pegasus-1-5-v1:0`
 - `global.openai.gpt-6.1-sol`
 - `global.openai.gpt-6-luna`
 - `global.openai.gpt-6-sol` (fallback only)

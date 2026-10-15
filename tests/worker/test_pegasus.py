@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from bedrock.limits import PEGASUS_MAX_OUTPUT_TOKENS, PEGASUS_MODEL, PEGASUS_REGION
+from bedrock.limits import PEGASUS_MODEL, PEGASUS_PART_MAX_MS, PEGASUS_REGION, pegasus_output_tokens
 from support import registry
 from errors import TimestampOutside
 from pegasus.client import PegasusClient, build_body, classify_observations
@@ -17,21 +17,24 @@ class Transport:
     def invoke(self, *, model_id, region, body):
         assert model_id == PEGASUS_MODEL
         assert region == PEGASUS_REGION
-        assert body["maxOutputTokens"] == PEGASUS_MAX_OUTPUT_TOKENS
+        assert body["maxOutputTokens"] == pegasus_output_tokens(5_000)
+        assert body["temperature"] == 0
+        assert body["responseFormat"]["type"] == "json_schema"
+        assert body["responseFormat"]["jsonSchema"]["$id"].endswith("meeting.pegasus.v1.json")
         assert "base64String" not in json.dumps(body)
         self.bodies.append(body)
         return self.responses.pop(0)
 
 
-def test_scene_parts_stay_under_fifty_minutes():
+def test_scene_parts_stay_inside_the_output_window():
     minute = 60_000
     short = pack_scenes([(0, 10 * minute)])
     assert len(short) == 1 and short[0].duration_ms == 10 * minute
     split = pack_scenes([(0, 40 * minute), (40 * minute, 80 * minute)])
     assert [part.duration_ms for part in split] == [40 * minute, 40 * minute]
-    long = pack_scenes([(0, 70 * minute)])
-    assert [part.duration_ms for part in long] == [50 * minute, 20 * minute]
-    assert all(part.duration_ms <= 50 * minute for part in long)
+    long = pack_scenes([(0, 80 * minute)])
+    assert [part.duration_ms for part in long] == [PEGASUS_PART_MAX_MS, 80 * minute - PEGASUS_PART_MAX_MS]
+    assert all(part.duration_ms <= PEGASUS_PART_MAX_MS for part in long)
 
 
 def test_length_continuation_discards_the_partial_object():
@@ -55,12 +58,13 @@ def test_length_continuation_discards_the_partial_object():
     parts = pack_scenes([(600_000, 605_000)])
     result = client.analyze(parts, lambda part: "s3://axion-meeting-staging-media/part0.mp4", "m")
     assert len(transport.bodies) == 2
-    assert all(body["maxOutputTokens"] == 4096 for body in transport.bodies)
+    assert all(body["maxOutputTokens"] == pegasus_output_tokens(5_000) for body in transport.bodies)
+    assert all(body["temperature"] == 0 for body in transport.bodies)
+    assert "additionalProperties" in json.dumps(transport.bodies[0]["responseFormat"])
     assert transport.bodies[0]["inputPrompt"] == registry().prompt("meeting.pegasus.v1").body
     assert transport.bodies[1]["inputPrompt"] == registry().prompt("meeting.pegasus.continue.v1").body
     assert partial not in transport.bodies[1]["inputPrompt"]
     assert transport.bodies[0]["mediaSource"]["s3Location"]["bucketOwner"] == "255834078973"
-    assert "additionalProperties" not in json.dumps(transport.bodies[0]["responseFormat"])
     assert len(result.observations) == 1
     assert (result.observations[0].start_ms, result.observations[0].end_ms) == (600_000, 601_000)
     assert result.observations[0].can_support_claim is True
@@ -68,9 +72,17 @@ def test_length_continuation_discards_the_partial_object():
     assert all(note.can_support_claim is False for note in result.notes)
 
 
-def test_vendor_max_cannot_be_lowered_and_times_must_sit_inside_the_part():
-    with pytest.raises(ValueError, match="4096"):
-        build_body("prompt", {}, "s3://bucket/video.mp4", max_output_tokens=2048)
+def test_output_budget_stays_inside_the_vendor_card_and_times_must_sit_inside_the_part():
+    minute = 60_000
+    assert pegasus_output_tokens(5_000) == 512
+    assert pegasus_output_tokens(3 * minute) == 4096
+    assert pegasus_output_tokens(72 * minute) == 98304
+    assert pegasus_output_tokens(10 * 60 * minute) == 98304
+    schema = {"$id": "https://contracts.quotient.axion/schemas/meeting.pegasus.v1.json", "additionalProperties": False}
+    body = build_body("prompt", schema, "s3://bucket/video.mp4", duration_ms=3 * minute)
+    assert body["maxOutputTokens"] == 4096
+    assert body["responseFormat"]["type"] == "json_schema"
+    assert body["responseFormat"]["jsonSchema"] is schema
     part = pack_scenes([(0, 1000)])[0]
     with pytest.raises(TimestampOutside):
         classify_observations(

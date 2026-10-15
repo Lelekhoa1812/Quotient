@@ -3,6 +3,7 @@ import json
 from errors import SchemaRejected
 from media.artifacts import ArtifactCache
 from pegasus.client import PegasusClient, classify_screens
+from bedrock.limits import PEGASUS_PART_MAX_MS, PEGASUS_WINDOW_MS
 from pegasus.parts import Part, window_parts
 from support import registry
 
@@ -25,14 +26,14 @@ def reply(**data):
 def test_windows_cover_the_recording_and_fold_a_short_tail():
     minute = 60_000
     parts = window_parts(20 * minute)
+    assert len(parts) == 1
     assert parts[0].source_start_ms == 0 and parts[-1].source_end_ms == 20 * minute
     assert all(a.source_end_ms == b.source_start_ms for a, b in zip(parts, parts[1:]))
-    assert all(part.duration_ms <= 3 * minute + 45_000 for part in parts)
-    tail = window_parts(3 * minute + 20_000)
+    tail = window_parts(PEGASUS_WINDOW_MS + 20_000)
     assert len(tail) == 1  # a 20 second tail joins the window before it
     assert window_parts(0) == []
     long = window_parts(120 * minute)
-    assert all(part.duration_ms <= 50 * minute for part in long)
+    assert all(part.duration_ms <= PEGASUS_PART_MAX_MS for part in long)
 
 
 def test_screens_and_people_become_absolute_times_and_bad_ones_are_dropped():

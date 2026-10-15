@@ -1,5 +1,5 @@
 # Motivation vs Logic
-# Motivation: Pegasus S3 input is limited to one hour. Scene-bounded parts stay under 50 minutes.
+# Motivation: One Pegasus 1.5 call stays inside the output card, so a part stays near 72 minutes.
 # Logic: Split any scene longer than the cap, then pack contiguous pieces without crossing the cap.
 
 from dataclasses import dataclass

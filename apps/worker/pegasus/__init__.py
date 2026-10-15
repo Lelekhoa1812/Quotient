@@ -1,1 +1,1 @@
-"""Pegasus 1.2 InvokeModel client. Output stays at the vendor maximum of 4096."""
+"""Pegasus 1.5 InvokeModel client. Output scales with the window and stops at 98304."""

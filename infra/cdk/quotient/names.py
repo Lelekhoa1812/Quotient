@@ -17,7 +17,7 @@ SONIC_REGION = "ap-northeast-1"
 # Global inference profiles invoked from Sydney. The fallback id is the
 # pre-6.1 Sol profile used when gpt-6.1-sol is not invocable.
 GLOBAL_PROFILES = (
-    "global.twelvelabs.pegasus-1-2-v1:0",
+    "global.twelvelabs.pegasus-1-5-v1:0",
     "global.openai.gpt-6.1-sol",
     "global.openai.gpt-6-luna",
     "global.openai.gpt-6-sol",
@@ -25,7 +25,7 @@ GLOBAL_PROFILES = (
 
 # Foundation models behind those profiles. Sonic is intentionally absent.
 GLOBAL_FOUNDATION_MODELS = (
-    "twelvelabs.pegasus-1-2-v1:0",
+    "twelvelabs.pegasus-1-5-v1:0",
     "openai.gpt-6.1-sol",
     "openai.gpt-6-luna",
     "openai.gpt-6-sol",

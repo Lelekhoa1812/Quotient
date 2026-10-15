@@ -1,6 +1,6 @@
 # Motivation vs Logic
 # Motivation: A length stop is a partial object and must not be spliced into the next JSON value.
-# Logic: InvokeModel always sends maxOutputTokens 4096. On length, discard the message and issue a new call.
+# Logic: The token card is computed inside this client. The call still sends meeting.pegasus.v1 under responseFormat.
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from loop.pool import map_ordered
 
 from bedrock.limits import (
     PEGASUS_BUCKET_OWNER,
-    PEGASUS_MAX_OUTPUT_TOKENS,
     PEGASUS_MODEL,
     PEGASUS_REGION,
+    pegasus_output_tokens,
 )
 from errors import SchemaRejected, TimestampOutside
 from pegasus.parts import Part
@@ -85,25 +85,10 @@ class PegasusResult:
     failed_windows: int = 0
 
 
-def _vendor_schema(schema):
-    # Bugs vs Fixes
-    # Bug: Pegasus answers "Unprocessable video" when jsonSchema contains
-    # additionalProperties, even though the MP4 itself decodes.
-    # Fix: Send type, properties, required, and items only. The response is
-    # still validated against the contract schema after the call returns.
-    drop = {"additionalProperties", "$schema", "$id", "title", "description", "$comment"}
-    if isinstance(schema, dict):
-        return {key: _vendor_schema(value) for key, value in schema.items() if key not in drop}
-    if isinstance(schema, list):
-        return [_vendor_schema(item) for item in schema]
-    return schema
-
-
-def build_body(prompt_body: str, schema: dict, uri: str, *, max_output_tokens: int = PEGASUS_MAX_OUTPUT_TOKENS) -> dict:
-    if max_output_tokens != PEGASUS_MAX_OUTPUT_TOKENS:
-        raise ValueError(
-            f"Pegasus maxOutputTokens stays at the vendor maximum {PEGASUS_MAX_OUTPUT_TOKENS}"
-        )
+def build_body(prompt_body: str, schema: dict, uri: str, *, duration_ms: int) -> dict:
+    # Motivation vs Logic
+    # Motivation: Other products already validate meeting.pegasus.v1. A new token field would force a migration.
+    # Logic: Scale maxOutputTokens from the window and clamp it to the 1.5 card. Send that schema unchanged.
     return {
         "inputPrompt": prompt_body,
         "mediaSource": {
@@ -112,8 +97,10 @@ def build_body(prompt_body: str, schema: dict, uri: str, *, max_output_tokens: i
                 "bucketOwner": PEGASUS_BUCKET_OWNER,
             }
         },
-        "maxOutputTokens": PEGASUS_MAX_OUTPUT_TOKENS,
-        "responseFormat": {"jsonSchema": _vendor_schema(schema)},
+        "temperature": 0,
+        "maxOutputTokens": pegasus_output_tokens(duration_ms),
+        # Pegasus 1.5 requires responseFormat.type. jsonSchema stays meeting.pegasus.v1.
+        "responseFormat": {"type": "json_schema", "jsonSchema": schema},
     }
 
 
@@ -242,14 +229,14 @@ class PegasusClient:
         def one(part: Part):
             try:
                 uri = upload(part)
-                body = build_body(prompt.body, schema, uri)
+                body = build_body(prompt.body, schema, uri, duration_ms=part.duration_ms)
                 response = self._invoke(body)
                 turns = 1
                 while _reason(response) == "length":
                     if turns > self.continuation_ceiling:
                         return [], [], [], [], True, False
                     continuation = self.registry.prompt(PEGASUS_CONTINUE)
-                    body = build_body(continuation.body, schema, uri)
+                    body = build_body(continuation.body, schema, uri, duration_ms=part.duration_ms)
                     response = self._invoke(body)
                     turns += 1
                 if _reason(response) != "stop":
