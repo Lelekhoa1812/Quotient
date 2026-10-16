@@ -257,6 +257,10 @@ class MemoryPort:
             if prompt_release is not None:
                 row["prompt_release"] = prompt_release
             if graph:
+                # Bugs vs Fixes
+                # Bug: settle copied speech spans and dropped screens and
+                # identities, so a graph read had no picture rows and no speaker name.
+                # Fix: copy those two fields onto the meeting row with the other graph keys.
                 for key in (
                     "spans",
                     "claims",
@@ -272,6 +276,8 @@ class MemoryPort:
                     "charts",
                     "synthesis_omissions",
                     "observations",
+                    "screens",
+                    "identities",
                 ):
                     if key in graph:
                         row[key] = copy.deepcopy(graph[key])

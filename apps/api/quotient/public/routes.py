@@ -1,8 +1,8 @@
 """Motivation vs Logic
 
-Motivation: External apps need plain HTTP for a recording, a transcript, and
-an analysis, with streaming they can turn off. The key that authorises them
-is minted only on this computer.
+Motivation: External apps need plain HTTP for a recording, a transcript, an
+analysis, and the graph of spans, speakers, screens, and times. Streaming
+can be turned off. The key that authorises them is minted only on this computer.
 Logic: /v1/jobs requires the bearer key. /v1/keys accepts a loopback peer
 or the portal token the settings route sends. stream true opens an event
 stream with a 15 second comment heartbeat.
@@ -161,6 +161,19 @@ def public_routes(runtime: object) -> list:
             StreamingResponse(frames(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
         )
 
+    async def job_graph(request: Request) -> Response:
+        if request.method == "OPTIONS":
+            return _cors(Response(status_code=204))
+        auth = _auth(request, runtime)
+        if isinstance(auth, Response):
+            return auth
+        _key_id, subject = auth
+        try:
+            body = runtime.board.graph(request.path_params["job_id"], subject)  # type: ignore[attr-defined]
+        except PortError as exc:
+            return _port(exc)
+        return _json(body)
+
     async def job_transcript(request: Request) -> Response:
         return await _product(request, runtime, "transcript")
 
@@ -174,6 +187,7 @@ def public_routes(runtime: object) -> list:
         Route("/v1/jobs/{job_id}", endpoint=job_item, methods=["GET", "DELETE", "OPTIONS"]),
         Route("/v1/jobs/{job_id}/submit", endpoint=job_submit, methods=["POST", "OPTIONS"]),
         Route("/v1/jobs/{job_id}/events", endpoint=job_events, methods=["GET", "OPTIONS"]),
+        Route("/v1/jobs/{job_id}/graph", endpoint=job_graph, methods=["GET", "OPTIONS"]),
         Route("/v1/jobs/{job_id}/transcript", endpoint=job_transcript, methods=["GET", "OPTIONS"]),
         Route("/v1/jobs/{job_id}/analysis", endpoint=job_analysis, methods=["GET", "OPTIONS"]),
     ]

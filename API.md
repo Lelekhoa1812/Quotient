@@ -18,6 +18,7 @@ The local default origin is `http://127.0.0.1:8080`. The AWS staging origin is t
 | Events | `GET /v1/jobs/{job_id}/events` |
 | Transcript | `GET /v1/jobs/{job_id}/transcript` |
 | Analysis | `GET /v1/jobs/{job_id}/analysis` |
+| Graph | `GET /v1/jobs/{job_id}/graph` |
 | Request body | `application/json` |
 | CORS | Any origin. The key is still required. |
 
@@ -102,6 +103,7 @@ The analysis is included when the job is `ready` or `needs_review`. `status` say
 3. `POST /v1/jobs/{job_id}/submit` with `upload_complete: true`.
 4. If `stream` is false, poll `GET /v1/jobs/{job_id}` until the status is `ready`, `needs_review`, `failed`, or `cancelled`. If `stream` is true, hold `GET /v1/jobs/{job_id}/events` until the `result` event.
 5. `GET /v1/jobs/{job_id}/transcript` and `GET /v1/jobs/{job_id}/analysis` for the pieces you asked for. The `result` event already carries those bodies when streaming.
+6. `GET /v1/jobs/{job_id}/graph` when the job is `ready` or `needs_review`. The body has `spans`, `speakers`, `screens`, and `times`. It has no media address.
 
 ```mermaid
 sequenceDiagram
@@ -229,6 +231,19 @@ Create that job with:
 
 `analysis: true` means summary, decisions, actions, questions, and findings.
 
+## Graph
+
+`GET /v1/jobs/{job_id}/graph` uses the same bearer key as the other job routes. Call it when the job is `ready` or `needs_review`. A job that is still running answers 409.
+
+| Field | Meaning |
+| --- | --- |
+| `spans` | Speech lines. Each has `span_id`, `kind`, `start_ms`, `end_ms`, `speaker_hypothesis_id`, `raw_text`, and `text`. |
+| `speakers` | One row per `speaker_hypothesis_id`. `name` is set only when the meeting stored that name. |
+| `screens` | Picture rows. Each has `id`, `kind`, `title`, `text`, `start_ms`, and `end_ms`. |
+| `times` | Clock rows for the spans and the screens. A screen row uses `kind` `screen`. |
+
+The body does not include a media address.
+
 ## Errors
 
 | HTTP | When |
@@ -237,7 +252,7 @@ Create that job with:
 | 401 | The key is missing or revoked. |
 | 403 | A key was minted or read from somewhere other than this computer. |
 | 404 | The job is not yours, the output was not requested, or streaming was left off. |
-| 409 | A key already exists, or the transcript or analysis is not ready. |
+| 409 | A key already exists, or the transcript, analysis, or graph is not ready. |
 | 503 | Object storage is not configured for a new upload. |
 
 A job that is still `queued` or `working` answers 409 on the transcript and analysis routes. Read `progress_message` on the job and try again. A failed or cancelled job names that in `failure_message`.

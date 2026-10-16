@@ -183,6 +183,28 @@ class JobBoard:
             "analysis": payload.get("analysis") or {},
         }
 
+    def graph(self, job_id: str, subject: str) -> dict:
+        """Spans, speakers, screens, and times for one owned job."""
+        job = self._owned(job_id, subject)
+        if job is None:
+            raise PortError("not_found", "Job not found.")
+        self._sync(job)
+        if job["status"] not in {"ready", "needs_review"}:
+            raise PortError("conflict", "The graph is not ready.")
+        meeting_id = job.get("meeting_id")
+        if not isinstance(meeting_id, str) or not meeting_id:
+            raise PortError("conflict", "The graph is not ready.")
+        raw = self.port.meeting(meeting_id, subject)  # type: ignore[attr-defined]
+        if raw is None:
+            raise PortError("not_found", "Job not found.")
+        from quotient.graph.gate import project_meeting
+        from quotient.public.graph import partner_graph
+
+        projected = project_meeting(raw)
+        graph = projected.get("graph") if isinstance(projected.get("graph"), dict) else {}
+        status = projected.get("status") if isinstance(projected.get("status"), str) else job["status"]
+        return partner_graph(job_id, status, graph)
+
     def fail_orphans(self) -> None:
         for job in list(self._jobs.values()):
             if job.get("status") not in {"queued", "working"}:
