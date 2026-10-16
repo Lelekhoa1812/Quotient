@@ -22,7 +22,7 @@ from media.artifacts import ArtifactCache
 from media.clock import build_table
 from media.compact import IndexedSpan
 from media.pcm import write_pcm
-from media.probe import classify_file, probe
+from media.probe import classify_file, probe, readable_duration_ms
 from pegasus.client import Observation, PegasusClient, PegasusResult, Screen, Sighting, VisualNote
 from pegasus.parts import window_parts
 from registry.load import Registry
@@ -77,6 +77,27 @@ def resolve_object(object_key: str) -> Path:
     return candidate
 
 
+def open_source(object_key: str) -> tuple[Path, Path | None]:
+    # Bugs vs Fixes
+    # Bug: A seeded meeting keeps object_key derivatives/<file>. The API task
+    # has no derivatives tree, so a reindex raises FileNotFoundError and the
+    # earlier analysis is restored.
+    # Fix: Read a derivatives file from disk when it is there. Otherwise copy
+    # that key from the media bucket into a temporary directory.
+    from media.storage import download
+
+    if object_key.startswith("uploads/"):
+        path = download(object_key)
+        return path, path.parent
+    try:
+        return resolve_object(object_key), None
+    except FileNotFoundError as exc:
+        if "outside derivatives" in str(exc):
+            raise
+        path = download(object_key)
+        return path, path.parent
+
+
 def assemble(
     path: Path,
     meeting_id: str,
@@ -112,7 +133,10 @@ def _assemble(
 ) -> Ledger:
     info = probe(path)
     kind = classify_file(path)
-    duration_ms = _duration_ms(info)
+    declared_ms = _duration_ms(info)
+    duration_ms = readable_duration_ms(path, declared_ms)
+    if duration_ms < declared_ms:
+        _stage(f"duration readable {duration_ms} header {declared_ms}")
     # Bugs vs Fixes
     # Bug: PCM, silence detection, and the S3 put ran one after another, and
     # Sonic's real-time stream finished before Pegasus was even opened.

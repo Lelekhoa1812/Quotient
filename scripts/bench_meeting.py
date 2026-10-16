@@ -102,7 +102,11 @@ if not meeting_id:
 pages = []
 cursor = None
 request_id += 1
-for page_num in range(1, 51):
+# Bugs vs Fixes
+# Bug: The graph is paged at 50 rows. A 73-minute meeting has more than
+# 2,500 spans, so page 51 raises and the benchmark drops a finished analysis.
+# Fix: Follow the cursor to the end, and stop only after 400 pages.
+for page_num in range(1, 401):
     args = {"meeting_id": meeting_id}
     if cursor:
         args["cursor"] = cursor
@@ -125,7 +129,7 @@ for page_num in range(1, 51):
     if not cursor:
         break
 else:
-    raise RuntimeError("Graph pagination exceeded 50 pages")
+    raise RuntimeError("Graph pagination exceeded 400 pages")
 
 result_summary = (result_body.get("structuredContent") or {})
 claim_rows = [item for page in pages for item in page.get("claims", [])]

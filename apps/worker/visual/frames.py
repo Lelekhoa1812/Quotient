@@ -47,16 +47,25 @@ def frame_times(duration_ms: int, interval_ms: int = FRAME_INTERVAL_MS, limit: i
 
 
 def extract_frame(path: Path, at_ms: int, dest: Path) -> Path:
+    # Bugs vs Fixes
+    # Bug: ffmpeg 8 will not write one jpeg unless -update 1 is set, and a
+    # limited-range picture is rejected by the mjpeg encoder. Every later
+    # frame of a normal recording was skipped.
+    # Fix: Ask for a single image and convert to full-range jpeg before encode.
     subprocess.run(
         [
             "ffmpeg", "-v", "error", "-y", "-ss", f"{at_ms / 1000:.3f}", "-i", str(path),
-            "-frames:v", "1", "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "4", str(dest),
+            "-frames:v", "1", "-update", "1",
+            "-vf", f"scale={FRAME_WIDTH}:-2,format=yuvj420p",
+            "-q:v", "4", str(dest),
         ],
         check=True,
         capture_output=True,
         stdin=subprocess.DEVNULL,
         timeout=FRAME_TIMEOUT_SECONDS,
     )
+    if not dest.is_file() or dest.stat().st_size == 0:
+        raise subprocess.CalledProcessError(1, "ffmpeg", stderr=b"frame extract wrote no image")
     return dest
 
 

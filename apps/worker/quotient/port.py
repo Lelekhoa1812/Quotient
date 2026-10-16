@@ -680,21 +680,15 @@ class Port:
     def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...], reindex: bool = False) -> None:
         from bedrock.reason import Reasoner
         from bedrock.wire import Transport
-        from loop.ingest import assemble, resolve_object
+        from loop.ingest import assemble, open_source
         from registry.load import Registry
 
         self._set_progress(meeting_id, "Preparing the media and building the transcript")
-        # A portal upload lives in object storage under uploads/; read it into a private
-        # temporary directory that is removed whatever happens next.
-        scratch = None
-        if object_key.startswith(UPLOAD_PREFIX):
-            from media.storage import download
-
-            self._set_progress(meeting_id, "Fetching the uploaded recording")
-            path = download(object_key)
-            scratch = path.parent
-        else:
-            path = resolve_object(object_key)
+        # A file that is not on this disk is copied from the media bucket into a
+        # private directory that is removed whatever happens next.
+        path, scratch = open_source(object_key)
+        if scratch is not None:
+            self._set_progress(meeting_id, "Fetching the recording")
         try:
             ledger = assemble(
                 path,

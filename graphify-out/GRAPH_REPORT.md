@@ -1,23 +1,23 @@
-# Graph Report - meeting  (2026-10-15)
+# Graph Report - meeting  (2026-10-16)
 
 ## Corpus Check
-- 325 files · ~271,080 words
+- 327 files · ~271,748 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4211 nodes · 8738 edges · 303 communities (254 shown, 40 thin omitted)
+- 4224 nodes · 8771 edges · 306 communities (256 shown, 41 thin omitted)
 - Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 544 edges (avg confidence: 0.92)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e9d900f7`
+- Built from commit: `0ea91a65`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- meeting/charts.tsx
+- insights.ts
 - properties
-- MemoryPort
+- PortError
 - home.tsx
 - isolation.py
 - meeting.chart.v1.json
@@ -33,7 +33,7 @@
 - meeting.entailment.v1.json
 - meeting.supplement.v1.json
 - SchemaRejected
-- gate.py
+- project_meeting
 - types.ts
 - client.ts
 - delete-cache.sh
@@ -63,25 +63,25 @@
 - wire.py
 - shell.tsx
 - Quotient MCP
-- TestClient
+- MemoryPort
 - properties
 - test_loop.py
-- _post
+- server.py
 - TaskRoles
 - guide.tsx
 - sandbox.py
 - settings/route.ts
 - MeetingCompute
-- quotient/app.py
+- WorkerPort
 - package.json
-- Client
+- test_sort.py
 - cluster.py
 - format.ts
 - stack.py
 - overview.tsx
-- project_meeting
+- keys.py
 - pegasus/client.py
-- server.py
+- exports.py
 - workspace.tsx
 - properties
 - numbers.py
@@ -100,7 +100,7 @@
 - css.d.ts
 - bedrock/__init__.py
 - worker/graph/__init__.py
-- keys.py
+- quotient/app.py
 - pegasus/__init__.py
 - sonic/__init__.py
 - cdk/auth/__init__.py
@@ -118,10 +118,10 @@
 - test_digest.py
 - mcp/tools.py
 - actions.py
-- write_pcm
-- create_app
+- sonic/client.py
+- CognitoVerifier
 - Span
-- digest.ts
+- diagram.tsx
 - meeting.review_sort.v1.json
 - progress.tsx
 - test_prose.py
@@ -142,7 +142,7 @@
 - record
 - frames.py
 - meeting.screen_use.v1.json
-- ._run_meeting
+- Port
 - ContextLibrary
 - quotient/port.py
 - to_markdown
@@ -156,7 +156,7 @@
 - routes.py
 - test_sonic.py
 - storage.py
-- Port
+- test_port_persistence.py
 - JobBoard
 - review.tsx
 - upload.ts
@@ -174,21 +174,21 @@
 - summary
 - summary
 - test_screenuse.py
-- test_visual_scan.py
+- ArtifactCache
 - .__init__
 - TranscriptCache
 - Next steps (hand-over, 2026-10-09)
 - Tools
-- sonic/client.py
 - Session
+- next
 - home-loader.tsx
-- public/jobs.py
+- assemble
 - Quotient — Repository Architecture
 - gist_of
 - mcp.tsx
 - README.md
 - start-local-minio.sh
-- dependencies
+- PegasusClient
 - contracts/schemas/meeting.digest_review.v1.json
 - contracts/schemas/meeting.digest.v1.json
 - fixtures/contracts/schemas/meeting.digest_review.v1.json
@@ -284,8 +284,8 @@
 - setup-diarizer.sh
 - claim_ids
 - claim_ids
-- ValueError
-- settings.tsx
+- public/project.py
+- skills.tsx
 - Architecture gaps and discrepancies
 - test_port.py
 - test_media.py
@@ -294,21 +294,24 @@
 - audit_coverage.py
 - Execution traces
 - public/__init__.py
+- settings.tsx
+- test_ingest_upload.py
 - test_one_open_span_is_not_coarse_and_raw_text_is_immutable
-- limits.py
-- keys/route.ts
 - .wrap
 - diarize_pcm
 - Architectural layers
 - datetime
 - .respond
-- _permanent
-- _digest
-- guard.ts
+- _UploadPort
+- map_ordered
+- summary
 - ._post
 - iam_credentials
 - _send_all
+- IndexedSpan
 - FilteringTransport
+- _permanent
+- api/screenuse.py
 
 ## God Nodes (most connected - your core abstractions)
 1. `project_meeting()` - 66 edges
@@ -337,23 +340,23 @@
 ## Import Cycles
 - None detected.
 
-## Communities (303 total, 40 thin omitted)
+## Communities (306 total, 41 thin omitted)
 
-### Community 0 - "meeting/charts.tsx"
-Cohesion: 0.20
-Nodes (8): Charts(), Columns(), Moments(), Stack(), TableView(), BarRow, Insight, countText()
+### Community 0 - "insights.ts"
+Cohesion: 0.13
+Nodes (19): Charts(), Columns(), Moments(), Stack(), TableView(), absenceNote(), BarRow, buildInsights() (+11 more)
 
 ### Community 1 - "properties"
 Cohesion: 0.06
 Nodes (38): additionalProperties, items, type, anyOf, items, type, $id, additionalProperties (+30 more)
 
-### Community 2 - "MemoryPort"
-Cohesion: 0.13
-Nodes (10): _blank_meeting(), MemoryPort, _now(), _pending_artifacts(), Motivation vs Logic Motivation: Partners can exercise MCP before the worker…, Move a ledger row. Not an MCP tool and not a model loop., PortError, Exception (+2 more)
+### Community 2 - "PortError"
+Cohesion: 0.20
+Nodes (7): _blank_meeting(), _now(), _pending_artifacts(), Motivation vs Logic Motivation: Partners can exercise MCP before the worker…, Move a ledger row. Not an MCP tool and not a model loop., PortError, Exception
 
 ### Community 3 - "home.tsx"
-Cohesion: 0.08
-Nodes (41): ConfirmDialog(), ContextModal(), FilterId, FILTERS, Home(), beginEdit(), confirmRemove(), onSubmit() (+33 more)
+Cohesion: 0.09
+Nodes (40): ConfirmDialog(), FilterId, FILTERS, Home(), beginEdit(), confirmRemove(), onSubmit(), saveEdit() (+32 more)
 
 ### Community 4 - "isolation.py"
 Cohesion: 0.17
@@ -365,7 +368,7 @@ Nodes (24): additionalProperties, enum, type, allOf, enum, type, $id, items (+16
 
 ### Community 6 - "context.ts"
 Cohesion: 0.06
-Nodes (61): chipFor(), ContextDialog(), addFiles(), addNote(), editNote(), save(), count(), ICONS (+53 more)
+Nodes (62): chipFor(), ContextDialog(), addFiles(), addNote(), editNote(), save(), ContextModal(), count() (+54 more)
 
 ### Community 7 - "meeting.synthesis.v1.json"
 Cohesion: 0.08
@@ -408,24 +411,24 @@ Cohesion: 0.17
 Nodes (11): additionalProperties, $id, items, oneOf, type, properties, items, required (+3 more)
 
 ### Community 17 - "SchemaRejected"
-Cohesion: 0.09
-Nodes (33): estimate_tokens(), _function_tools(), Registry tool objects become Responses function tools. Schema keywords the…, Reasoner, DimensionSkipped, InputTooLarge, NoAudioTrack, NoSpeech (+25 more)
+Cohesion: 0.14
+Nodes (22): estimate_tokens(), _function_tools(), Registry tool objects become Responses function tools. Schema keywords the…, Reasoner, InputTooLarge, NotInvocable, Decoded model output failed draft-2020-12 validation or was truncated JSON., Assembled model input exceeded the 272K-token short-context budget. (+14 more)
 
-### Community 18 - "gate.py"
-Cohesion: 0.07
-Nodes (37): _action_claims_published(), _actions(), _artifacts(), _charts(), _citation_view(), _claim_view(), _confidence(), _context_view() (+29 more)
+### Community 18 - "project_meeting"
+Cohesion: 0.10
+Nodes (38): _action_claims_published(), _actions(), _artifacts(), _charts(), _citation_view(), _claim_view(), _confidence(), _context_view() (+30 more)
 
 ### Community 19 - "types.ts"
 Cohesion: 0.07
-Nodes (52): Actions(), Boards(), Synthesis(), dueText(), isProposed(), absenceNote(), buildInsights(), confirmationCounts() (+44 more)
+Nodes (42): Actions(), Boards(), Synthesis(), dueText(), isProposed(), AGGREGATION, aggregationText(), CLAIM_STATUS (+34 more)
 
 ### Community 20 - "client.ts"
-Cohesion: 0.08
-Nodes (43): buildPrepareArgs(), runPool(), UPLOAD_CONCURRENCY, emptyGraph(), answeredElicitations, baseHeaders(), callTool(), connect() (+35 more)
+Cohesion: 0.09
+Nodes (45): buildPrepareArgs(), runPool(), emptyGraph(), answeredElicitations, baseHeaders(), callTool(), connect(), consumeSse() (+37 more)
 
 ### Community 22 - "Session"
-Cohesion: 0.12
-Nodes (8): AuthContext, local_context(), Cognito access-token verification and the explicitly local auth context., Return a context for a signature-checked access token, or None., Motivation vs Logic Motivation: Streamable HTTP keeps a session so progress,…, Session, SessionStore, Queue
+Cohesion: 0.13
+Nodes (7): AuthContext, local_context(), Cognito access-token verification and the explicitly local auth context., Motivation vs Logic Motivation: Streamable HTTP keeps a session so progress,…, Session, SessionStore, Queue
 
 ### Community 23 - "meeting.lens_commitment.v1.json"
 Cohesion: 0.40
@@ -472,16 +475,16 @@ Cohesion: 0.14
 Nodes (6): Deterministic media evidence: probe, PCM, VAD, idle, overlap, compaction, clock., _FakeProcess, Stands in for the diarizer: writes its turns file when started, then reports it…, _run_with_output(), test_diarizer_output_that_is_not_an_object_or_has_bad_rows_never_crashes(), test_port_refuses_non_media_and_oversize_uploads()
 
 ### Community 42 - "quality.py"
-Cohesion: 0.11
-Nodes (42): overlapping(), apply_decision_status(), _decision_enum(), require_dimensions(), _take_enum(), gate(), GateResult, keep_findings() (+34 more)
+Cohesion: 0.13
+Nodes (36): DimensionSkipped, RuntimeError, A meeting finished without one of the ten blinded lenses., apply_decision_status(), _decision_enum(), require_dimensions(), _take_enum(), gate() (+28 more)
 
 ### Community 43 - "properties"
 Cohesion: 0.07
 Nodes (27): enum, additionalProperties, type, items, type, type, enum, type (+19 more)
 
 ### Community 44 - "TaskRecord"
-Cohesion: 0.14
-Nodes (9): clamp_ttl(), LimitError, Exception, Motivation vs Logic Motivation: submit_meeting is long-running. MCP tasks let…, TaskBoard, TaskRecord, tool_error(), utc_now() (+1 more)
+Cohesion: 0.15
+Nodes (8): LimitError, Exception, Motivation vs Logic Motivation: submit_meeting is long-running. MCP tasks let…, TaskBoard, TaskRecord, tool_error(), utc_now(), Future
 
 ### Community 45 - "wire.py"
 Cohesion: 0.24
@@ -495,85 +498,85 @@ Nodes (12): metadata, montserrat, pirulen, isCurrent(), PRIMARY_LINKS, PrimaryLi
 Cohesion: 0.14
 Nodes (14): Authorization, Endpoint, Errors, External client, Limits, Local bypass, Local process, Prompts (+6 more)
 
-### Community 48 - "TestClient"
-Cohesion: 0.10
-Nodes (35): TestClient, MapVerifier, open_session(), Shared HTTP helpers for the Quotient MCP contract tests., rpc(), _answer(), _ContextOwningPort, _meeting_id() (+27 more)
+### Community 48 - "MemoryPort"
+Cohesion: 0.09
+Nodes (53): create_app(), MemoryPort, Starlette, TestClient, base_headers(), MapVerifier, open_session(), Shared HTTP helpers for the Quotient MCP contract tests. (+45 more)
 
 ### Community 49 - "properties"
 Cohesion: 0.05
 Nodes (44): additionalProperties, type, description, type, type, $id, additionalProperties, properties (+36 more)
 
 ### Community 50 - "test_loop.py"
-Cohesion: 0.12
-Nodes (39): ModelTurn, ToolCall, run_lenses(), Claim, Budget, _contest(), _coverage(), Ledger (+31 more)
+Cohesion: 0.11
+Nodes (41): ModelTurn, ToolCall, run_lenses(), Claim, Budget, _BudgetModel, _contest(), _coverage() (+33 more)
 
-### Community 51 - "_post"
-Cohesion: 0.24
-Nodes (21): _accepts(), _audit_http(), _authorize(), _bearer(), _classify(), _cors(), _delete(), _empty() (+13 more)
+### Community 51 - "server.py"
+Cohesion: 0.18
+Nodes (27): resolve_client_response(), get_prompt(), list_prompts(), Motivation vs Logic Motivation: MCP prompts are partner workflows for a client…, _accepts(), _audit_http(), _authorize(), _bearer() (+19 more)
 
 ### Community 52 - "TaskRoles"
 Cohesion: 0.15
 Nodes (11): IBucket, ICluster, Construct, IQueue, Role, TaskRoles, IRole, ISecret (+3 more)
 
 ### Community 53 - "guide.tsx"
-Cohesion: 0.24
-Nodes (8): dynamic, metadata, ApiScreen(), originSubscribe(), View, apiBase(), apiMcpUrl(), localHost()
+Cohesion: 0.36
+Nodes (6): ApiScreen(), originSubscribe(), View, apiBase(), apiMcpUrl(), localHost()
 
 ### Community 54 - "sandbox.py"
 Cohesion: 0.07
 Nodes (71): _action_acceptance(), aggregation_chart(), builtins_open(), _catalog(), _chart(), _chart_by_id(), commit_svg(), _count_row() (+63 more)
 
 ### Community 55 - "settings/route.ts"
-Cohesion: 0.20
-Nodes (19): dynamic, envPath(), GET(), localRequest(), loopbackHost(), POST(), RELEASE, releaseFields() (+11 more)
+Cohesion: 0.12
+Nodes (33): dynamic, forward(), GET(), localRequest(), loopbackHost(), POST(), siteRequest(), dynamic (+25 more)
 
 ### Community 56 - "MeetingCompute"
 Cohesion: 0.21
 Nodes (8): MeetingCompute, Construct, IQueue, Role, MeetingTables, Construct, IVpc, Repository
 
-### Community 57 - "quotient/app.py"
-Cohesion: 0.07
-Nodes (20): _disk(), __getattr__(), _isolated(), _load_verifier(), Motivation vs Logic Motivation: The process exposes one ASGI app: Streamable…, Contract tests inject a port and carry no table names. They must not open the…, _Runtime, Protocol (+12 more)
+### Community 57 - "WorkerPort"
+Cohesion: 0.11
+Nodes (9): _import_worker_port(), _load_file(), load_worker_port(), Path, Protocol, Motivation vs Logic Motivation: The meeting loop, model calls, and binary…, Sync surface the MCP server calls. submit must return without a model loop.…, _repo_root() (+1 more)
 
 ### Community 58 - "package.json"
-Cohesion: 0.09
-Nodes (22): devDependencies, @types/node, @types/react, @types/react-dom, @types/three, typescript, name, private (+14 more)
+Cohesion: 0.07
+Nodes (29): dependencies, lucide-react, mermaid, next, react, react-dom, three, devDependencies (+21 more)
 
-### Community 59 - "Client"
-Cohesion: 0.12
-Nodes (22): _audit_api(), Client, _elapsed_ms(), JevFailed, RuntimeError, _retry_after(), _ordered(), rank_digest() (+14 more)
+### Community 59 - "test_sort.py"
+Cohesion: 0.10
+Nodes (39): _audit_api(), Client, _elapsed_ms(), JevFailed, RuntimeError, _retry_after(), _ordered(), rank_digest() (+31 more)
 
 ### Community 60 - "cluster.py"
 Cohesion: 0.23
 Nodes (6): FargateService, MeetingAuth, Construct, _release_desired_count(), MeetingVpc, Construct
 
 ### Community 61 - "format.ts"
-Cohesion: 0.09
-Nodes (33): Highlighted(), Inspector(), groupBySpeaker(), Overview(), talkTime(), Player, PlayerHandle, Props (+25 more)
+Cohesion: 0.10
+Nodes (28): Highlighted(), Inspector(), Player, PlayerHandle, Props, sampleBlank(), SPEEDS, Highlighted() (+20 more)
 
 ### Community 62 - "stack.py"
 Cohesion: 0.20
 Nodes (8): BillingAlarms, Construct, IQueue, Construct, StagingStack, Construct, WorkQueue, Stack
 
 ### Community 63 - "overview.tsx"
-Cohesion: 0.07
-Nodes (38): Diagram(), enqueue(), MermaidTheme, queue, readTheme(), sanitize(), CONTEXT_STATUS, DECISION_LABEL (+30 more)
+Cohesion: 0.06
+Nodes (50): CONTEXT_STATUS, DECISION_LABEL, groupBySpeaker(), Overview(), talkTime(), TYPE_LABEL, counts(), KIND_LABEL (+42 more)
 
-### Community 64 - "project_meeting"
-Cohesion: 0.19
-Nodes (24): project_meeting(), published_graph(), Publish gate, captions, and export resources., _resource(), test_a_not_evaluated_lens_alone_prevents_ready(), test_a_script_in_the_summary_text_is_escaped_in_the_brief_even_when_a_diagram_is_present(), test_brief_exports_carry_the_walkaway_when_a_meeting_has_one(), test_brief_exports_render_markdown_and_mermaid() (+16 more)
+### Community 64 - "keys.py"
+Cohesion: 0.09
+Nodes (19): _Runtime, Protocol, Return a context for a signature-checked access token, or None., TokenVerifier, _client(), _Dynamo, dynamo_directory(), file_directory() (+11 more)
 
 ### Community 65 - "pegasus/client.py"
-Cohesion: 0.11
-Nodes (22): A cited time lies outside the source or the scene part that produced it., TimestampOutside, A saved visual scan, or None when it is missing or does not have the expected…, _restore_scan(), classify_observations(), classify_screens(), Observation, PegasusClient (+14 more)
+Cohesion: 0.09
+Nodes (29): pegasus_output_tokens(), Tokens for one window. Short windows use the vendor floor. Long windows stop at…, A cited time lies outside the source or the scene part that produced it., TimestampOutside, A saved visual scan, or None when it is missing or does not have the expected…, _restore_scan(), build_body(), classify_observations() (+21 more)
 
-### Community 66 - "server.py"
-Cohesion: 0.17
-Nodes (26): error(), JSON-RPC error codes used by the Quotient MCP endpoint., result(), notify_resources(), sync_task(), decode_cursor(), encode_cursor(), Opaque cursors for MCP list methods. (+18 more)
+### Community 66 - "exports.py"
+Cohesion: 0.11
+Nodes (30): _digest(), _leaks(), Commentary about the transcript itself. Positional wording needs a speaker in…, Remove every clause or sentence that talks about the transcript itself; keep…, Clean one row in place. False when its main text was nothing but such…, Re-check the worker's grounded digest against this meeting's spans before…, _unleak(), _unleak_row() (+22 more)
 
 ### Community 67 - "workspace.tsx"
 Cohesion: 0.08
-Nodes (38): SameVoiceDialog(), UnknownVoiceButton(), UnknownVoiceDialog(), useMediaSource(), citationFor(), idlePanel, NAV, Panel (+30 more)
+Nodes (37): SameVoiceDialog(), UnknownVoiceButton(), UnknownVoiceDialog(), useMediaSource(), citationFor(), idlePanel, NAV, Panel (+29 more)
 
 ### Community 68 - "properties"
 Cohesion: 0.05
@@ -581,7 +584,7 @@ Nodes (44): additionalProperties, type, description, type, type, $id, additional
 
 ### Community 69 - "numbers.py"
 Cohesion: 0.19
-Nodes (17): _digit(), _direction(), grounded(), NumberScan, _orphan_unit(), Quantity, A magnitude word after a digit: "5 million", "$50k". Without it "$5 million"…, _same() (+9 more)
+Nodes (16): _has_quantity(), True when the figure reads as at least one number the span can be checked for;…, _digit(), _direction(), NumberScan, _orphan_unit(), Quantity, A magnitude word after a digit: "5 million", "$50k". Without it "$5 million"… (+8 more)
 
 ### Community 70 - "Quotient staging"
 Cohesion: 0.18
@@ -589,7 +592,7 @@ Nodes (11): Auth, Budget, Compute, Data, Deploy, IAM, Images, Network (+3 more)
 
 ### Community 71 - "insights.tsx"
 Cohesion: 0.07
-Nodes (55): Insights(), KIND_LABEL, SERIES_COLORS, BarPart, ChartCard(), clip(), Column, DataTable() (+47 more)
+Nodes (57): Insights(), KIND_LABEL, SERIES_COLORS, BarPart, ChartCard(), clip(), Column, DataTable() (+49 more)
 
 ### Community 72 - "MeetingMachine"
 Cohesion: 0.31
@@ -601,7 +604,7 @@ Nodes (7): additionalProperties, enum, properties, label, required, $schema, typ
 
 ### Community 75 - "graph.ts"
 Cohesion: 0.12
-Nodes (56): parsePrepareResult(), toolErrorMessage(), dedupe(), dedupeObservations(), dedupeOmissions(), dedupeSeams(), entityId(), exportUri() (+48 more)
+Nodes (56): parsePrepareResult(), toolErrorMessage(), parseDigest(), rows(), dedupe(), dedupeObservations(), dedupeOmissions(), dedupeSeams() (+48 more)
 
 ### Community 76 - "meeting.crossmodal.v1.json"
 Cohesion: 0.09
@@ -619,21 +622,21 @@ Nodes (3): MeetingLogs, Construct, LogGroup
 Cohesion: 0.40
 Nodes (3): nextConfig, root, securityHeaders
 
-### Community 86 - "keys.py"
-Cohesion: 0.12
-Nodes (15): _client(), _Dynamo, dynamo_directory(), file_directory(), _item(), KeyDirectory, load_directory(), MemoryDirectory (+7 more)
+### Community 86 - "quotient/app.py"
+Cohesion: 0.08
+Nodes (21): _disk(), __getattr__(), _isolated(), _load_verifier(), Motivation vs Logic Motivation: The process exposes one ASGI app: Streamable…, Contract tests inject a port and carry no table names. They must not open the…, Explicit deny-all verifier for unconfigured environments and tests., RejectingVerifier (+13 more)
 
 ### Community 97 - "meeting.sonic.v1.json"
 Cohesion: 0.25
 Nodes (7): additionalProperties, description, $id, properties, $schema, title, type
 
 ### Community 98 - "ingest.py"
-Cohesion: 0.13
-Nodes (28): HTTPS adapter. respond() and invoke() match the worker client contracts., Transport, assemble(), _assemble(), _clamp(), _complement(), _cut(), _duration_ms() (+20 more)
+Cohesion: 0.16
+Nodes (22): _assemble(), _clamp(), _complement(), _cut(), _duration_ms(), _ms_field(), open_source(), _put_object() (+14 more)
 
 ### Community 99 - "Registry"
-Cohesion: 0.12
-Nodes (32): PinMismatch, FileNotFoundError, The registry model role does not match the locked plan pin., A plan registry id or its file is not on disk., RegistryMissing, apply_order(), _breakpoints(), default_root() (+24 more)
+Cohesion: 0.16
+Nodes (14): PinMismatch, FileNotFoundError, The registry model role does not match the locked plan pin., A plan registry id or its file is not on disk., RegistryMissing, _breakpoints(), default_root(), _index() (+6 more)
 
 ### Community 100 - "start-local.sh"
 Cohesion: 0.17
@@ -648,28 +651,28 @@ Cohesion: 0.12
 Nodes (41): ground_digest(), _claim(), _raw(), _span(), test_a_concept_starts_at_its_earliest_cited_line(), test_a_disagreement_needs_two_distinct_identified_voices(), test_a_due_phrase_is_kept_only_when_it_names_a_time(), test_a_figure_without_a_quantity_is_not_a_figure() (+33 more)
 
 ### Community 103 - "mcp/tools.py"
-Cohesion: 0.24
-Nodes (20): page_graph(), summary(), _accept_action(), _cancel_meeting(), _get_meeting(), _handlers(), _merge_speakers(), _optional_cursor() (+12 more)
+Cohesion: 0.25
+Nodes (20): page_graph(), _accept_action(), _cancel_meeting(), _get_meeting(), _handlers(), _merge_speakers(), _optional_cursor(), _owned() (+12 more)
 
 ### Community 104 - "actions.py"
-Cohesion: 0.26
-Nodes (16): accept_action(), action_schema(), apply_owner(), _checked(), _find_action_schema(), _first_person(), ground_action(), ground_due() (+8 more)
+Cohesion: 0.33
+Nodes (15): accept_action(), action_schema(), apply_owner(), _checked(), _find_action_schema(), _first_person(), ground_action(), ground_due() (+7 more)
 
-### Community 105 - "write_pcm"
+### Community 105 - "sonic/client.py"
 Cohesion: 0.16
-Nodes (9): Checkpointed quality loop. A replay of the same idempotency key returns the…, ffmpeg_pcm_args(), Path, write_pcm(), parametrize, test_local_s3_video_ingest_records_skipped_visual_analysis(), test_pegasus_parts_go_to_the_aws_bucket_when_media_is_on_minio(), test_upload_failure_is_actionable_without_leaking_cli_output() (+1 more)
+Nodes (16): KeepInterval, map_sample_range(), _merge(), ms_to_samples(), source_ms_of_sample(), bind_samples(), _content(), _H2Error (+8 more)
 
-### Community 106 - "create_app"
-Cohesion: 0.13
-Nodes (27): Any, create_app(), CognitoVerifier, Verify Cognito RS256 access tokens against the configured resource. Access…, PyJWKClient, Starlette, base_headers(), Authorization metadata and the default-off local bypass. (+19 more)
+### Community 106 - "CognitoVerifier"
+Cohesion: 0.18
+Nodes (13): Any, CognitoVerifier, Verify Cognito RS256 access tokens against the configured resource. Access…, PyJWKClient, signed_token(), StaticJwks, test_cognito_access_token_signature_and_scope_are_verified(), test_cognito_verifier_accepts_resource_audience_without_client_allowlist() (+5 more)
 
 ### Community 107 - "Span"
-Cohesion: 0.16
-Nodes (25): ImmutableRawText, raw_text is the Sonic string and cannot be replaced., confidence_of(), dual(), _finalize(), finalize_claim(), Resolution, resolve_quote() (+17 more)
+Cohesion: 0.12
+Nodes (33): ImmutableRawText, raw_text is the Sonic string and cannot be replaced., confidence_of(), dual(), _finalize(), finalize_claim(), overlapping(), record_cross() (+25 more)
 
-### Community 108 - "digest.ts"
-Cohesion: 0.13
-Nodes (19): DRAWABLE, isDrawable(), Basis, chapterAt(), ContentType, Decision, DigestAction, DigestLine (+11 more)
+### Community 108 - "diagram.tsx"
+Cohesion: 0.26
+Nodes (8): Diagram(), enqueue(), MermaidTheme, queue, readTheme(), sanitize(), DRAWABLE, isDrawable()
 
 ### Community 109 - "meeting.review_sort.v1.json"
 Cohesion: 0.17
@@ -677,7 +680,7 @@ Nodes (11): additionalProperties, $id, properties, score, type, required, $schem
 
 ### Community 110 - "progress.tsx"
 Cohesion: 0.15
-Nodes (16): CANONICAL, Exports(), download(), Progress(), stepState(), SpanEdit(), saveSpeaker(), saveText() (+8 more)
+Nodes (17): CANONICAL, Exports(), download(), Progress(), stepState(), SpanEdit(), saveSpeaker(), saveText() (+9 more)
 
 ### Community 111 - "test_prose.py"
 Cohesion: 0.19
@@ -701,7 +704,7 @@ Nodes (41): items, type, items, type, items, items, type, items (+33 more)
 
 ### Community 116 - "export/project.py"
 Cohesion: 0.07
-Nodes (63): _bounds(), _cue_text(), _document(), Motivation vs Logic Motivation: Captions are a projection of speech spans onto…, Pack words into lines of at most LINE characters, then pair lines into cues.…, _speech(), _split(), srt() (+55 more)
+Nodes (64): _bounds(), _cue_text(), _document(), Motivation vs Logic Motivation: Captions are a projection of speech spans onto…, Pack words into lines of at most LINE characters, then pair lines into cues.…, _speech(), _split(), srt() (+56 more)
 
 ### Community 117 - "properties"
 Cohesion: 0.05
@@ -716,12 +719,12 @@ Cohesion: 0.05
 Nodes (38): additionalProperties, enum, type, description, type, $id, additionalProperties, properties (+30 more)
 
 ### Community 120 - "mcp/jobs.py"
-Cohesion: 0.17
-Nodes (21): cancel_meeting_tasks(), _collect_upload(), _elicitation(), _fanout(), _names(), _notify_status(), _progress(), Motivation vs Logic Motivation: submit_meeting returns a task and then waits on… (+13 more)
+Cohesion: 0.15
+Nodes (26): cancel_meeting_tasks(), _collect_upload(), _elicitation(), _fanout(), _names(), notify_resources(), _notify_status(), _progress() (+18 more)
 
 ### Community 121 - "test_digest_review.py"
-Cohesion: 0.12
-Nodes (27): _BudgetModel, Counts lens calls against the activity ceiling without choosing a model from…, _reviewed(), _size(), _verify_questions(), complete_with_open_span(), complete_with_tools(), complete(payload) -> turn. Returns the final turn, or None if complete() does.… (+19 more)
+Cohesion: 0.11
+Nodes (31): claim_rows(), _digest(), Walkaway pass. Never fails the analysis: any error leaves the meeting without a…, Attach a checked reading of each screen. A failure here keeps the walkaway…, _reviewed(), _screen_readings(), _size(), _verify_questions() (+23 more)
 
 ### Community 122 - "properties"
 Cohesion: 0.05
@@ -736,20 +739,20 @@ Cohesion: 0.27
 Nodes (8): _hidden(), record(), _redact(), Audit lines for Bedrock and Jev stay free of secrets and request bodies., test_bedrock_respond_appends_status_without_the_body(), test_jev_exchange_records_status_without_the_key(), test_record_drops_secret_names_and_configured_values(), test_record_is_silent_until_the_log_path_is_set()
 
 ### Community 128 - "frames.py"
-Cohesion: 0.14
-Nodes (20): _clean_title(), extract_frame(), frame_times(), merge_readings(), _norm(), _overlap(), _quality(), Cleaner is better, then fuller: the fewest unreadable marks, then the most text. (+12 more)
+Cohesion: 0.15
+Nodes (19): _clean_title(), frame_times(), merge_readings(), _norm(), _overlap(), _quality(), Cleaner is better, then fuller: the fewest unreadable marks, then the most text., readings: (frame time ms, validated frame object) in time order. (+11 more)
 
 ### Community 129 - "meeting.screen_use.v1.json"
 Cohesion: 0.06
 Nodes (31): additionalProperties, description, anyOf, $id, maxLength, minLength, type, additionalProperties (+23 more)
 
-### Community 130 - "._run_meeting"
-Cohesion: 0.19
-Nodes (5): True once a person stopped the reindex that is (still) running on this row., Turn the meeting's uploaded reference files into a library the agents can read.…, Say on the row that the documents were not read, so nobody assumes the analysis…, What a person decided about voices outranks a fresh run: merges are replayed on…, _reindex_stopped()
+### Community 130 - "Port"
+Cohesion: 0.11
+Nodes (12): HTTPS adapter. respond() and invoke() match the worker client contracts., Transport, Port, True once a person stopped the reindex that is (still) running on this row., Ledger the MCP server calls. Analysis stays in loop.quality.run., Signed upload targets for reference files. The keys are minted here under…, The context block a new meeting row carries; called with the lock held., Turn the meeting's uploaded reference files into a library the agents can read.… (+4 more)
 
 ### Community 131 - "ContextLibrary"
-Cohesion: 0.13
-Nodes (20): ContextDoc, ContextLibrary, headings_of(), _marks(), _passages(), What travels in a prompt: the purpose, the index and the rules for reading it.…, The read_context tool for the agent loop: arguments in, one bounded result out…, (offset of the heading line, title) for every heading, in order. (+12 more)
+Cohesion: 0.14
+Nodes (18): ContextDoc, ContextLibrary, headings_of(), _marks(), _passages(), What travels in a prompt: the purpose, the index and the rules for reading it.…, The read_context tool for the agent loop: arguments in, one bounded result out…, (offset of the heading line, title) for every heading, in order. (+10 more)
 
 ### Community 132 - "quotient/port.py"
 Cohesion: 0.11
@@ -761,14 +764,14 @@ Nodes (23): ConversionFailed, ConverterUnavailable, _csv_table(), _json_block(),
 
 ### Community 134 - "._save_locked"
 Cohesion: 0.18
-Nodes (10): _now(), _raise(), Record bytes a worker renderer already produced. Empty bodies are ignored., Quality entrypoint. Calls loop.quality.run and stores its gate result., Keep the newest correction per span (re-analysis replays only that) and bound…, Raise the API PortError when this module was loaded by the MCP process., A reindex that fails leaves the meeting as it was: the brief it already had is…, Run the analysis again on the same recording so a name a person has since given… (+2 more)
+Nodes (10): _now(), _raise(), Quality entrypoint. Calls loop.quality.run and stores its gate result., Keep the newest correction per span (re-analysis replays only that) and bound…, Raise the API PortError when this module was loaded by the MCP process., A reindex that fails leaves the meeting as it was: the brief it already had is…, Run the analysis again on the same recording so a name a person has since given…, Record bytes a worker renderer already produced. Empty bodies are ignored. (+2 more)
 
 ### Community 135 - "screens.ts"
 Cohesion: 0.19
 Nodes (17): buildScreenCards(), chromeLines(), cleanLines(), collapseRows(), CONTROLS, dropMenuRuns(), Highlight, highlights() (+9 more)
 
 ### Community 136 - "test_context_port.py"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (16): PortError, Exception, _files(), port(), fixture, The action-recall pass and the claim check were chosen from measured…, test_a_batch_belongs_to_one_meeting_and_unused_ones_are_capped_and_expire(), test_a_batch_belongs_to_the_subject_who_prepared_it() (+8 more)
 
 ### Community 137 - "Quotient hardening ledger"
@@ -780,8 +783,8 @@ Cohesion: 0.10
 Nodes (21): Configuration, Contributing, Data handling and privacy, Deployment, Documentation, Environment file (`.env`), How it works, Known limitations (+13 more)
 
 ### Community 139 - "markdown.tsx"
-Cohesion: 0.13
-Nodes (17): metadata, Align, alignment(), Block, blocks(), fit(), inline(), Markdown() (+9 more)
+Cohesion: 0.29
+Nodes (11): Align, alignment(), Block, blocks(), fit(), inline(), Markdown(), paragraphBlock() (+3 more)
 
 ### Community 140 - "SonicClient"
 Cohesion: 0.15
@@ -799,9 +802,13 @@ Nodes (16): build_table(), _client(), Rejects the audio of selected session numb
 Cohesion: 0.18
 Nodes (17): base_media_type(), bucket_name(), _client(), context_allowed(), context_extension(), context_key(), head(), media_type_allowed() (+9 more)
 
-### Community 144 - "Port"
-Cohesion: 0.10
-Nodes (23): Port, Ledger the MCP server calls. Analysis stays in loop.quality.run., Signed upload targets for reference files. The keys are minted here under…, The context block a new meeting row carries; called with the lock held., A signed PUT for one browser upload, or None when object storage is not…, Size and type of an uploaded object (None when it is missing)., _port_module(), _port_type() (+15 more)
+### Community 144 - "test_port_persistence.py"
+Cohesion: 0.22
+Nodes (17): _port_module(), _port_type(), _presign_keys(), test_a_ledger_that_is_damaged_or_the_wrong_shape_is_refused_and_left_exactly_as_found(), test_a_rejected_sign_in_gets_an_actionable_sentence(), test_a_restart_loop_cannot_resume_the_same_meeting_forever(), test_aws_playback_signs_the_submitted_key_without_probing(), test_checkpoint_keys_are_scoped_by_subject_so_one_tenant_cannot_replay_anothers_analysis() (+9 more)
+
+### Community 145 - "JobBoard"
+Cohesion: 0.23
+Nodes (5): JobBoard, _not_ready(), _now(), _public_upload(), Size and type of an uploaded object (None when it is missing).
 
 ### Community 146 - "review.tsx"
 Cohesion: 0.17
@@ -812,16 +819,16 @@ Cohesion: 0.22
 Nodes (16): contentForSchema(), EXTENSION_TYPES, fileFacts(), findUpload(), isHttp(), mediaTypeOf(), parseParts(), Part (+8 more)
 
 ### Community 148 - "test_flow_safety.py"
-Cohesion: 0.20
-Nodes (9): _public_failure(), BaseException, port(), fixture, _span(), test_a_long_recording_with_nothing_transcribed_fails_instead_of_publishing_as_ready(), test_a_second_process_cannot_open_the_same_meeting_store(), test_cancel_refuses_a_meeting_that_already_finished() (+1 more)
+Cohesion: 0.15
+Nodes (13): NoSpeech, The recording is long enough to hold speech but nothing was transcribed., A recording with nothing transcribed must fail, not publish as ready with every…, _require_speech(), _public_failure(), BaseException, port(), fixture (+5 more)
 
 ### Community 149 - "digest.py"
-Cohesion: 0.11
-Nodes (21): claim_rows(), _clean(), _clean_item(), _due(), _due_supported(), _has_quantity(), True when the figure reads as at least one number the span can be checked for;…, Compact transcript rows for the digest payload: id, m:ss, speaker label, text. (+13 more)
+Cohesion: 0.15
+Nodes (14): _clean(), _clean_item(), _due(), _due_supported(), The on_screen payload: one row per distinct screen, in time order. A screen…, A weekday or month in a due phrase has to be in the lines it came from (or the…, Same data with every list a list of objects and every id a string, whatever the…, screen_rows() (+6 more)
 
 ### Community 150 - "test_context.py"
-Cohesion: 0.23
-Nodes (15): download(), FileNotFoundError, The stored object is bigger than the caller allows., Copy an uploaded object to a private temporary file and return its path. With…, TooLarge, skipif, _items(), test_a_conversion_cached_before_the_cleaning_rule_is_cleaned_when_it_is_read_back() (+7 more)
+Cohesion: 0.21
+Nodes (16): download(), FileNotFoundError, The stored object is bigger than the caller allows., Copy an uploaded object to a private temporary file and return its path. With…, TooLarge, skipif, _items(), test_a_conversion_cached_before_the_cleaning_rule_is_cleaned_when_it_is_read_back() (+8 more)
 
 ### Community 151 - "overlap.py"
 Cohesion: 0.23
@@ -844,8 +851,8 @@ Cohesion: 0.22
 Nodes (12): clean(), Printable text with tidy spacing, capped; the flag says whether it was cut., _cache_path(), _evict(), load_library(), Path, Converted text is cached per person: identical bytes from someone else must not…, (library, items with status/reason/chars/summary filled in). (+4 more)
 
 ### Community 156 - "graph/screenuse.py"
-Cohesion: 0.27
-Nodes (11): _clock(), batches(), _clip(), _line(), One checked reading per screen. A failed batch leaves the others; a failed pass…, Heading plus the tail. Totals on a record sit after the rows, so a head-only…, Payloads of at most BATCH screens, each with the lines the model is allowed to…, read_screens() (+3 more)
+Cohesion: 0.18
+Nodes (15): _clock(), Compact transcript rows for the digest payload: id, m:ss, speaker label, text., transcript_lines(), batches(), _clip(), _line(), One checked reading per screen. A failed batch leaves the others; a failed pass…, Heading plus the tail. Totals on a record sit after the rows, so a head-only… (+7 more)
 
 ### Community 157 - "summary"
 Cohesion: 0.14
@@ -867,13 +874,13 @@ Nodes (12): enum, type, content_type, summary, title, items, maxItems, minItems 
 Cohesion: 0.49
 Nodes (10): ground_screen_uses(), Keep a reading only when its screen was in this pack, its citations were shown,…, _pack(), _screen(), _span(), test_a_citation_outside_the_screen_window_is_removed_and_a_difference_needs_one(), test_a_difference_with_no_remaining_citation_is_cleared_and_the_reading_stays(), test_a_figure_that_is_neither_on_the_screen_nor_in_a_cited_line_drops_the_reading() (+2 more)
 
-### Community 162 - "test_visual_scan.py"
-Cohesion: 0.14
-Nodes (12): artifact_dir(), artifact_key(), ArtifactCache, Path, Contiguous windows of about window_ms covering the whole recording. A tail…, window_parts(), reply(), test_artifact_cache_round_trips_and_isolates_owner_and_audio() (+4 more)
+### Community 162 - "ArtifactCache"
+Cohesion: 0.27
+Nodes (5): artifact_dir(), artifact_key(), ArtifactCache, Path, test_artifact_cache_round_trips_and_isolates_owner_and_audio()
 
 ### Community 163 - ".__init__"
-Cohesion: 0.24
-Nodes (8): _load_file(), Path, _load_entrypoints(), load_port(), _load_seed(), Path, Media entrypoint: ffprobe kind plus the model plan. Extensions are not used., One process owns the meeting store. Two writers would each rewrite the whole…
+Cohesion: 0.27
+Nodes (6): _load_entrypoints(), load_port(), _load_seed(), Path, Media entrypoint: ffprobe kind plus the model plan. Extensions are not used., One process owns the meeting store. Two writers would each rewrite the whole…
 
 ### Community 164 - "TranscriptCache"
 Cohesion: 0.22
@@ -887,21 +894,21 @@ Nodes (11): Do not do, How to score it (same method as Rounds 12 and 13, so numb
 Cohesion: 0.18
 Nodes (11): `accept_action`, `cancel_meeting`, `get_meeting`, `merge_speakers`, `prepare_context`, `read_graph`, `read_span`, `revise_speaker` (+3 more)
 
-### Community 167 - "sonic/client.py"
-Cohesion: 0.16
-Nodes (16): KeepInterval, map_sample_range(), _merge(), ms_to_samples(), source_ms_of_sample(), bind_samples(), _content(), _H2Error (+8 more)
-
-### Community 168 - "Session"
+### Community 167 - "Session"
 Cohesion: 0.11
 Nodes (6): CountingTransport, ExpiringTransport, Answers HTTP 403 until its credentials are refreshed, like a session token that…, A transport that records how many sessions were opened and can fail from a…, RejectingSession, Session
+
+### Community 168 - "next"
+Cohesion: 0.25
+Nodes (4): dynamic, metadata, metadata, next
 
 ### Community 169 - "home-loader.tsx"
 Cohesion: 0.21
 Nodes (11): HomeLoader, HomeObject, HomeLoader(), readColor(), RINGS, Satellite, buildStars(), HomeObject() (+3 more)
 
-### Community 170 - "public/jobs.py"
-Cohesion: 0.10
-Nodes (13): default_path(), Disk, Path, Motivation vs Logic Motivation: An offline computer still has to remember the…, _aws(), FileJobs, _job_item(), load_board() (+5 more)
+### Community 170 - "assemble"
+Cohesion: 0.24
+Nodes (14): assemble(), classify_file(), classify_streams(), model_plan(), probe(), Path, readable_duration_ms(), extract_frame() (+6 more)
 
 ### Community 171 - "Quotient — Repository Architecture"
 Cohesion: 0.15
@@ -919,9 +926,9 @@ Nodes (9): metadata, formatTool(), McpScreen(), originSubscribe(), phaseLabel(),
 Cohesion: 0.32
 Nodes (7): env_value(), fail(), QUOTIENT_MEDIA_BUCKET, QUOTIENT_S3_ACCESS_KEY_ID, QUOTIENT_S3_ENDPOINT_URL, QUOTIENT_S3_SECRET_ACCESS_KEY, start-local-minio.sh script
 
-### Community 176 - "dependencies"
-Cohesion: 0.29
-Nodes (7): dependencies, lucide-react, mermaid, next, react, react-dom, three
+### Community 176 - "PegasusClient"
+Cohesion: 0.21
+Nodes (8): PegasusClient, Contiguous windows of about window_ms covering the whole recording. A tail…, window_parts(), reply(), test_one_unreadable_window_becomes_a_note_and_the_rest_still_count(), test_strict_mode_still_raises(), test_windows_cover_the_recording_and_fold_a_short_tail(), Transport
 
 ### Community 177 - "contracts/schemas/meeting.digest_review.v1.json"
 Cohesion: 0.29
@@ -964,8 +971,8 @@ Cohesion: 0.54
 Nodes (6): _Port, _seed(), test_a_missing_seed_object_installs_nothing(), test_a_non_list_and_an_oversized_document_are_skipped(), test_a_seed_document_is_installed_and_a_damaged_one_is_skipped(), test_install_keeps_an_existing_meeting_and_drops_export_bytes()
 
 ### Community 187 - "resources.py"
-Cohesion: 0.30
-Nodes (11): is_text(), mime_for(), _content(), _json_block(), meeting_uris(), _parse(), Motivation vs Logic Motivation: Partners read the graph, the published brief,…, read_resource() (+3 more)
+Cohesion: 0.16
+Nodes (26): is_text(), mime_for(), error(), JSON-RPC error codes used by the Quotient MCP endpoint., result(), decode_cursor(), encode_cursor(), Opaque cursors for MCP list methods. (+18 more)
 
 ### Community 188 - "Benchmark results"
 Cohesion: 0.40
@@ -988,8 +995,8 @@ Cohesion: 0.50
 Nodes (4): Blind rubric evaluation (independent Haiku evaluators; each writes its own 8 key points from the full transcript first), Defects found (all verified) and fixed, New capability, Round 3: from evidence dump to a walkaway (2026-10-08/09)
 
 ### Community 195 - "public.py"
-Cohesion: 0.39
-Nodes (14): _auth(), _finish(), Integration key and /v1 job contract., _recording(), _stack(), test_a_bad_output_spec_is_rejected_before_an_upload_target(), test_a_key_never_expires_and_a_revoked_key_is_rejected(), test_a_portal_token_reads_keys_from_a_remote_peer_and_a_wrong_token_does_not() (+6 more)
+Cohesion: 0.29
+Nodes (15): _auth(), _finish(), Integration key and /v1 job contract., _recording(), _stack(), test_a_bad_output_spec_is_rejected_before_an_upload_target(), test_a_key_never_expires_and_a_revoked_key_is_rejected(), test_a_portal_token_reads_keys_from_a_remote_peer_and_a_wrong_token_does_not() (+7 more)
 
 ### Community 197 - "metadata.py"
 Cohesion: 0.29
@@ -1267,13 +1274,13 @@ Nodes (3): value, minLength, type
 Cohesion: 0.67
 Nodes (3): what, minLength, type
 
-### Community 276 - "ValueError"
-Cohesion: 0.35
-Nodes (9): _analysis(), _context(), _media(), _outputs(), parse_job(), project_result(), Motivation vs Logic Motivation: A caller chooses a raw transcript, analysis…, _safe_key() (+1 more)
+### Community 276 - "public/project.py"
+Cohesion: 0.31
+Nodes (8): _analysis(), _context(), _media(), _outputs(), parse_job(), project_result(), Motivation vs Logic Motivation: A caller chooses a raw transcript, analysis…, _safe_key()
 
-### Community 277 - "settings.tsx"
-Cohesion: 0.14
-Nodes (7): metadata, metadata, ApiKeyRecord, IntegrationKey(), LoadedField, Settings(), next
+### Community 277 - "skills.tsx"
+Cohesion: 0.22
+Nodes (5): metadata, Skill, Skills(), TIPS, SkillSummary
 
 ### Community 278 - "Architecture gaps and discrepancies"
 Cohesion: 0.17
@@ -1281,7 +1288,7 @@ Nodes (12): Architecture gaps and discrepancies, G10 — Orphan / unused worker 
 
 ### Community 280 - "test_media.py"
 Cohesion: 0.13
-Nodes (19): apply_omissions(), IndexedSpan, payload_duration_ms(), source_duration_ms(), frame_metrics(), idle_spans(), IdleSpan, OpenCV frame-delta and Bhattacharyya histogram distance. Imported only when… (+11 more)
+Nodes (19): NoAudioTrack, The recording has no audio stream, so there is nothing to transcribe., frame_metrics(), idle_spans(), IdleSpan, OpenCV frame-delta and Bhattacharyya histogram distance. Imported only when…, ffmpeg_pcm_args(), Path (+11 more)
 
 ### Community 281 - "Quotient API"
 Cohesion: 0.20
@@ -1299,25 +1306,25 @@ Nodes (3): cited_ids(), main(), Motivation vs Logic Motivation: Blind scoring sa
 Cohesion: 0.18
 Nodes (11): Execution traces, Trace T10 — Staging ECS (documented gap), Trace T1 — Local boot, Trace T2 — MCP `submit_meeting` (portal upload), Trace T3 — MCP `submit_meeting` (derivatives CLI path), Trace T4 — Quality loop (single analysis run), Trace T5 — Ingest / media parallel path, Trace T6 — MCP `read_graph` / resources (+3 more)
 
-### Community 287 - "test_one_open_span_is_not_coarse_and_raw_text_is_immutable"
+### Community 287 - "settings.tsx"
+Cohesion: 0.20
+Nodes (5): metadata, ApiKeyRecord, IntegrationKey(), LoadedField, Settings()
+
+### Community 288 - "test_ingest_upload.py"
+Cohesion: 0.18
+Nodes (5): Checkpointed quality loop. A replay of the same idempotency key returns the…, parametrize, test_local_s3_video_ingest_records_skipped_visual_analysis(), test_pegasus_parts_go_to_the_aws_bucket_when_media_is_on_minio(), test_upload_failure_is_actionable_without_leaking_cli_output()
+
+### Community 289 - "test_one_open_span_is_not_coarse_and_raw_text_is_immutable"
 Cohesion: 0.25
 Nodes (5): FakeClock, pytest_raises_immutable(), test_handoff_writes_a_seam_and_carries_text_history(), test_one_open_span_is_not_coarse_and_raw_text_is_immutable(), Transport
-
-### Community 288 - "limits.py"
-Cohesion: 0.27
-Nodes (8): pegasus_output_tokens(), Tokens for one window. Short windows use the vendor floor. Long windows stop at…, build_body(), pack_scenes(), test_length_continuation_discards_the_partial_object(), test_output_budget_stays_inside_the_vendor_card_and_times_must_sit_inside_the_part(), test_scene_parts_stay_inside_the_output_window(), Transport
-
-### Community 289 - "keys/route.ts"
-Cohesion: 0.40
-Nodes (9): dynamic, forward(), GET(), localRequest(), loopbackHost(), POST(), siteRequest(), deployment() (+1 more)
 
 ### Community 290 - ".wrap"
 Cohesion: 0.25
 Nodes (7): _blob_header(), _encode_frame_raw(), _EventSigner, _open_h2(), Chains the HTTP signature into each Sonic event. The secret is not logged., _signing_key(), _streaming_headers()
 
 ### Community 291 - "diarize_pcm"
-Cohesion: 0.53
-Nodes (5): diarize_pcm(), _kill_group(), Path, _python(), Speaker turns for 16 kHz mono 16-bit PCM, or None when diarization is…
+Cohesion: 0.31
+Nodes (8): attach_speakers(), diarize_pcm(), _kill_group(), Path, _python(), Give each speech span the speaker who talks longest inside it; mark spans with…, Speaker turns for 16 kHz mono 16-bit PCM, or None when diarization is…, test_speakers_attach_by_largest_overlap_and_mark_shared_spans()
 
 ### Community 292 - "Architectural layers"
 Cohesion: 0.33
@@ -1331,17 +1338,13 @@ Nodes (3): _timestamp_header(), datetime, Submit one media object to the local Q
 Cohesion: 0.25
 Nodes (7): _cached_tokens(), _function_calls(), _output_text(), Responses function_call items. Arguments stay a JSON object; a bad blob is…, _strip_fence(), test_function_call_arguments_parse_and_bad_json_is_dropped(), test_output_text_keeps_the_last_message()
 
-### Community 296 - "_permanent"
-Cohesion: 0.67
-Nodes (3): _permanent(), BaseException, Configuration failures must fail the meeting, not turn into "not transcribed".
+### Community 297 - "map_ordered"
+Cohesion: 0.33
+Nodes (5): map_ordered(), width(), PegasusResult, R, T
 
-### Community 297 - "_digest"
-Cohesion: 0.12
-Nodes (18): _digest(), _leaks(), Commentary about the transcript itself. Positional wording needs a speaker in…, Remove every clause or sentence that talks about the transcript itself; keep…, Clean one row in place. False when its main text was nothing but such…, Re-check the worker's grounded digest against this meeting's spans before…, _unleak(), _unleak_row() (+10 more)
-
-### Community 298 - "guard.ts"
-Cohesion: 0.57
-Nodes (5): hostName(), jsonContent(), LOOPBACK, safeToMutate(), trustedOrigin()
+### Community 298 - "summary"
+Cohesion: 0.33
+Nodes (6): summary(), test_failed_meetings_report_a_sanitised_reason_and_old_leaky_rows_are_masked(), test_meeting_summary_keeps_the_last_analysis_phase_after_restart(), test_summary_names_the_task_that_uploaded_the_recording_so_a_client_can_tie_its_own_submission_to_it(), test_summary_offers_a_readable_source_name_but_never_a_path_or_generated_copy_name(), test_the_context_block_never_carries_storage_keys_or_batch_ids()
 
 ### Community 299 - "._post"
 Cohesion: 0.33
@@ -1355,20 +1358,28 @@ Nodes (5): _auth_headers(), bearer_token(), _container_credentials(), iam_creden
 Cohesion: 0.47
 Nodes (4): _send_all(), test_send_all_gives_up_after_its_deadline(), test_send_all_waits_for_a_busy_non_blocking_socket_instead_of_failing(), test_send_all_waits_for_readability_when_tls_needs_to_read_first()
 
+### Community 302 - "IndexedSpan"
+Cohesion: 0.73
+Nodes (5): apply_omissions(), IndexedSpan, payload_duration_ms(), source_duration_ms(), test_compaction_never_drops_overlap_and_keeps_the_index()
+
+### Community 304 - "_permanent"
+Cohesion: 0.67
+Nodes (3): _permanent(), BaseException, Configuration failures must fail the meeting, not turn into "not transcribed".
+
 ## Knowledge Gaps
 - **1019 isolated node(s):** `quotient-api`, `dynamic`, `dynamic`, `metadata`, `RELEASE` (+1014 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1522 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **41 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
+- **Why does `Port` connect `Port` to `.__init__`, `quotient/port.py`, `Registry`, `._save_locked`, `mcp/tools.py`, `test_context_port.py`, `test_media_robustness.py`, `resolve_visual`, `test_port_persistence.py`, `SchemaRejected`, `JobBoard`, `test_flow_safety.py`, `_port`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **Why does `Table` connect `sandbox.py` to `MeetingCompute`?**
   _High betweenness centrality (0.014) - this node is a cross-community bridge._
-- **Why does `Port` connect `Port` to `ingest.py`, `.__init__`, `quotient/port.py`, `._run_meeting`, `._save_locked`, `Registry`, `mcp/tools.py`, `test_context_port.py`, `test_media_robustness.py`, `resolve_visual`, `SchemaRejected`, `test_flow_safety.py`, `_port`?**
-  _High betweenness centrality (0.014) - this node is a cross-community bridge._
 - **Why does `MeetingTables` connect `MeetingCompute` to `cluster.py`, `stack.py`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
+  _High betweenness centrality (0.014) - this node is a cross-community bridge._
 - **Are the 17 inferred relationships involving `Port` (e.g. with `Reasoner` and `Transport`) actually correct?**
   _`Port` has 17 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 16 inferred relationships involving `MemoryPort` (e.g. with `PortError` and `test_brief_withholds_unresolved_claims_and_captions_use_source_time()`) actually correct?**
