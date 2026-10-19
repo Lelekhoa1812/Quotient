@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.quotient.axion/schemas/meeting.identity.fuse.v1.json",
+  "title": "IdentityFuseResult",
+  "description": "Multi-modal fusion result resolving speaker identities and voice merges across video, audio, and transcript signals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["identities", "merges"],
+  "properties": {
+    "identities": {
+      "type": "array",
+      "description": "Resolved identities for each active speaker voice hypothesis.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["voice_id", "name", "confidence", "reasoning"],
+        "properties": {
+          "voice_id": {
+            "type": "string",
+            "description": "The diarization voice hypothesis id (e.g. spk_0, spk_3, spk_5)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The resolved human name of this speaker."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score between 0.0 and 1.0."
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Brief explanation of how the visual, audio, or dialogue signals were fused."
+          }
+        }
+      }
+    },
+    "merges": {
+      "type": "array",
+      "description": "Pairs of voice hypotheses that represent the same individual and should be merged.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keep_voice_id", "merge_voice_id", "reason"],
+        "properties": {
+          "keep_voice_id": {
+            "type": "string",
+            "description": "The primary voice ID that should be kept (typically the one with more speech time)."
+          },
+          "merge_voice_id": {
+            "type": "string",
+            "description": "The duplicate voice ID that should be merged into keep_voice_id."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why these two voices represent the same person."
+          }
+        }
+      }
+    }
+  }
+}

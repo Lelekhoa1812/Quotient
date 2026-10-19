@@ -22,8 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/api apps/api
 COPY apps/worker apps/worker
 COPY contracts contracts
-RUN mkdir -p /tmp/quotient \
-    && useradd --create-home --uid 10001 quotient \
+COPY cache/transcripts/ /tmp/quotient/
+COPY cache/artifacts/ /tmp/quotient/artifacts/
+RUN useradd --create-home --uid 10001 quotient \
     && chown -R quotient:quotient /app /tmp/quotient
 USER quotient
 ENV PYTHONUNBUFFERED=1 \

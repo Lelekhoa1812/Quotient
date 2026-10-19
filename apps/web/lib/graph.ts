@@ -347,7 +347,8 @@ function parseSpan(value: unknown): Span | null {
     session_id: asString(record.session_id),
     seam: record.seam === true,
     speaker_hypothesis_id: asString(record.speaker_hypothesis_id),
-    speaker_label: asString(record.speaker_display) ?? asString(record.speaker_label) ?? asString(record.display_name),
+    speaker_label: asString(record.speaker_label),
+    speaker_display: asString(record.speaker_display) ?? asString(record.display_name),
     speaker_identity: asString(record.speaker_identity)?.trim() || null,
   };
 }

@@ -251,8 +251,17 @@ export function Workspace({ meetingId }: { meetingId: string }) {
     const name = displayName.trim();
     const voice = anchor.speaker_hypothesis_id;
     const labelOf = (span: Span) => (span.speaker_hypothesis_id && names.get(span.speaker_hypothesis_id)) || speakerName(null, span.speaker_hypothesis_id);
+    const nameLower = name.toLowerCase();
+    let otherVoiceId: string | undefined;
+    for (const [id, n] of names.entries()) {
+      if (id !== voice && n.trim().toLowerCase() === nameLower) {
+        otherVoiceId = id;
+        break;
+      }
+    }
     const other = voice
-      ? graph.spans.find((span) => span.speaker_hypothesis_id && span.speaker_hypothesis_id !== voice && labelOf(span).toLowerCase() === name.toLowerCase())
+      ? (otherVoiceId ? graph.spans.find((span) => span.speaker_hypothesis_id === otherVoiceId) : undefined) ??
+        graph.spans.find((span) => span.speaker_hypothesis_id && span.speaker_hypothesis_id !== voice && labelOf(span).toLowerCase() === nameLower)
       : undefined;
     if (!voice || !other) return run(() => mcp.reviseSpeaker(meetingId, anchor.id, "hypothesis", name));
     return new Promise<void>((resolve) => setClash({ name, anchor, other, resolve }));
@@ -267,7 +276,12 @@ export function Workspace({ meetingId }: { meetingId: string }) {
       return;
     }
     if (choice === "merge") {
-      current.resolve(run(() => mcp.mergeSpeakers(meetingId, current.anchor.id, current.other.id, current.name)));
+      const anchorCount = graph.spans.filter((s) => s.speaker_hypothesis_id === current.anchor.speaker_hypothesis_id).length;
+      const otherCount = graph.spans.filter((s) => s.speaker_hypothesis_id === current.other.speaker_hypothesis_id).length;
+      const [keepSpan, goneSpan] = anchorCount >= otherCount
+        ? [current.anchor, current.other]
+        : [current.other, current.anchor];
+      current.resolve(run(() => mcp.mergeSpeakers(meetingId, keepSpan.id, goneSpan.id, current.name)));
       return;
     }
     const differName = /\(ex\)$/i.test(current.name) ? current.name : `${current.name} (ex)`;

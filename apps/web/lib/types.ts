@@ -56,6 +56,8 @@ export type Span = {
   speaker_hypothesis_id: string | null;
   /** A name a person typed for this line's voice. */
   speaker_label: string | null;
+  /** The overall display name for this line's voice. */
+  speaker_display?: string | null;
   /** The name the analysis gave this voice (from the picture or from what was said); never a typed one. */
   speaker_identity: string | null;
 };

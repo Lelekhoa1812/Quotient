@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from identity.resolve import clean_name, reconcile, resolve_visual, same_person
+from identity.resolve import Identity, clean_name, reconcile, resolve_visual, same_person
 
 
 @dataclass
@@ -138,3 +138,100 @@ def test_a_mark_that_never_lets_up_names_nobody():
     intervals = turns((0, 200, "spk_2"), (200, 240, "spk_3"), (240, 420, "spk_2"))
     found, merges = resolve_visual(intervals, [S("a", "Ly Ho", True, 0, 420_000)])
     assert found == [] and merges == []
+
+
+def test_similar_names_cross_voice_merging():
+    from identity.resolve import clean_partial_name, fuse_identities_model
+    # Truncated names on video tiles are recovered
+    assert clean_partial_name("Bill Kolla...") == "Bill Kolla"
+    assert clean_partial_name("Rafi Must…") == "Rafi Must"
+
+    # Cross-voice: spk_5 has audio name 'Bill', spk_8 has visual name 'Bill Kollatos'
+    intervals = turns((0, 100, "spk_5"), (110, 130, "spk_8"))
+    visual = [
+        Identity("spk_8", "Bill Kollatos", "visual", 0.9, seconds=20.0),
+        Identity("spk_3", "Liam Le", "visual", 0.9, seconds=50.0),
+    ]
+    audio = {"spk_5": "Bill", "spk_7": "Liam"}
+    merges_out = []
+    out = reconcile(visual, audio, {}, intervals=intervals, merges_out=merges_out)
+    
+    # Bill (spk_5) and Bill Kollatos (spk_8) are merged into one canonical Bill Kollatos
+    assert out["spk_8"].name == "Bill Kollatos"
+    assert out["spk_5"].name == "Bill Kollatos"
+    # spk_8 is merged into spk_5 or vice versa
+    assert ("spk_8", "spk_5") in merges_out or ("spk_5", "spk_8") in merges_out
+
+    # Liam Le (spk_3) and Liam (spk_7) are merged
+    assert out["spk_3"].name == "Liam Le"
+    assert out["spk_7"].name == "Liam Le"
+    assert ("spk_3", "spk_7") in merges_out or ("spk_7", "spk_3") in merges_out
+
+
+def test_fuse_identities_model_fallback():
+    from identity.resolve import fuse_identities_model
+    intervals = turns((0, 50, "spk_0"), (60, 90, "spk_1"))
+    spans = [
+        {"speaker_hypothesis_id": "spk_0", "text": "hello this is bill from engineering"},
+        {"speaker_hypothesis_id": "spk_1", "text": "thanks bill this is liam"},
+    ]
+    sightings = [S("a", "Bill Kollatos", True, 0, 50_000)]
+    identities, merges = fuse_identities_model(spans, sightings, intervals, locked_names={"spk_1": "Liam Le"})
+    assert identities["spk_0"].name == "Bill Kollatos"
+    assert identities["spk_1"].name == "Liam Le"
+
+
+def test_kollab_real_video_identity_resolution():
+    from identity.resolve import same_person, longer_form, reconcile, Identity
+
+    # 1. Phonetic matching between Vietnamese / English pronunciation: 'Lee' and 'Ly Ho'
+    assert same_person("Lee", "Ly Ho") is True
+    assert same_person("Ly", "Lee") is True
+    assert same_person("Bill", "William Kollatos") is True
+    assert same_person("Liam", "Liam Le") is True
+    assert longer_form("Lee", "Ly Ho") == "Ly Ho"
+    assert longer_form("Bill", "Bill Kollatos") == "Bill Kollatos"
+
+    # 2. Real kollab.mp4 scenario:
+    # spk_5 spoke for 3290s ('Bill' in audio)
+    # spk_10 was sighted in visual scan ('Bill Kollatos', 65s)
+    # spk_3 spoke for 2260s ('Liam' in audio)
+    # spk_0 was sighted in visual scan ('Liam Le')
+    # spk_4 spoke for 970s ('Lee' in audio, tile 'Ly Ho')
+    intervals = turns(
+        (0, 3290, "spk_5"),
+        (3290, 3355, "spk_10"),
+        (3355, 5615, "spk_3"),
+        (5615, 6585, "spk_4"),
+    )
+    visual = [
+        Identity("spk_10", "Bill Kollatos", "visual", 0.944, seconds=65.0),
+        Identity("spk_0", "Liam Le", "visual", 1.0, seconds=20.0),
+        Identity("spk_4", "Ly Ho", "visual", 0.9, seconds=50.0),
+    ]
+    audio = {
+        "spk_5": "Bill",
+        "spk_3": "Liam",
+        "spk_4": "Lee",
+    }
+    merges_out = []
+    resolved = reconcile(visual, audio, {}, intervals=intervals, merges_out=merges_out)
+
+    # Main speaking voice (spk_5) stays primary head with full canonical name
+    assert resolved["spk_5"].name == "Bill Kollatos"
+    assert resolved["spk_5"].source == "visual+audio"
+    assert resolved["spk_5"].confidence >= 0.9
+    assert "spk_10" in resolved["spk_5"].merged
+    assert ("spk_5", "spk_10") in merges_out
+
+    # Main speaking voice (spk_3) stays primary head with full canonical name
+    assert resolved["spk_3"].name == "Liam Le"
+    assert resolved["spk_3"].source == "visual+audio"
+    assert resolved["spk_3"].confidence == 1.0
+    assert "spk_0" in resolved["spk_3"].merged
+    assert ("spk_3", "spk_0") in merges_out
+
+    # spk_4 resolves phonetic homophone 'Lee' and 'Ly Ho'
+    assert resolved["spk_4"].name == "Ly Ho"
+    assert resolved["spk_4"].source == "visual+audio"
+

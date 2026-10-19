@@ -26,6 +26,7 @@ import { buildScreenCards } from "@/lib/screens";
 import { buildStoryline, topicIndex } from "@/lib/storyline";
 import { durationText, percentText, readable, speakerName } from "@/lib/present";
 import type { ActionItem, Claim, ContextUse, IdentityState, MeetingContext, ScreenView, Span, SynthesisSentence, VoiceIdentity } from "@/lib/types";
+import { talkTime, type TalkTimeRow } from "@/lib/voices";
 
 const TYPE_LABEL: Record<string, string> = {
   meeting: "Meeting",
@@ -386,22 +387,27 @@ export function Overview({
             <>
               <h4 className="q-subhead">Who spoke</h4>
               <ul className="q-hbars is-editable">
-                {participation.map((row) => (
-                  <li key={row.id}>
-                    <div className="q-who-line">
-                      <VoiceName id={row.id} name={row.name} locked={locked.has(row.id)} onRename={rename} />
-                      {unknownSet.has(row.id) && onIdentify ? <UnknownVoiceButton label={row.name} onOpen={() => onIdentify(row.id)} /> : null}
-                      {!locked.has(row.id) && identities[row.id] ? (
-                        <span className="q-faint q-from" title={identities[row.id].conflict ? `The ${identities[row.id].source.includes("visual") ? "audio" : "video"} suggested "${identities[row.id].conflict}" instead.` : undefined}>
-                          {identities[row.id].source === "audio" ? "named in the talk" : identities[row.id].source === "user" ? "" : "named from the video"}
-                          {identities[row.id].conflict ? " · check" : ""}
-                        </span>
-                      ) : null}
-                    </div>
-                    <strong className="q-num">{percentText(row.share)}</strong>
-                    <span className="q-hbar-track" aria-hidden="true"><span className="q-hbar-fill" style={{ width: `${row.share * 100}%` }} /></span>
-                  </li>
-                ))}
+                {participation.map((row) => {
+                  const isLocked = row.voiceIds.some((vId) => locked.has(vId));
+                  const isUnknown = row.voiceIds.some((vId) => unknownSet.has(vId));
+                  const matchedIdent = identities[row.id] ?? row.voiceIds.map((vId) => identities[vId]).find(Boolean);
+                  return (
+                    <li key={row.id}>
+                      <div className="q-who-line">
+                        <VoiceName id={row.id} name={row.name} locked={isLocked} onRename={rename} />
+                        {isUnknown && onIdentify ? <UnknownVoiceButton label={row.name} onOpen={() => onIdentify(row.id)} /> : null}
+                        {!isLocked && matchedIdent ? (
+                          <span className="q-faint q-from" title={matchedIdent.conflict ? `The ${matchedIdent.source.includes("visual") ? "audio" : "video"} suggested "${matchedIdent.conflict}" instead.` : undefined}>
+                            {matchedIdent.source === "audio" ? "named in the talk" : matchedIdent.source === "user" ? "" : "named from the video"}
+                            {matchedIdent.conflict ? " · check" : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                      <strong className="q-num">{percentText(row.share)}</strong>
+                      <span className="q-hbar-track" aria-hidden="true"><span className="q-hbar-fill" style={{ width: `${row.share * 100}%` }} /></span>
+                    </li>
+                  );
+                })}
               </ul>
               <p className="q-faint">Speakers are told apart automatically, using the video when it shows names. Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
             </>
@@ -498,18 +504,7 @@ function Section({ id, icon, title, children }: { id?: string; icon: ReactNode; 
 }
 
 
-function talkTime(spans: Span[], names: Map<string, string>): { id: string; name: string; share: number }[] {
-  const totals = new Map<string, number>();
-  for (const span of spans) {
-    if (span.kind !== "speech" || !span.speaker_hypothesis_id || span.start_ms === null || span.end_ms === null) continue;
-    totals.set(span.speaker_hypothesis_id, (totals.get(span.speaker_hypothesis_id) ?? 0) + Math.max(0, span.end_ms - span.start_ms));
-  }
-  const sum = [...totals.values()].reduce((left, right) => left + right, 0);
-  if (sum <= 0) return [];
-  return [...totals.entries()]
-    .map(([id, ms]) => ({ id, name: names.get(id) ?? speakerName(null, id), share: ms / sum }))
-    .sort((left, right) => right.share - left.share);
-}
+export { talkTime, type TalkTimeRow } from "@/lib/voices";
 
 function groupBySpeaker(items: Digest["perspectives"]): { speaker: string | null; items: Digest["perspectives"] }[] {
   const groups = new Map<string | null, Digest["perspectives"]>();

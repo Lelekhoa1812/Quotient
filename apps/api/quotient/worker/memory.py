@@ -152,6 +152,18 @@ class MemoryPort:
                 anchor["speaker_hypothesis_id"] = "hyp_" + secrets.token_urlsafe(8)
             for span in targets:
                 span["speaker_display"] = display_name
+            if scope == "hypothesis" and hypothesis:
+                row.setdefault("speaker_names", {})[hypothesis] = display_name
+                if "identities" in row and isinstance(row["identities"], dict):
+                    target_ident = row["identities"].setdefault(hypothesis, {
+                        "name": display_name,
+                        "source": "user",
+                        "confidence": 1.0,
+                        "conflict": None,
+                        "merged": [],
+                    })
+                    target_ident["name"] = display_name
+                    target_ident["source"] = "user"
             row["revisions"].append(
                 {
                     "span_id": span_id,
@@ -191,6 +203,34 @@ class MemoryPort:
             names = row.setdefault("speaker_names", {})
             names.pop(gone, None)
             names[keep] = display_name
+
+            merges = row.setdefault("speaker_merges", {})
+            for earlier, target in list(merges.items()):
+                if target == gone:
+                    merges[earlier] = keep
+            if gone != keep:
+                merges[gone] = keep
+
+            if "identities" in row and isinstance(row["identities"], dict):
+                identities = row["identities"]
+                target_ident = identities.setdefault(keep, {
+                    "name": display_name,
+                    "source": "user",
+                    "confidence": 1.0,
+                    "conflict": None,
+                    "merged": [],
+                })
+                target_ident["name"] = display_name
+                target_ident["source"] = "user"
+                merged_list = target_ident.setdefault("merged", [])
+                if gone not in merged_list:
+                    merged_list.append(gone)
+                if gone in identities:
+                    for m in identities[gone].get("merged", []):
+                        if m not in merged_list and m != keep:
+                            merged_list.append(m)
+                    identities.pop(gone, None)
+
             row["revisions"].append(
                 {
                     "span_id": span_id,

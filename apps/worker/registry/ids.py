@@ -24,6 +24,7 @@ CHART = "meeting.chart.v1"
 REVIEW_SORT = "meeting.review_sort.v1"
 ACTION = "meeting.action.v1"
 GRAPH = "meeting.graph.v1"
+IDENTITY_FUSE = "meeting.identity.fuse.v1"
 
 LENS_ORDER = (
     "decision",

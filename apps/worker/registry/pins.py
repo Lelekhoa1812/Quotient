@@ -19,6 +19,7 @@ from registry.ids import (
     DIGEST_REVIEW,
     ANSWER_CHECK,
     SCREEN_USE,
+    IDENTITY_FUSE,
     lens_id,
 )
 
@@ -53,6 +54,7 @@ PROMPT_ROLE = {
     DISSENT: "slm",
     CHART: "slm",
     FRAME: "llm",
+    IDENTITY_FUSE: "slm",
 }
 
 for _dimension, _role in LENS_ROLE.items():

@@ -1,0 +1,56 @@
+# Motivation vs Logic
+# Motivation: Diarization splits speech into anonymous clusters (spk_0, spk_1, ...). Different acoustic moments of
+# the same person get split into distinct IDs, and names across video tiles and audio transcripts slightly differ
+# ("Bill" vs "Bill Kollatos", "Lee" vs "Ly Ho"). Rigid token heuristics either fail to merge them or merge wrong people.
+# Logic: A dedicated fusion stage combines video frame OCR sightings, transcribed speech turns, and conversational
+# cues to intelligently resolve human identities and identify voice merges.
+id: meeting.identity.fuse.v1
+version: 1
+model_role: slm
+schema: meeting.identity.fuse.v1
+cache_breakpoints:
+  - name: stable_prefix
+    after:
+      - system
+      - tools
+      - schema
+    mode: explicit
+    ttl: 30m
+stages:
+  - id: reason
+    output: text
+  - id: fill
+    output: schema
+tools: []
+input:
+  include:
+    - voices
+    - visual_sightings
+    - spoken_names
+    - user_locked
+body: |
+  You are an expert identity resolution system for video meetings. Your task is to accurately resolve the real-world human identity of each voice hypothesis and detect voice clusters that represent the same person split across multiple IDs.
+
+  Input provided:
+  - voices: List of diarized voice hypothesis IDs with their total speaking duration, turn count, and sample transcribed quotes from the meeting.
+  - visual_sightings: Participant names detected on camera tiles, shared screens, or lower-thirds in video frames, along with active-speaker indications.
+  - spoken_names: Names spoken or addressed in the audio transcript (e.g., "Thanks Liam", "Bill, can you hear us?").
+  - user_locked: Names or merges explicitly locked by a human user. These MUST be strictly honored and never contradicted.
+
+  Instructions:
+  1. Resolve Full Names Intelligently:
+     - When a voice is referred to by a nickname or first name (e.g. "Bill", "Liam", "Lee") and visual or contextual evidence shows the full name (e.g. "Bill Kollatos", "Liam Le", "Ly Ho"), assign the full, canonical display name.
+     - Do NOT use rigid string matching alone: understand conversational context, greetings, handoffs, and topic flow.
+
+  2. Detect and Merge Split Voices:
+     - Acoustic diarization often fractures one human speaker into two or more voice IDs (e.g. spk_5 and spk_8 both speaking as Bill; spk_3 and spk_7 both speaking as Liam).
+     - When evidence indicates two voice IDs are the same person (consistent name in speech/video, conversational continuation, lack of conflicting simultaneous speech), emit a merge directive:
+       - keep_voice_id: The primary voice ID (typically the one with more speech time).
+       - merge_voice_id: The secondary voice ID to fold into the primary.
+     - Never merge clearly distinct participants (e.g., two different people who converse with each other).
+
+  3. Eliminate Anonymous "Speaker N" Labels:
+     - Use all available cues—video name tiles, active-speaker indicators, self-introductions ("I'm Liam from..."), and peer address ("Hey Ly, what do you think?")—to determine who each speaker is.
+     - If evidence is partial but reasonable, provide the most likely name with an appropriate confidence score (0.0 to 1.0). Only leave a voice unnamed if there is genuinely no clue whatsoever.
+
+  Output valid JSON conforming strictly to schema meeting.identity.fuse.v1.

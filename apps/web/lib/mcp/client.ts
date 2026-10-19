@@ -683,7 +683,7 @@ export const mcp = {
   async readGraph(meetingId: string): Promise<GraphPage> {
     let cursor: string | undefined;
     let merged = emptyGraph();
-    for (let page = 0; page < 50; page += 1) {
+    for (let page = 0; page < 500; page += 1) {
       const args: Record<string, unknown> = { meeting_id: meetingId };
       if (cursor) args.cursor = cursor;
       const result = await callTool("read_graph", args);

@@ -61,7 +61,7 @@ export function VoiceName({
 
   async function save(value: string) {
     const next = value.trim();
-    if (!next || next === name) {
+    if (!next || (next === name && locked)) {
       finish();
       return;
     }

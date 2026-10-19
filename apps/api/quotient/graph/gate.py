@@ -661,6 +661,10 @@ def _identity_state(cleaned: dict) -> dict:
 def _span_view(span: dict, meeting_id: str, identities: dict | None = None) -> dict:
     start_ms = span.get("start_ms") if _ints(span.get("start_ms")) else None
     playback = f"meetings/{meeting_id}?t={start_ms}" if isinstance(start_ms, int) else f"meetings/{meeting_id}"
+    hypothesis = span.get("speaker_hypothesis_id")
+    ident = (identities or {}).get(hypothesis) if isinstance(hypothesis, str) else None
+    is_user = bool(span.get("speaker_locked") or (ident and ident.get("source") == "user"))
+    speaker_label = span.get("speaker_display") if is_user else span.get("speaker_label")
     return {
         "span_id": span.get("span_id"),
         "meeting_id": meeting_id,
@@ -672,10 +676,11 @@ def _span_view(span: dict, meeting_id: str, identities: dict | None = None) -> d
         "coarse": bool(span.get("coarse")),
         "overlap": bool(span.get("overlap")),
         "session_id": span.get("session_id"),
-        "speaker_hypothesis_id": span.get("speaker_hypothesis_id"),
+        "speaker_hypothesis_id": hypothesis,
         "speaker_display": span.get("speaker_display"),
+        "speaker_label": speaker_label,
         # The name the analysis gave this voice (from the picture or from what was said), never a typed one.
-        "speaker_identity": (identities or {}).get(span.get("speaker_hypothesis_id"), {}).get("name") if isinstance(span.get("speaker_hypothesis_id"), str) else None,
+        "speaker_identity": ident.get("name") if (ident and ident.get("source") != "user") else None,
         "playback": playback,
     }
 

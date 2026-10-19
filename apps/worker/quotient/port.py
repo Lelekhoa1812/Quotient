@@ -810,6 +810,16 @@ class Port:
             if scope == "hypothesis" and hypothesis:
                 # Locked: a name a person gave a voice survives any later analysis of the recording.
                 row.setdefault("speaker_names", {})[hypothesis] = display_name
+                if "identities" in row and isinstance(row["identities"], dict):
+                    target_ident = row["identities"].setdefault(hypothesis, {
+                        "name": display_name,
+                        "source": "user",
+                        "confidence": 1.0,
+                        "conflict": None,
+                        "merged": [],
+                    })
+                    target_ident["name"] = display_name
+                    target_ident["source"] = "user"
             row.setdefault("revisions", []).append(
                 {
                     "span_id": span_id,
@@ -859,6 +869,45 @@ class Port:
                     merges[earlier] = keep
             if gone != keep:
                 merges[gone] = keep
+
+            # Update row['identities'] so portals immediately reflect merged identities
+            if "identities" in row and isinstance(row["identities"], dict):
+                identities = row["identities"]
+                target_ident = identities.setdefault(keep, {
+                    "name": display_name,
+                    "source": "user",
+                    "confidence": 1.0,
+                    "conflict": None,
+                    "merged": [],
+                })
+                target_ident["name"] = display_name
+                target_ident["source"] = "user"
+                merged_list = target_ident.setdefault("merged", [])
+                if gone not in merged_list:
+                    merged_list.append(gone)
+                if gone in identities:
+                    for m in identities[gone].get("merged", []):
+                        if m not in merged_list and m != keep:
+                            merged_list.append(m)
+                    identities.pop(gone, None)
+
+            # Update row['digest']['speakers'] so digest consistency is maintained
+            if "digest" in row and isinstance(row["digest"], dict):
+                d_speakers = row["digest"].get("speakers")
+                if isinstance(d_speakers, list):
+                    for spk in d_speakers:
+                        if isinstance(spk, dict) and spk.get("id") == gone:
+                            spk["id"] = keep
+                            spk["name"] = display_name
+                    seen_spk_ids = set()
+                    deduped = []
+                    for spk in d_speakers:
+                        if isinstance(spk, dict) and spk.get("id"):
+                            if spk["id"] not in seen_spk_ids:
+                                seen_spk_ids.add(spk["id"])
+                                deduped.append(spk)
+                    row["digest"]["speakers"] = deduped
+
             row["identity_revision"] = int(row.get("identity_revision") or 0) + 1
             row.setdefault("revisions", []).append(
                 {
@@ -1182,8 +1231,19 @@ class Port:
             if gone in audio:
                 audio.setdefault(_final_voice(merges, gone), audio[gone])
                 audio.pop(gone, None)
+        intervals = getattr(ledger, "turns", None) or []
+        new_merges: list[tuple[str, str]] = []
         locked = {voice: name for voice, name in (row.get("speaker_names") or {}).items() if isinstance(name, str) and name.strip()}
-        final = reconcile(visual, audio, locked)
+        final = reconcile(visual, audio, locked, intervals=intervals, merges_out=new_merges)
+        if new_merges:
+            for keep, other in new_merges:
+                merges[other] = keep
+                for span in row.get("spans") or []:
+                    if span.get("speaker_hypothesis_id") == other:
+                        span["speaker_hypothesis_id"] = keep
+                        if span.get("speaker_display") and keep in final:
+                            span["speaker_display"] = final[keep].name
+            row["speaker_merges"] = merges
         row["identities"] = {
             voice: {
                 "name": item.name,
@@ -1270,8 +1330,18 @@ def _load_entrypoints():
     # package, already first on the path, is not shadowed by
     # apps/worker/quotient.
     root = str(Path(__file__).resolve().parents[1])
+    test_index = next((i for i, p in enumerate(sys.path) if "tests" in Path(p).parts), -1)
     if root not in sys.path:
-        sys.path.append(root)
+        if test_index != -1:
+            sys.path.insert(test_index, root)
+        else:
+            sys.path.append(root)
+    elif test_index != -1 and sys.path.index(root) > test_index:
+        sys.path.remove(root)
+        sys.path.insert(test_index, root)
+    for name in ("graph", "identity", "screenuse"):
+        if name in sys.modules and not hasattr(sys.modules[name], "__path__"):
+            del sys.modules[name]
     from loop.quality import run as quality_run
     from loop.store import MemoryStore
     from media.probe import classify_file, model_plan

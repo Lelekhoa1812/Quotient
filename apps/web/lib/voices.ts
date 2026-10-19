@@ -7,6 +7,7 @@
  * with two voices at once scores low), then take the best three that are far apart in time. Pure
  * functions, so the choice can be tested without a browser.
  */
+import { speakerName } from "@/lib/present";
 import type { Span } from "@/lib/types";
 
 export type Slice = {
@@ -112,4 +113,78 @@ export function registerTargets(names: Map<string, string>, voiceId: string): Ca
     out.push({ id, name: name.trim() });
   }
   return out.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export type TalkTimeRow = {
+  id: string;
+  voiceIds: string[];
+  name: string;
+  share: number;
+};
+
+const PHONETIC_ALIASES: [string, string][] = [
+  ["lee", "ly"], ["lee", "li"], ["ly", "li"],
+  ["dan", "daniel"], ["bill", "william"], ["bob", "robert"],
+  ["jim", "james"], ["mike", "michael"], ["dave", "david"],
+  ["matt", "matthew"], ["chris", "christopher"], ["steve", "stephen"],
+  ["steve", "steven"], ["jon", "john"], ["tom", "thomas"],
+];
+
+function samePerson(a: string, b: string): boolean {
+  const normA = a.trim().toLowerCase();
+  const normB = b.trim().toLowerCase();
+  if (normA === normB) return true;
+  if (normA.startsWith("speaker ") || normB.startsWith("speaker ")) return false;
+  const tokA = normA.split(/\s+/);
+  const tokB = normB.split(/\s+/);
+  const [short, long_] = tokA.length <= tokB.length ? [tokA, tokB] : [tokB, tokA];
+  if (long_.slice(0, short.length).join(" ") === short.join(" ")) return true;
+  if (short.length === 1) {
+    if (short[0] === long_[0]) return true;
+    if (PHONETIC_ALIASES.some(([x, y]) => (short[0] === x && long_[0] === y) || (short[0] === y && long_[0] === x))) return true;
+  }
+  return false;
+}
+
+function longerName(a: string, b: string): string {
+  const tokA = a.trim().split(/\s+/).length;
+  const tokB = b.trim().split(/\s+/).length;
+  if (tokA !== tokB) return tokA > tokB ? a : b;
+  return a.length >= b.length ? a : b;
+}
+
+/**
+ * Total speaking share per person.
+ * Unifies fragmented or duplicate voice IDs sharing the same canonical display name or alias
+ * into a single row, preventing isolated duplicate bars.
+ */
+export function talkTime(spans: Span[], names: Map<string, string>): TalkTimeRow[] {
+  const totals = new Map<string, number>();
+  for (const span of spans) {
+    if (span.kind !== "speech" || !span.speaker_hypothesis_id || span.start_ms === null || span.end_ms === null) continue;
+    totals.set(span.speaker_hypothesis_id, (totals.get(span.speaker_hypothesis_id) ?? 0) + Math.max(0, span.end_ms - span.start_ms));
+  }
+  const sum = [...totals.values()].reduce((left, right) => left + right, 0);
+  if (sum <= 0) return [];
+
+  // Group by canonical person identity (unifying split voice IDs or alias names)
+  const clusters: { primaryId: string; voiceIds: string[]; name: string; ms: number }[] = [];
+  for (const [id, ms] of totals.entries()) {
+    const rawName = names.get(id) ?? speakerName(null, id);
+    let match = clusters.find((c) => samePerson(c.name, rawName));
+    if (!match) {
+      clusters.push({ primaryId: id, voiceIds: [id], name: rawName, ms });
+    } else {
+      match.voiceIds.push(id);
+      match.ms += ms;
+      match.name = longerName(match.name, rawName);
+      if (ms > (totals.get(match.primaryId) ?? 0)) {
+        match.primaryId = id;
+      }
+    }
+  }
+
+  return clusters
+    .map((entry) => ({ id: entry.primaryId, voiceIds: entry.voiceIds, name: entry.name, share: entry.ms / sum }))
+    .sort((left, right) => right.share - left.share);
 }

@@ -45,6 +45,24 @@ _DEVICE = re.compile(r"\s*[’']s\s+(iphone|ipad|android|phone|macbook|laptop|ga
 _PHONE = re.compile(r"^\+?[\d\s().-]{6,}$")
 _TITLES = re.compile(r"^(mr|mrs|ms|miss|dr|prof|sir)\.?\s+", re.I)
 
+_PHONETIC_ALIASES = {
+    frozenset({"lee", "ly"}),
+    frozenset({"lee", "li"}),
+    frozenset({"ly", "li"}),
+    frozenset({"dan", "daniel"}),
+    frozenset({"bill", "william"}),
+    frozenset({"bob", "robert"}),
+    frozenset({"jim", "james"}),
+    frozenset({"mike", "michael"}),
+    frozenset({"dave", "david"}),
+    frozenset({"matt", "matthew"}),
+    frozenset({"chris", "christopher"}),
+    frozenset({"steve", "stephen"}),
+    frozenset({"steve", "steven"}),
+    frozenset({"jon", "john"}),
+    frozenset({"tom", "thomas"}),
+}
+
 
 def clean_name(raw: object) -> str | None:
     """A person's name as shown on screen, or None when the text is not a name (a device, a phone number, a role)."""
@@ -87,15 +105,21 @@ def _near(a: str, b: str) -> bool:
 
 def same_person(first: str, second: str) -> bool:
     """'Maddy' and 'Maddy Smith' are one person, and so are 'Ly Ha' and 'Ly Ho' (a misread letter);
-    'Maddy Smith' and 'Mark Smith' are not."""
+    'Lee' and 'Ly Ho' (phonetic homophone); 'Maddy Smith' and 'Mark Smith' are not."""
     a, b = _tokens(first), _tokens(second)
     if not a or not b:
         return False
     short, long_ = (a, b) if len(a) <= len(b) else (b, a)
-    if long_[: len(short)] == short or (len(short) == 1 and short[0] == long_[0]):
+    if long_[: len(short)] == short:
         return True
-    # Same first name, surname one letter apart (only when there is a surname on both sides).
-    return len(a) >= 2 and len(b) >= 2 and a[0] == b[0] and _near(a[-1], b[-1])
+    if len(short) == 1 and (short[0] == long_[0] or frozenset({short[0], long_[0]}) in _PHONETIC_ALIASES):
+        return True
+    # Same first name (or phonetic alias), surname one letter apart (only when there is a surname on both sides).
+    if len(a) >= 2 and len(b) >= 2:
+        first_match = a[0] == b[0] or frozenset({a[0], b[0]}) in _PHONETIC_ALIASES
+        if first_match and _near(a[-1], b[-1]):
+            return True
+    return False
 
 
 def longer_form(first: str, second: str) -> str:
@@ -262,14 +286,26 @@ def _talk_over(intervals: list[tuple[int, int, str]], first: str, second: str) -
     return shared / smaller if smaller else 0.0
 
 
+def clean_partial_name(raw: object) -> str | None:
+    """A person's name as shown on screen, including labels ending in an ellipsis from small tiles."""
+    if not isinstance(raw, str):
+        return None
+    trimmed = re.sub(r"[.…\s]+$", "", raw.strip())
+    return clean_name(trimmed)
+
+
 def reconcile(
     visual: list[Identity],
     audio: dict[str, str],
     locked: dict[str, str],
+    intervals: list[tuple[int, int, str]] | None = None,
+    merges_out: list[tuple[str, str]] | None = None,
 ) -> dict[str, Identity]:
     """One name per voice. A name a person typed wins. A name from the video and a name said aloud that agree
     are one stronger identity; when they differ the video wins only when its evidence is strong, and the
-    other name is kept as a conflict so a person can look."""
+    other name is kept as a conflict so a person can look.
+    Cross-voice unification: Voices representing the same person that do not talk over each other are
+    merged into a single identity."""
     out: dict[str, Identity] = {}
     by_voice = {item.speaker: item for item in visual}
     for voice in set(by_voice) | set(audio) | set(locked):
@@ -288,4 +324,158 @@ def reconcile(
             out[voice] = seen
         elif heard:
             out[voice] = Identity(voice, heard, "audio", 0.5)
+
+    # Cross-voice unification for same person
+    groups: list[list[Identity]] = []
+    for item in out.values():
+        matched = False
+        for grp in groups:
+            if any(same_person(item.name, other.name) for other in grp):
+                grp.append(item)
+                matched = True
+                break
+        if not matched:
+            groups.append([item])
+
+    merged_pairs = merges_out if merges_out is not None else []
+    talk_dur: dict[str, int] = {}
+    if intervals:
+        for s, e, v in intervals:
+            talk_dur[v] = talk_dur.get(v, 0) + (e - s)
+
+    for grp in groups:
+        if len(grp) <= 1:
+            continue
+        # Dominant voice as head: user locked first, then voices with speech, then talk duration, then confidence
+        grp.sort(
+            key=lambda x: (
+                x.source == "user",
+                talk_dur.get(x.speaker, 0) > 0,
+                talk_dur.get(x.speaker, 0),
+                x.confidence,
+                x.seconds,
+            ),
+            reverse=True,
+        )
+        head = grp[0]
+        for other in grp[1:]:
+            head.name = longer_form(head.name, other.name)
+            head.confidence = max(head.confidence, other.confidence)
+            if head.source != "user" and other.source in ("visual", "visual+audio"):
+                head.source = "visual+audio" if head.source == "audio" else other.source
+        for other in grp[1:]:
+            can_merge = True
+            if intervals:
+                can_merge = _talk_over(intervals, head.speaker, other.speaker) <= SAME_PERSON_OVERLAP
+            if can_merge:
+                if other.speaker not in head.merged:
+                    head.merged.append(other.speaker)
+                head.merged.extend([m for m in other.merged if m not in head.merged and m != head.speaker])
+                head.seconds = round(head.seconds + other.seconds, 1)
+                head.moments += other.moments
+                merged_pairs.append((head.speaker, other.speaker))
+                other.name = head.name
+
     return out
+
+
+def fuse_identities_model(
+    spans: list,
+    sightings: list,
+    intervals: list[tuple[int, int, str]],
+    locked_names: dict[str, str] | None = None,
+    digest_speakers: list[dict] | None = None,
+    reasoner: object | None = None,
+    registry: object | None = None,
+) -> tuple[dict[str, Identity], list[tuple[str, str]]]:
+    """Fuse multi-modal identity cues using Bedrock Reasoner (meeting.identity.fuse.v1) when available,
+    falling back to visual resolution and cross-voice reconciliation."""
+    from registry.ids import IDENTITY_FUSE
+
+    locked = dict(locked_names or {})
+    audio_map: dict[str, str] = {}
+    for entry in digest_speakers or []:
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and isinstance(entry.get("name"), str):
+            audio_map[entry["id"]] = entry["name"]
+
+    # If Reasoner and Registry are supplied, attempt model-driven fusion
+    if reasoner is not None and registry is not None and hasattr(reasoner, "complete"):
+        try:
+            # Build speech summaries per voice
+            voice_data: dict[str, dict] = {}
+            for start, end, voice in intervals:
+                voice_data.setdefault(voice, {"duration_ms": 0, "samples": []})["duration_ms"] += (end - start)
+            for span in spans:
+                voice = getattr(span, "speaker_hypothesis_id", None)
+                if isinstance(span, dict):
+                    voice = span.get("speaker_hypothesis_id")
+                    text = span.get("text") or span.get("raw_text") or ""
+                else:
+                    text = getattr(span, "text", "") or getattr(span, "raw_text", "")
+                if voice and voice in voice_data and text.strip() and len(voice_data[voice]["samples"]) < 3:
+                    if len(text.split()) >= 3:
+                        voice_data[voice]["samples"].append(text.strip()[:150])
+
+            voices_payload = [
+                {
+                    "id": v_id,
+                    "duration_seconds": round(info["duration_ms"] / 1000, 1),
+                    "sample_texts": info["samples"],
+                    "candidate_name": locked.get(v_id) or audio_map.get(v_id),
+                }
+                for v_id, info in voice_data.items()
+            ]
+
+            sightings_payload = []
+            seen_sightings = set()
+            for s in sightings:
+                name = clean_partial_name(getattr(s, "name", None) or (s.get("name") if isinstance(s, dict) else None))
+                if name and name not in seen_sightings:
+                    seen_sightings.add(name)
+                    speaking = getattr(s, "speaking", False) if not isinstance(s, dict) else s.get("speaking", False)
+                    cue = getattr(s, "cue", "label") if not isinstance(s, dict) else s.get("cue", "label")
+                    sightings_payload.append({"name": name, "speaking": bool(speaking), "cue": str(cue)})
+
+            turn = reasoner.complete(
+                prompt_id=IDENTITY_FUSE,
+                role="slm",
+                payload={
+                    "voices": voices_payload,
+                    "visual_sightings": sightings_payload,
+                    "spoken_names": [{"id": k, "name": v} for k, v in audio_map.items()],
+                    "user_locked": locked,
+                },
+            )
+            output = turn.output if hasattr(turn, "output") else turn
+            if isinstance(output, dict) and "identities" in output:
+                model_identities: dict[str, Identity] = {}
+                for item in output.get("identities") or []:
+                    vid = item.get("voice_id")
+                    name = item.get("name")
+                    if vid and name:
+                        conf = float(item.get("confidence") or 0.8)
+                        model_identities[vid] = Identity(
+                            speaker=vid,
+                            name=name,
+                            source="user" if vid in locked else "visual+audio",
+                            confidence=min(1.0, max(0.0, conf)),
+                        )
+                model_merges = []
+                for m in output.get("merges") or []:
+                    keep = m.get("keep_voice_id")
+                    other = m.get("merge_voice_id")
+                    if keep and other and keep != other and keep in model_identities:
+                        model_merges.append((keep, other))
+                        if other not in model_identities[keep].merged:
+                            model_identities[keep].merged.append(other)
+                if model_identities:
+                    return model_identities, model_merges
+        except Exception as exc:
+            import sys
+            print(f"identity model fusion fallback: {type(exc).__name__}", file=sys.stderr, flush=True)
+
+    # Heuristic fallback
+    visual_ids, visual_merges = resolve_visual(intervals, sightings)
+    merges_list: list[tuple[str, str]] = list(visual_merges)
+    reconciled = reconcile(visual_ids, audio_map, locked, intervals=intervals, merges_out=merges_list)
+    return reconciled, merges_list

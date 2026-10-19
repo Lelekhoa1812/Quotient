@@ -164,7 +164,7 @@ export function speakerName(label: string | null | undefined, hypothesisId: stri
  * transcript itself gave (the digest's speakers); otherwise "Speaker N". Never a guess.
  */
 export function voiceNames(
-  spans: { speaker_hypothesis_id: string | null; speaker_label: string | null }[],
+  spans: { speaker_hypothesis_id: string | null; speaker_label: string | null; speaker_display?: string | null }[],
   named: { id: string; name: string; role: string | null }[] = [],
   identities: Record<string, { name: string }> = {},
 ): Map<string, string> {
@@ -176,6 +176,15 @@ export function voiceNames(
   }
   for (const [voice, identity] of Object.entries(identities)) {
     if (identity.name.trim()) names.set(voice, title(identity.name.trim()));
+  }
+  for (const span of spans) {
+    if (span.speaker_hypothesis_id && span.speaker_display?.trim()) {
+      const existing = names.get(span.speaker_hypothesis_id);
+      const disp = span.speaker_display.trim();
+      if (!existing || disp.split(/\s+/).length > existing.split(/\s+/).length) {
+        names.set(span.speaker_hypothesis_id, disp);
+      }
+    }
   }
   for (const span of spans) {
     if (span.speaker_hypothesis_id && span.speaker_label?.trim()) names.set(span.speaker_hypothesis_id, span.speaker_label.trim());
