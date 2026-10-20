@@ -808,18 +808,89 @@ class Port:
             for span in targets:
                 span["speaker_display"] = display_name
             if scope == "hypothesis" and hypothesis:
-                # Locked: a name a person gave a voice survives any later analysis of the recording.
-                row.setdefault("speaker_names", {})[hypothesis] = display_name
-                if "identities" in row and isinstance(row["identities"], dict):
-                    target_ident = row["identities"].setdefault(hypothesis, {
-                        "name": display_name,
-                        "source": "user",
-                        "confidence": 1.0,
-                        "conflict": None,
-                        "merged": [],
-                    })
-                    target_ident["name"] = display_name
-                    target_ident["source"] = "user"
+                from identity.resolve import same_person
+                names = row.setdefault("speaker_names", {})
+                existing_match = None
+                for other_hyp, other_name in list(names.items()):
+                    if other_hyp != hypothesis and same_person(other_name, display_name):
+                        existing_match = other_hyp
+                        break
+                if not existing_match and "identities" in row and isinstance(row["identities"], dict):
+                    for other_hyp, other_ident in list(row["identities"].items()):
+                        if other_hyp != hypothesis and isinstance(other_ident, dict):
+                            if same_person(other_ident.get("name", ""), display_name):
+                                existing_match = other_hyp
+                                break
+
+                if existing_match:
+                    keep, gone = existing_match, hypothesis
+                    for s in row["spans"]:
+                        if s.get("speaker_hypothesis_id") == gone:
+                            s["speaker_hypothesis_id"] = keep
+                        if s.get("speaker_hypothesis_id") == keep:
+                            s["speaker_display"] = display_name
+                    names.pop(gone, None)
+                    names[keep] = display_name
+                    merges = row.setdefault("speaker_merges", {})
+                    for earlier, target in list(merges.items()):
+                        if target == gone:
+                            merges[earlier] = keep
+                    if gone != keep:
+                        merges[gone] = keep
+                    if "digest" in row and isinstance(row["digest"], dict):
+                        d = row["digest"]
+                        d_spks = d.get("speakers")
+                        if isinstance(d_spks, list):
+                            for spk in d_spks:
+                                if isinstance(spk, dict) and spk.get("id") == gone:
+                                    spk["id"] = keep
+                                    spk["name"] = display_name
+                            seen_spk_ids = set()
+                            deduped = []
+                            for spk in d_spks:
+                                if isinstance(spk, dict) and spk.get("id"):
+                                    if spk["id"] not in seen_spk_ids:
+                                        seen_spk_ids.add(spk["id"])
+                                        deduped.append(spk)
+                            d["speakers"] = deduped
+                        for p in d.get("perspectives") or []:
+                            if isinstance(p, dict) and p.get("speaker") == gone:
+                                p["speaker"] = keep
+                        for dec in d.get("decisions") or []:
+                            if isinstance(dec, dict) and dec.get("decided_by") == gone:
+                                dec["decided_by"] = keep
+                    if "identities" in row and isinstance(row["identities"], dict):
+                        identities = row["identities"]
+                        target_ident = identities.setdefault(keep, {
+                            "name": display_name,
+                            "source": "user",
+                            "confidence": 1.0,
+                            "conflict": None,
+                            "merged": [],
+                        })
+                        target_ident["name"] = display_name
+                        target_ident["source"] = "user"
+                        merged_list = target_ident.setdefault("merged", [])
+                        if gone not in merged_list:
+                            merged_list.append(gone)
+                        if gone in identities:
+                            for m in identities[gone].get("merged", []):
+                                if m not in merged_list and m != keep:
+                                    merged_list.append(m)
+                            identities.pop(gone, None)
+                else:
+                    # Locked: a name a person gave a voice survives any later analysis of the recording.
+                    names[hypothesis] = display_name
+                    if "identities" in row and isinstance(row["identities"], dict):
+                        target_ident = row["identities"].setdefault(hypothesis, {
+                            "name": display_name,
+                            "source": "user",
+                            "confidence": 1.0,
+                            "conflict": None,
+                            "merged": [],
+                        })
+                        target_ident["name"] = display_name
+                        target_ident["source"] = "user"
             row.setdefault("revisions", []).append(
                 {
                     "span_id": span_id,
@@ -907,6 +978,12 @@ class Port:
                                 seen_spk_ids.add(spk["id"])
                                 deduped.append(spk)
                     row["digest"]["speakers"] = deduped
+                for p in row["digest"].get("perspectives") or []:
+                    if isinstance(p, dict) and p.get("speaker") == gone:
+                        p["speaker"] = keep
+                for dec in row["digest"].get("decisions") or []:
+                    if isinstance(dec, dict) and dec.get("decided_by") == gone:
+                        dec["decided_by"] = keep
 
             row["identity_revision"] = int(row.get("identity_revision") or 0) + 1
             row.setdefault("revisions", []).append(
@@ -1110,7 +1187,7 @@ class Port:
                 self._fail(meeting_id, "A queued claim entered the brief.")
             raise
         with self._lock:
-            self._project(result, ledger)
+            self._project(result, ledger, reasoner=model, registry=registry)
         return result
 
     def _subject_of(self, meeting_id: str) -> str:
@@ -1135,7 +1212,7 @@ class Port:
             row["updated_at"] = _now()
             self._save_locked()
 
-    def _project(self, result, ledger) -> None:
+    def _project(self, result, ledger, reasoner: object | None = None, registry: object | None = None) -> None:
         meeting_id = getattr(ledger, "meeting_id", None)
         if not isinstance(meeting_id, str):
             return
@@ -1196,7 +1273,7 @@ class Port:
         row["charts"] = _worker_charts(result, ledger)
         digest = getattr(result, "digest", None)
         row["digest"] = digest if isinstance(digest, dict) else None
-        self._project_identity(row, ledger, row["digest"])
+        self._project_identity(row, ledger, row["digest"], reasoner=reasoner, registry=registry)
         row["reindexing"] = False
         row["reindex_error"] = None
         row.pop("previous_status", None)
@@ -1209,32 +1286,35 @@ class Port:
         row["updated_at"] = _now()
         self._save_locked()
 
-    def _project_identity(self, row: dict, ledger, digest) -> None:
+    def _project_identity(
+        self,
+        row: dict,
+        ledger,
+        digest,
+        reasoner: object | None = None,
+        registry: object | None = None,
+    ) -> None:
         """Who is who after this analysis, and what the picture showed. The names a person typed stay in
         speaker_names; this is the machine's answer, kept apart so the portal can tell them apart."""
-        from identity.resolve import reconcile
+        from identity.resolve import fuse_identities_model
 
         merges = dict(row.get("speaker_merges") or {})
-        visual = []
-        for item in getattr(ledger, "visual_identities", []) or []:
-            keep = _final_voice(merges, item.speaker)
-            if keep != item.speaker:
-                item = copy.copy(item)
-                item.speaker = keep
-            visual.append(item)
-        audio: dict[str, str] = {}
-        for entry in (digest or {}).get("speakers") or []:
-            if isinstance(entry, dict) and isinstance(entry.get("id"), str) and isinstance(entry.get("name"), str):
-                audio[entry["id"]] = entry["name"]
-        # A merged-in voice no longer exists; keep any audio name it carried only if the kept voice has none.
-        for gone, keep in merges.items():
-            if gone in audio:
-                audio.setdefault(_final_voice(merges, gone), audio[gone])
-                audio.pop(gone, None)
         intervals = getattr(ledger, "turns", None) or []
-        new_merges: list[tuple[str, str]] = []
+        spans = row.get("spans") or getattr(ledger, "spans", []) or []
+        sightings = getattr(ledger, "sightings", []) or []
         locked = {voice: name for voice, name in (row.get("speaker_names") or {}).items() if isinstance(name, str) and name.strip()}
-        final = reconcile(visual, audio, locked, intervals=intervals, merges_out=new_merges)
+        digest_speakers = (digest or {}).get("speakers") or []
+
+        final, new_merges = fuse_identities_model(
+            spans=spans,
+            sightings=sightings,
+            intervals=intervals,
+            locked_names=locked,
+            digest_speakers=digest_speakers,
+            reasoner=reasoner,
+            registry=registry,
+        )
+
         if new_merges:
             for keep, other in new_merges:
                 merges[other] = keep
@@ -1243,6 +1323,13 @@ class Port:
                         span["speaker_hypothesis_id"] = keep
                         if span.get("speaker_display") and keep in final:
                             span["speaker_display"] = final[keep].name
+            if digest and isinstance(digest, dict):
+                for p in digest.get("perspectives") or []:
+                    if isinstance(p, dict) and p.get("speaker") in merges:
+                        p["speaker"] = merges[p["speaker"]]
+                for q in digest.get("decisions") or []:
+                    if isinstance(q, dict) and q.get("decided_by") in merges:
+                        q["decided_by"] = merges[q["decided_by"]]
             row["speaker_merges"] = merges
         row["identities"] = {
             voice: {
@@ -1253,12 +1340,13 @@ class Port:
                 "merged": list(item.merged),
             }
             for voice, item in sorted(final.items())
+            if voice not in merges
         }
         row["screens"] = [_screen_row(item) for item in (getattr(ledger, "screens", None) or [])][:SCREEN_ROWS]
         row["visual"] = {
             "screens": len(getattr(ledger, "screens", None) or []),
             "sightings": len(getattr(ledger, "sightings", None) or []),
-            "named_from_picture": len(visual),
+            "named_from_picture": len([item for item in final.values() if "visual" in item.source]),
         }
         # Everything the person decided so far is now in the analysis.
         row["analysed_identity_revision"] = int(row.get("identity_revision") or 0)

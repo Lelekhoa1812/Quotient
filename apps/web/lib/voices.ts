@@ -130,7 +130,7 @@ const PHONETIC_ALIASES: [string, string][] = [
   ["steve", "steven"], ["jon", "john"], ["tom", "thomas"],
 ];
 
-function samePerson(a: string, b: string): boolean {
+export function samePerson(a: string, b: string): boolean {
   const normA = a.trim().toLowerCase();
   const normB = b.trim().toLowerCase();
   if (normA === normB) return true;

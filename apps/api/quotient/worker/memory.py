@@ -52,6 +52,15 @@ def _blank_meeting(*, meeting_id: str, subject: str, object_key: str, context_na
     }
 
 
+def _same_person(a: str, b: str) -> bool:
+    tok_a = [t for t in a.strip().lower().split() if t]
+    tok_b = [t for t in b.strip().lower().split() if t]
+    if not tok_a or not tok_b:
+        return False
+    short, long_ = (tok_a, tok_b) if len(tok_a) <= len(tok_b) else (tok_b, tok_a)
+    return long_[: len(short)] == short or (len(short) == 1 and short[0] == long_[0])
+
+
 class MemoryPort:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -153,17 +162,87 @@ class MemoryPort:
             for span in targets:
                 span["speaker_display"] = display_name
             if scope == "hypothesis" and hypothesis:
-                row.setdefault("speaker_names", {})[hypothesis] = display_name
-                if "identities" in row and isinstance(row["identities"], dict):
-                    target_ident = row["identities"].setdefault(hypothesis, {
-                        "name": display_name,
-                        "source": "user",
-                        "confidence": 1.0,
-                        "conflict": None,
-                        "merged": [],
-                    })
-                    target_ident["name"] = display_name
-                    target_ident["source"] = "user"
+                names = row.setdefault("speaker_names", {})
+                existing_match = None
+                for other_hyp, other_name in list(names.items()):
+                    if other_hyp != hypothesis and _same_person(other_name, display_name):
+                        existing_match = other_hyp
+                        break
+                if not existing_match and "identities" in row and isinstance(row["identities"], dict):
+                    for other_hyp, other_ident in list(row["identities"].items()):
+                        if other_hyp != hypothesis and isinstance(other_ident, dict):
+                            if _same_person(other_ident.get("name", ""), display_name):
+                                existing_match = other_hyp
+                                break
+
+                if existing_match:
+                    keep, gone = existing_match, hypothesis
+                    for s in row["spans"]:
+                        if s.get("speaker_hypothesis_id") == gone:
+                            s["speaker_hypothesis_id"] = keep
+                        if s.get("speaker_hypothesis_id") == keep:
+                            s["speaker_display"] = display_name
+                    names.pop(gone, None)
+                    names[keep] = display_name
+                    merges = row.setdefault("speaker_merges", {})
+                    for earlier, target in list(merges.items()):
+                        if target == gone:
+                            merges[earlier] = keep
+                    if gone != keep:
+                        merges[gone] = keep
+                    if "digest" in row and isinstance(row["digest"], dict):
+                        d = row["digest"]
+                        d_spks = d.get("speakers")
+                        if isinstance(d_spks, list):
+                            for spk in d_spks:
+                                if isinstance(spk, dict) and spk.get("id") == gone:
+                                    spk["id"] = keep
+                                    spk["name"] = display_name
+                            seen_spk_ids = set()
+                            deduped = []
+                            for spk in d_spks:
+                                if isinstance(spk, dict) and spk.get("id"):
+                                    if spk["id"] not in seen_spk_ids:
+                                        seen_spk_ids.add(spk["id"])
+                                        deduped.append(spk)
+                            d["speakers"] = deduped
+                        for p in d.get("perspectives") or []:
+                            if isinstance(p, dict) and p.get("speaker") == gone:
+                                p["speaker"] = keep
+                        for dec in d.get("decisions") or []:
+                            if isinstance(dec, dict) and dec.get("decided_by") == gone:
+                                dec["decided_by"] = keep
+                    if "identities" in row and isinstance(row["identities"], dict):
+                        identities = row["identities"]
+                        target_ident = identities.setdefault(keep, {
+                            "name": display_name,
+                            "source": "user",
+                            "confidence": 1.0,
+                            "conflict": None,
+                            "merged": [],
+                        })
+                        target_ident["name"] = display_name
+                        target_ident["source"] = "user"
+                        merged_list = target_ident.setdefault("merged", [])
+                        if gone not in merged_list:
+                            merged_list.append(gone)
+                        if gone in identities:
+                            for m in identities[gone].get("merged", []):
+                                if m not in merged_list and m != keep:
+                                    merged_list.append(m)
+                            identities.pop(gone, None)
+                else:
+                    names[hypothesis] = display_name
+                    if "identities" in row and isinstance(row["identities"], dict):
+                        target_ident = row["identities"].setdefault(hypothesis, {
+                            "name": display_name,
+                            "source": "user",
+                            "confidence": 1.0,
+                            "conflict": None,
+                            "merged": [],
+                        })
+                        target_ident["name"] = display_name
+                        target_ident["source"] = "user"
             row["revisions"].append(
                 {
                     "span_id": span_id,
@@ -230,6 +309,29 @@ class MemoryPort:
                         if m not in merged_list and m != keep:
                             merged_list.append(m)
                     identities.pop(gone, None)
+
+            if "digest" in row and isinstance(row["digest"], dict):
+                d = row["digest"]
+                d_spks = d.get("speakers")
+                if isinstance(d_spks, list):
+                    for spk in d_spks:
+                        if isinstance(spk, dict) and spk.get("id") == gone:
+                            spk["id"] = keep
+                            spk["name"] = display_name
+                    seen_spk_ids = set()
+                    deduped = []
+                    for spk in d_spks:
+                        if isinstance(spk, dict) and spk.get("id"):
+                            if spk["id"] not in seen_spk_ids:
+                                seen_spk_ids.add(spk["id"])
+                                deduped.append(spk)
+                    d["speakers"] = deduped
+                for p in d.get("perspectives") or []:
+                    if isinstance(p, dict) and p.get("speaker") == gone:
+                        p["speaker"] = keep
+                for dec in d.get("decisions") or []:
+                    if isinstance(dec, dict) and dec.get("decided_by") == gone:
+                        dec["decided_by"] = keep
 
             row["revisions"].append(
                 {

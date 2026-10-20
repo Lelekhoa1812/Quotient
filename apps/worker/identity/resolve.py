@@ -16,20 +16,20 @@ from dataclasses import dataclass, field
 # Evidence is measured in seconds of a voice talking while a name is on screen.
 MIN_SECONDS = 4.0
 MIN_MOMENTS = 2  # distinct five-second stretches, so one brief flash of a label is not enough
-MIN_SHARE = 0.6
-MIN_LEAD = 1.8
+MIN_SHARE = 0.55
+MIN_LEAD = 1.4
 WEAK_WEIGHT = 0.3  # a name label with no active-speaker mark: it may be the speaker, or only a tile on show
 BUCKET_MS = 5000
 SAME_PERSON_OVERLAP = 0.1  # two voices that talk over each other for more than this share are two people
 # Folding one voice into another cannot be undone from the page, so it needs clear evidence for both voices.
-MERGE_MIN_CONFIDENCE = 0.75
-MERGE_MIN_SECONDS = 15.0
+MERGE_MIN_CONFIDENCE = 0.4
+MERGE_MIN_SECONDS = 4.0
 # A mark that is on a person all the time (a presenter pinned to the stage) says little about who is talking.
 # It only counts as evidence when it discriminates: the share of a voice's talk that carries the mark has to
 # beat the rate of the mark while that voice is silent.
-MIN_PRECISION = 0.35
-MIN_LIFT = 0.15
-MERGE_LIFT = 0.3
+MIN_PRECISION = 0.15
+MIN_LIFT = 0.08
+MERGE_LIFT = 0.08
 LIFT_TIE = 0.1  # two voices closer than this are told apart by who talks much more
 TALK_DOMINANCE = 3.0
 
@@ -267,14 +267,12 @@ def resolve_visual(intervals: list[tuple[int, int, str]], sightings: list) -> tu
                     candidates.pop(other.speaker, None)
             chosen[head.speaker] = head
             continue
-        second = group[1]
-        if lifts[keep.speaker] - lifts[second.speaker] >= LIFT_TIE:
+        dominant = max(group, key=lambda item: talk.get(item.speaker, 0))
+        others = [item for item in group if item is not dominant]
+        if all(talk.get(dominant.speaker, 0) >= TALK_DOMINANCE * talk.get(item.speaker, 1) for item in others):
+            chosen[dominant.speaker] = dominant
+        elif lifts[keep.speaker] - lifts[second.speaker] >= LIFT_TIE:
             chosen[keep.speaker] = keep
-        else:
-            dominant = max(group, key=lambda item: talk.get(item.speaker, 0))
-            others = [item for item in group if item is not dominant]
-            if all(talk.get(dominant.speaker, 0) >= TALK_DOMINANCE * talk.get(item.speaker, 1) for item in others):
-                chosen[dominant.speaker] = dominant
     return sorted(chosen.values(), key=lambda item: item.speaker), merges
 
 
@@ -398,6 +396,11 @@ def fuse_identities_model(
         if isinstance(entry, dict) and isinstance(entry.get("id"), str) and isinstance(entry.get("name"), str):
             audio_map[entry["id"]] = entry["name"]
 
+    # Visual resolution runs first so ground-truth video sightings are always captured
+    visual_ids, visual_merges = resolve_visual(intervals, sightings)
+    merges_list: list[tuple[str, str]] = list(visual_merges)
+    combined_map: dict[str, Identity] = {v.speaker: v for v in visual_ids}
+
     # If Reasoner and Registry are supplied, attempt model-driven fusion
     if reasoner is not None and registry is not None and hasattr(reasoner, "complete"):
         try:
@@ -448,34 +451,29 @@ def fuse_identities_model(
             )
             output = turn.output if hasattr(turn, "output") else turn
             if isinstance(output, dict) and "identities" in output:
-                model_identities: dict[str, Identity] = {}
                 for item in output.get("identities") or []:
                     vid = item.get("voice_id")
-                    name = item.get("name")
-                    if vid and name:
-                        conf = float(item.get("confidence") or 0.8)
-                        model_identities[vid] = Identity(
+                    raw_name = item.get("name")
+                    clean = clean_name(raw_name)
+                    if vid and clean:
+                        conf = min(1.0, max(0.0, float(item.get("confidence") or 0.8)))
+                        model_id = Identity(
                             speaker=vid,
-                            name=name,
+                            name=clean,
                             source="user" if vid in locked else "visual+audio",
-                            confidence=min(1.0, max(0.0, conf)),
+                            confidence=conf,
                         )
-                model_merges = []
+                        if vid not in combined_map or conf >= combined_map[vid].confidence:
+                            combined_map[vid] = model_id
                 for m in output.get("merges") or []:
                     keep = m.get("keep_voice_id")
                     other = m.get("merge_voice_id")
-                    if keep and other and keep != other and keep in model_identities:
-                        model_merges.append((keep, other))
-                        if other not in model_identities[keep].merged:
-                            model_identities[keep].merged.append(other)
-                if model_identities:
-                    return model_identities, model_merges
+                    if keep and other and keep != other:
+                        if (keep, other) not in merges_list:
+                            merges_list.append((keep, other))
         except Exception as exc:
             import sys
             print(f"identity model fusion fallback: {type(exc).__name__}", file=sys.stderr, flush=True)
 
-    # Heuristic fallback
-    visual_ids, visual_merges = resolve_visual(intervals, sightings)
-    merges_list: list[tuple[str, str]] = list(visual_merges)
-    reconciled = reconcile(visual_ids, audio_map, locked, intervals=intervals, merges_out=merges_list)
+    reconciled = reconcile(list(combined_map.values()), audio_map, locked, intervals=intervals, merges_out=merges_list)
     return reconciled, merges_list

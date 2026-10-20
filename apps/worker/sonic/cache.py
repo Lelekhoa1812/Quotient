@@ -45,6 +45,8 @@ class TranscriptCache:
         return data if isinstance(data, dict) else {}
 
     def get(self, session_id: str, lo: int, hi: int) -> dict | None:
+        if session_id not in self._data:
+            self._data = self._read()
         entry = self._data.get(session_id)
         if isinstance(entry, dict) and entry.get("lo") == lo and entry.get("hi") == hi and isinstance(entry.get("spans"), list):
             return entry

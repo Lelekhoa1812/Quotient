@@ -26,7 +26,7 @@ import { buildScreenCards } from "@/lib/screens";
 import { buildStoryline, topicIndex } from "@/lib/storyline";
 import { durationText, percentText, readable, speakerName } from "@/lib/present";
 import type { ActionItem, Claim, ContextUse, IdentityState, MeetingContext, ScreenView, Span, SynthesisSentence, VoiceIdentity } from "@/lib/types";
-import { talkTime, type TalkTimeRow } from "@/lib/voices";
+import { samePerson, talkTime, type TalkTimeRow } from "@/lib/voices";
 
 const TYPE_LABEL: Record<string, string> = {
   meeting: "Meeting",
@@ -154,7 +154,7 @@ export function Overview({
   const participation = talkTime(spans, names);
   const locked = new Set(spans.filter((span) => span.speaker_label?.trim() && span.speaker_hypothesis_id).map((span) => span.speaker_hypothesis_id as string));
   const rename = (id: string, name: string) => onRenameVoice(id, name);
-  const argued = groupBySpeaker(digest.perspectives);
+  const argued = groupBySpeaker(digest?.perspectives ?? [], names);
   /** "From <topic>": the stretch of the meeting an item came from, as a link into the walkthrough. */
   const fromTopic = (ms: number | null) => {
     const index = topicIndex(digest.chapters, ms);
@@ -506,8 +506,29 @@ function Section({ id, icon, title, children }: { id?: string; icon: ReactNode; 
 
 export { talkTime, type TalkTimeRow } from "@/lib/voices";
 
-function groupBySpeaker(items: Digest["perspectives"]): { speaker: string | null; items: Digest["perspectives"] }[] {
-  const groups = new Map<string | null, Digest["perspectives"]>();
-  for (const item of items) groups.set(item.speaker, [...(groups.get(item.speaker) ?? []), item]);
-  return [...groups.entries()].map(([speaker, rows]) => ({ speaker, items: rows }));
+function groupBySpeaker(
+  items: Digest["perspectives"],
+  names: Map<string, string>,
+): { speaker: string | null; items: Digest["perspectives"] }[] {
+  const clusters: { canonicalKey: string; primarySpeaker: string | null; items: Digest["perspectives"] }[] = [];
+  for (const item of items) {
+    const rawName = item.speaker ? names.get(item.speaker) ?? speakerName(null, item.speaker) : null;
+    let match = rawName ? clusters.find((c) => c.canonicalKey && samePerson(c.canonicalKey, rawName)) : null;
+    if (!match && item.speaker) {
+      match = clusters.find((c) => c.primarySpeaker === item.speaker);
+    }
+    if (!match) {
+      clusters.push({
+        canonicalKey: rawName ?? (item.speaker ?? "unknown"),
+        primarySpeaker: item.speaker,
+        items: [item],
+      });
+    } else {
+      match.items.push(item);
+      if (rawName && (!match.canonicalKey || rawName.length > match.canonicalKey.length)) {
+        match.canonicalKey = rawName;
+      }
+    }
+  }
+  return clusters.map((c) => ({ speaker: c.primarySpeaker, items: c.items }));
 }
