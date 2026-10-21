@@ -797,31 +797,133 @@ class Port:
         self._enqueue_analysis(meeting_id)
         return result
 
+    def _find_cached_turns(self, meeting_id: str, row: dict, spans: list) -> list[tuple[int, int, str]]:
+        duration_ms = max((s.end_ms for s in spans if s.end_ms is not None), default=0)
+        candidates = [
+            Path("/tmp/quotient/artifacts"),
+            Path(__file__).resolve().parents[3] / "cache" / "artifacts",
+        ]
+        for cdir in candidates:
+            if not cdir.is_dir():
+                continue
+            for file_path in cdir.glob("*.json"):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list) and data and isinstance(data[0], list) and len(data[0]) == 3:
+                        if isinstance(data[0][2], str) and data[0][2].startswith("spk_"):
+                            max_turn = max(item[1] for item in data)
+                            if abs(max_turn - duration_ms) <= 15000:
+                                return [tuple(item) for item in data]
+                except Exception:
+                    continue
+        return []
+
+    def _reconstruct_ledger(self, meeting_id: str, row: dict):
+        from graph.span import Span
+        from loop.quality import Ledger
+        from visual.frames import Screen
+
+        row_spans = row.get("spans") or []
+        spans = []
+        for idx, s in enumerate(row_spans):
+            if not isinstance(s, dict):
+                continue
+            s_id = s.get("span_id") or s.get("id") or f"{meeting_id}-span-{idx}"
+            s_mid = s.get("meeting_id") or meeting_id
+            s_kind = s.get("kind") or "speech"
+            s_start = s.get("start_ms") if s.get("start_ms") is not None else 0
+            s_end = s.get("end_ms") if s.get("end_ms") is not None else 0
+            spans.append(
+                Span(
+                    id=s_id,
+                    meeting_id=s_mid,
+                    kind=s_kind,
+                    start_ms=s_start,
+                    end_ms=s_end,
+                    raw_text=s.get("raw_text", ""),
+                    text=s.get("text", s.get("raw_text", "")),
+                    coarse=bool(s.get("coarse")),
+                    session_id=s.get("session_id"),
+                    speaker_hypothesis_id=s.get("speaker_hypothesis_id"),
+                    overlap=bool(s.get("overlap")),
+                )
+            )
+
+        turns = [tuple(t) for t in (row.get("turns") or [])]
+        if not turns:
+            turns = self._find_cached_turns(meeting_id, row, spans)
+
+        if any(s.speaker_hypothesis_id is None for s in spans if s.kind == "speech") and turns:
+            from media.diarize import attach_speakers
+            attach_speakers(spans, turns)
+
+        duration_ms = max((s.end_ms for s in spans if s.end_ms is not None), default=0)
+        screens = [
+            Screen(
+                id=sc.get("id") or f"{meeting_id}-screen-{s_idx}",
+                kind=sc.get("kind", "other"),
+                title=sc.get("title", ""),
+                text=sc.get("text", ""),
+                details=sc.get("details", ""),
+                start_ms=sc.get("start_ms", 0),
+                end_ms=sc.get("end_ms", 0),
+            )
+            for s_idx, sc in enumerate(row.get("screens") or [])
+            if isinstance(sc, dict)
+        ]
+        observations = row.get("observations") or []
+        ledger = Ledger(
+            meeting_id=meeting_id,
+            duration_ms=duration_ms,
+            kind="video" if screens or observations else "audio",
+            spans=spans,
+            screens=screens,
+            observations=observations,
+            turns=turns,
+        )
+        ledger.context = self._load_context(meeting_id)
+        return ledger
+
     def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...], reindex: bool = False) -> None:
         from bedrock.reason import Reasoner
         from bedrock.wire import Transport
         from loop.ingest import assemble, open_source
         from registry.load import Registry
 
-        self._set_progress(meeting_id, "Preparing the media and building the transcript")
-        # A file that is not on this disk is copied from the media bucket into a
-        # private directory that is removed whatever happens next.
-        path, scratch = open_source(object_key)
-        if scratch is not None:
-            self._set_progress(meeting_id, "Fetching the recording")
-        try:
-            ledger = assemble(
-                path,
-                meeting_id,
-                context=", ".join(names) if names else None,
-                progress_callback=lambda message: self._set_progress(meeting_id, message),
-                should_stop=lambda: self._is_cancelled(meeting_id),
-                cache_scope=self._subject_of(meeting_id),
-            )
-        finally:
+        ledger = None
+        if reindex:
+            with self._lock:
+                row = self._rows.get(meeting_id) or {}
+                row_spans = row.get("spans")
+            if row_spans:
+                self._set_progress(meeting_id, "Reindexing identity provenance")
+                try:
+                    ledger = self._reconstruct_ledger(meeting_id, row)
+                except Exception as exc:
+                    print(f"ledger reconstruction fallback: {exc}", file=sys.stderr, flush=True)
+                    ledger = None
+
+        if ledger is None:
+            self._set_progress(meeting_id, "Preparing the media and building the transcript")
+            # A file that is not on this disk is copied from the media bucket into a
+            # private directory that is removed whatever happens next.
+            path, scratch = open_source(object_key)
             if scratch is not None:
-                shutil.rmtree(scratch, ignore_errors=True)
-        ledger.context = self._load_context(meeting_id)
+                self._set_progress(meeting_id, "Fetching the recording")
+            try:
+                ledger = assemble(
+                    path,
+                    meeting_id,
+                    context=", ".join(names) if names else None,
+                    progress_callback=lambda message: self._set_progress(meeting_id, message),
+                    should_stop=lambda: self._is_cancelled(meeting_id),
+                    cache_scope=self._subject_of(meeting_id),
+                )
+            finally:
+                if scratch is not None:
+                    shutil.rmtree(scratch, ignore_errors=True)
+            ledger.context = self._load_context(meeting_id)
         self._apply_identity_state(meeting_id, ledger)
         registry = Registry()
         reasoner = Reasoner(registry, Transport())
@@ -881,6 +983,9 @@ class Port:
         for identity in getattr(ledger, "visual_identities", []) or []:
             voice = resolve(identity.speaker)
             known.setdefault(voice, identity.name)
+        for voice, item in (row.get("identities") or {}).items():
+            if isinstance(item, dict) and item.get("name"):
+                known.setdefault(resolve(voice), item["name"])
         known.update({resolve(voice): name for voice, name in locked.items() if isinstance(name, str) and name.strip()})
         ledger.known_names = known
 
@@ -1518,6 +1623,7 @@ class Port:
             if voice not in merges
         }
         row["screens"] = [_screen_row(item) for item in (getattr(ledger, "screens", None) or [])][:SCREEN_ROWS]
+        row["turns"] = [list(t) for t in (getattr(ledger, "turns", None) or [])]
         row["visual"] = {
             "screens": len(getattr(ledger, "screens", None) or []),
             "sightings": len(getattr(ledger, "sightings", None) or []),

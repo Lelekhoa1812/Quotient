@@ -475,5 +475,15 @@ def fuse_identities_model(
             import sys
             print(f"identity model fusion fallback: {type(exc).__name__}", file=sys.stderr, flush=True)
 
+    if locked:
+        merges_list = [
+            (keep, other)
+            for keep, other in merges_list
+            if not (
+                keep in locked
+                and other in locked
+                and locked[keep].strip().lower() != locked[other].strip().lower()
+            )
+        ]
     reconciled = reconcile(list(combined_map.values()), audio_map, locked, intervals=intervals, merges_out=merges_list)
     return reconciled, merges_list

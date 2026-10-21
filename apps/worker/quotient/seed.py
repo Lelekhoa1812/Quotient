@@ -216,6 +216,14 @@ def _install(port: object, rows: list) -> int:
         if meeting_id in current:
             continue
         stored = copy.deepcopy(row)
+        if stored.get("reindexing"):
+            stored["reindexing"] = False
+            stored["reindex_error"] = None
+            stored["status"] = stored.pop("previous_status", None) or "needs_review"
+            stored["progress_message"] = "Analysis ready."
+        elif stored.get("status") == "working":
+            stored["status"] = "needs_review"
+            stored["progress_message"] = "Analysis ready."
         artifacts = stored.get("artifacts")
         if isinstance(artifacts, dict) and artifacts.get("exports") == "ready":
             artifacts["exports"] = "not_run"
