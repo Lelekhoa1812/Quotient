@@ -136,18 +136,18 @@ export function McpScreen({ contract, cloudfrontMcpUrl }: { contract: string; cl
 
   const rows: { id: string; label: string; value: string; note?: string; copyValue: string | null }[] = [
     {
-      id: "https-mcp",
-      label: "HTTPS MCP URL (ChatGPT & TLS)",
-      value: secureMcpUrl,
-      note: "Required for ChatGPT & external TLS clients.",
-      copyValue: secureMcpUrl,
+      id: "http-mcp",
+      label: "HTTP MCP",
+      value: directMcpUrl,
+      note: isLocal ? "Local default." : "Direct ALB endpoint.",
+      copyValue: directMcpUrl,
     },
     {
-      id: "http-mcp",
-      label: "HTTP MCP URL (Direct API)",
-      value: directMcpUrl,
-      note: isLocal ? "Local development default." : "Direct ALB endpoint for existing integrations.",
-      copyValue: directMcpUrl,
+      id: "https-mcp",
+      label: "HTTPS MCP",
+      value: secureMcpUrl,
+      note: "CloudFront TLS endpoint.",
+      copyValue: secureMcpUrl,
     },
     { id: "url", label: "Browser proxy path", value: portalUrl, note: "Same origin", copyValue: portalUrl },
     { id: "protocol", label: "Protocol", value: link.protocolVersion, copyValue: link.protocolVersion },
@@ -182,9 +182,6 @@ export function McpScreen({ contract, cloudfrontMcpUrl }: { contract: string; cl
       <section className="q-mcp-block" aria-labelledby="mcp-parameters-heading">
         <h2 id="mcp-parameters-heading">Parameters</h2>
         {message ? <p role="alert">{message}</p> : null}
-        <div className="q-mcp-notice">
-          <strong>External Assistant &amp; ChatGPT Connection:</strong> For ChatGPT, Claude, and external clients requiring TLS encryption, connect to the <strong>HTTPS MCP URL</strong> (<code>{secureMcpUrl}</code>). The <strong>HTTP MCP URL</strong> (<code>{directMcpUrl}</code>) remains fully operational for existing direct integrations.
-        </div>
         <dl className="q-mcp-params">
           {rows.map((row) => (
             <div className="q-mcp-row" key={row.id}>

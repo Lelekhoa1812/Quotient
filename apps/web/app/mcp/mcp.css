@@ -31,20 +31,6 @@
   font-weight: 600;
 }
 
-.q-mcp-notice {
-  border: 1px solid var(--line);
-  padding: 0.75rem 0.95rem;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
-}
-
-.q-mcp-notice code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
 .q-mcp-params {
   margin: 0;
   border: 1px solid var(--line);
