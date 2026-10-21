@@ -514,20 +514,27 @@ def _unauthorized(settings: object, *, error_code: str | None) -> JSONResponse:
 
 
 def _portal_browser(request: Request, settings: object) -> bool:
+    hosts = set()
     parts = urlsplit(settings.resource_url)  # type: ignore[attr-defined]
-    host = (parts.hostname or "").lower()
-    if not host or host in _LOOPBACK_HOSTS:
+    if parts.hostname and parts.hostname.lower() not in _LOOPBACK_HOSTS:
+        hosts.add(parts.hostname.lower())
+    for allowed in getattr(settings, "allowed_origins", ()):
+        p = urlsplit(allowed)
+        if p.hostname and p.hostname.lower() not in _LOOPBACK_HOSTS:
+            hosts.add(p.hostname.lower())
+    if not hosts:
         return False
     origin = request.headers.get("origin")
     if origin:
         parsed = urlsplit(origin)
-        return (parsed.hostname or "").lower() == host and parsed.scheme == parts.scheme
-    raw = (request.headers.get("host") or "").strip().lower()
+        if (parsed.hostname or "").lower() in hosts:
+            return True
+    raw = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").strip().lower()
     if raw.startswith("["):
         name = raw[1:].split("]", 1)[0]
     else:
         name = raw.split(":", 1)[0]
-    return name == host
+    return name in hosts
 
 
 def _bearer(header: str | None) -> str | None:

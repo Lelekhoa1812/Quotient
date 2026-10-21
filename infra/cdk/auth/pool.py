@@ -8,6 +8,7 @@
 # domain prefix is the staging prefix. Callback is localhost because this
 # pass has no ACM hostname.
 
+import os
 from aws_cdk import Duration, RemovalPolicy, aws_cognito as cognito, aws_secretsmanager as secretsmanager
 from constructs import Construct
 
@@ -63,7 +64,14 @@ class MeetingAuth(Construct):
                     cognito.OAuthScope.EMAIL,
                     cognito.OAuthScope.resource_server(self.resource_server, scope_def),
                 ],
-                callback_urls=[f"{PORTAL_ORIGIN}/callback"],
+                callback_urls=[
+                    f"{PORTAL_ORIGIN}/callback",
+                    "https://chatgpt.com/aip/oauth/callback",
+                    "https://chat.openai.com/aip/oauth/callback",
+                    *(
+                        [cb.strip() for cb in os.environ.get("QUOTIENT_EXTRA_CALLBACK_URLS", "").split(",") if cb.strip()]
+                    ),
+                ],
                 logout_urls=[f"{PORTAL_ORIGIN}/"],
             ),
             supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],

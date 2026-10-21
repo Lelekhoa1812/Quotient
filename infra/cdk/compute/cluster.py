@@ -18,6 +18,8 @@ from aws_cdk import (
     Fn,
     RemovalPolicy,
     aws_applicationautoscaling as appscaling,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_cloudwatch as cloudwatch,
     aws_ec2 as ec2,
     aws_ecr as ecr,
@@ -135,6 +137,33 @@ class MeetingCompute(Construct):
         self.alb.log_access_logs(buckets.logs, "alb")
         self.mcp_resource_url = Fn.join("", ["http://", self.alb.load_balancer_dns_name, "/mcp"])
         self.public_origin = Fn.join("", ["http://", self.alb.load_balancer_dns_name])
+
+        # Motivation: ChatGPT and external AI assistants strictly require HTTPS for MCP.
+        # Logic: CloudFront provides an automatic, trusted https://*.cloudfront.net endpoint
+        # while keeping the ALB port 80 HTTP origin fully active for existing API clients.
+        alb_origin = origins.HttpOrigin(
+            self.alb.load_balancer_dns_name,
+            http_port=80,
+            protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+            read_timeout=Duration.seconds(60),
+            keepalive_timeout=Duration.seconds(60),
+        )
+        self.distribution = cloudfront.Distribution(
+            self,
+            "Distribution",
+            comment="Quotient MCP and Portal HTTPS distribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=alb_origin,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            ),
+        )
+        self.cloudfront_domain = self.distribution.distribution_domain_name
+        self.cloudfront_url = Fn.join("", ["https://", self.cloudfront_domain])
+        self.cloudfront_mcp_url = Fn.join("", ["https://", self.cloudfront_domain, "/mcp"])
         # Motivation vs Logic
         # Motivation: Settings on the load balancer has to mint the integration
         # key. The API refuses every peer that is not loopback.
@@ -273,11 +302,56 @@ class MeetingCompute(Construct):
             ),
         )
         listener.add_action(
+            "McpMethods",
+            priority=12,
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
+                elbv2.ListenerCondition.http_request_methods(["POST", "DELETE", "OPTIONS"]),
+            ],
+            action=elbv2.ListenerAction.forward([api_targets]),
+        )
+        listener.add_action(
             "McpProtocol",
             priority=15,
             conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp"]),
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
                 elbv2.ListenerCondition.http_header("Accept", ["*text/event-stream*"]),
+            ],
+            action=elbv2.ListenerAction.forward([api_targets]),
+        )
+        listener.add_action(
+            "McpJsonProtocol",
+            priority=16,
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
+                elbv2.ListenerCondition.http_header("Accept", ["*application/json*"]),
+            ],
+            action=elbv2.ListenerAction.forward([api_targets]),
+        )
+        listener.add_action(
+            "McpProtocolHeader",
+            priority=17,
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
+                elbv2.ListenerCondition.http_header("MCP-Protocol-Version", ["*"]),
+            ],
+            action=elbv2.ListenerAction.forward([api_targets]),
+        )
+        listener.add_action(
+            "McpSessionHeader",
+            priority=18,
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
+                elbv2.ListenerCondition.http_header("MCP-Session-Id", ["*"]),
+            ],
+            action=elbv2.ListenerAction.forward([api_targets]),
+        )
+        listener.add_action(
+            "McpAuthHeader",
+            priority=19,
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
+                elbv2.ListenerCondition.http_header("Authorization", ["*"]),
             ],
             action=elbv2.ListenerAction.forward([api_targets]),
         )
@@ -425,6 +499,9 @@ class MeetingCompute(Construct):
             "PORT": str(API_PORT),
             "MCP_PROTOCOL_VERSION": "2025-11-25",
             "MCP_RESOURCE_URL": self.mcp_resource_url,
+            "CLOUDFRONT_RESOURCE_URL": self.cloudfront_mcp_url,
+            "CLOUDFRONT_ORIGIN": self.cloudfront_url,
+            "ALB_ORIGIN": self.public_origin,
             "COGNITO_ISSUER": issuer,
             "COGNITO_CLIENT_ID": auth.client.user_pool_client_id,
             "COGNITO_DOMAIN": auth.domain.base_url(),

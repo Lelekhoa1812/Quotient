@@ -71,6 +71,12 @@ One NAT gateway, in the first public subnet. Private egress from the second AZ c
 
 The ALB is internet-facing on port 80. This pass has no ACM certificate and no production hostname. `/health` is the target-group check and must not return meeting data.
 
+In front of the ALB, a CloudFront distribution provides global TLS termination on HTTPS (port 443) with an AWS-managed certificate for ChatGPT and external AI assistants that strictly require HTTPS. The CloudFront distribution forwards all methods and MCP-specific headers to the ALB while keeping the direct ALB HTTP endpoint fully operational for existing API integrations.
+
+- CloudFront Domain: `d13b140h08qjom.cloudfront.net`
+- Staging HTTPS origin: `https://d13b140h08qjom.cloudfront.net`
+- Staging HTTP origin: `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com`
+
 ## Compute
 
 Cluster `axion-meeting-staging`. On-demand Fargate, ARM64, not Spot. Container Insights is off. Execute command is off. `DesiredCount` is omitted from the service resources so CloudFormation does not pin it; Application Auto Scaling owns the count.
@@ -115,7 +121,12 @@ Partner OAuth material is the Secrets Manager secret `axion-meeting-staging/part
 
 Cognito user pool `axion-meeting-staging` is the OAuth 2.1 authorization server for the MCP resource. Self-service sign-up is off. An operator creates users. MFA is optional TOTP.
 
-The portal client has no secret, so Cognito requires PKCE (`S256`) on the authorization-code grant. Callback `http://localhost:3000/callback`. Logout `http://localhost:3000/`. Scope `quotient/mcp`, plus `openid` and `email`.
+The portal client has no secret, so Cognito requires PKCE (`S256`) on the authorization-code grant. Whitelisted callback URLs:
+- `http://localhost:3000/callback`
+- `https://chatgpt.com/aip/oauth/callback`
+- `https://chat.openai.com/aip/oauth/callback`
+
+Logout `http://localhost:3000/`. Scope `quotient/mcp`, plus `openid` and `email`.
 
 Hosted UI domain prefix `axion-meeting-staging` (the prefix is global; if it is taken, change `PREFIX` before deploy):
 

@@ -11,14 +11,15 @@ Specification: [MCP 2025-11-25](https://modelcontextprotocol.io/specification/20
 | Item | Value |
 | --- | --- |
 | Local origin | `http://127.0.0.1:8080` |
-| Staging origin | `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com` |
+| Staging HTTP origin | `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com` |
+| Staging HTTPS origin | `https://d13b140h08qjom.cloudfront.net` |
 | MCP URL | `{origin}/mcp` |
 | Methods | `POST`, `GET`, `DELETE`, `OPTIONS` |
 | Protocol header | `MCP-Protocol-Version: 2025-11-25` |
 | Session header | `MCP-Session-Id` |
-| POST `Accept` | `application/json` and `text/event-stream` |
+| POST `Accept` | `application/json`, `text/event-stream`, or `*/*` |
 | POST `Content-Type` | `application/json` |
-| GET `Accept` | `text/event-stream` |
+| GET `Accept` | `text/event-stream` or `application/json` |
 
 `POST /mcp` carries one JSON-RPC 2.0 message. A JSON array is rejected. Notifications and client responses receive HTTP 202 with an empty body. Requests receive either one JSON object (`application/json`) or an SSE stream (`text/event-stream`).
 
@@ -26,14 +27,21 @@ Specification: [MCP 2025-11-25](https://modelcontextprotocol.io/specification/20
 
 `DELETE /mcp` ends the session.
 
-The local default origin is `http://127.0.0.1:8080`. The AWS staging origin is the internet-facing load balancer in `ap-southeast-2`, `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com`, on HTTP port 80. Paths are the same on both origins. Staging MCP is `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp`.
+The local default origin is `http://127.0.0.1:8080`.
+The AWS staging deployment provides dual access:
+1. Direct HTTP origin: `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com` (port 80) for existing app integrations.
+2. CloudFront HTTPS origin: `https://d13b140h08qjom.cloudfront.net` (port 443 with valid SSL certificate) for ChatGPT and external clients requiring TLS encryption.
 
-Set `QUOTIENT_RESOURCE_URL` to the canonical MCP URL, including the `/mcp` path. That value is the OAuth resource indicator. On staging it is the staging MCP URL above.
+Paths are identical across both origins.
 
-Protected resource metadata, unauthenticated:
+Set `QUOTIENT_RESOURCE_URL` to the canonical MCP URL, including the `/mcp` path. That value is the OAuth resource indicator.
+
+Protected resource & discovery metadata, unauthenticated:
 
 - `GET /.well-known/oauth-protected-resource`
 - `GET /.well-known/oauth-protected-resource/mcp`
+- `GET /.well-known/oauth-authorization-server`
+- `GET /.well-known/openid-configuration`
 
 ## Authorization
 
@@ -94,7 +102,29 @@ The session is bound to the authorization subject. A different subject on the sa
 
 ## External client
 
-An assistant outside this portal calls the canonical MCP URL. Locally that is `http://127.0.0.1:8080/mcp`. On AWS staging that is `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp`. Set `QUOTIENT_RESOURCE_URL` to that URL, including `/mcp`. When the variable is unset, the server uses the local default. The portal's same-origin `/mcp` is a browser path. It is not the partner address.
+An assistant outside this portal calls the canonical MCP URL.
+- Staging HTTPS (ChatGPT & TLS clients): `https://d13b140h08qjom.cloudfront.net/mcp`
+- Staging HTTP (existing integrations): `http://axion-meeting-staging-315925467.ap-southeast-2.elb.amazonaws.com/mcp`
+- Local development: `http://127.0.0.1:8080/mcp`
+
+### Connecting with ChatGPT
+
+OpenAI ChatGPT Apps / Custom GPT Actions require HTTPS and standard OAuth 2.0 / 2.1 authentication settings.
+
+1. **Server URL:**
+   `https://d13b140h08qjom.cloudfront.net/mcp`
+2. **Authentication Type:**
+   Select **OAuth** (or **None** for open read operations permitted by policy).
+3. **OAuth Endpoints:**
+   - Authorization URL: `https://axion-meeting-staging.auth.ap-southeast-2.amazoncognito.com/oauth2/authorize`
+   - Token URL: `https://axion-meeting-staging.auth.ap-southeast-2.amazoncognito.com/oauth2/token`
+   - Client ID: `4ahjkla5fshlcd8kvvc4s3lrhr`
+   - Client Secret: *(Leave empty / not required — uses PKCE S256)*
+   - Scopes: `quotient/mcp openid email`
+4. **Whitelisted Redirect URIs in Cognito:**
+   - `https://chatgpt.com/aip/oauth/callback`
+   - `https://chat.openai.com/aip/oauth/callback`
+   - `http://localhost:3000/callback`
 
 `initialize` is a JSON-RPC request with `protocolVersion` `2025-11-25` and `clientInfo`. It omits `MCP-Session-Id`. Every later request sends `MCP-Session-Id` from the initialize response and `MCP-Protocol-Version: 2025-11-25`. The next call is `notifications/initialized`. Other methods before that notification receive JSON-RPC `-32600`.
 
