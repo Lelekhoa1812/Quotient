@@ -935,6 +935,8 @@ class Port:
                 raw_claims = row.get("claims")
                 raw_findings = row.get("findings")
                 if raw_claims and raw_findings:
+                    none_set = set(row.get("none_in_transcript") or [])
+                    not_eval_set = set(row.get("not_evaluated") or [])
                     existing_data = {
                         "claims": raw_claims,
                         "findings": raw_findings,
@@ -942,7 +944,13 @@ class Port:
                         "omissions": row.get("omissions"),
                         "gaps": row.get("gaps"),
                         "disagreements": row.get("disagreements"),
-                        "dimensions": {name: "none_in_transcript" for name in (row.get("none_in_transcript") or [])},
+                        "dimensions": {
+                            name: "none_in_transcript"
+                            for name in none_set
+                        } | {
+                            name: "not_evaluated"
+                            for name in not_eval_set
+                        },
                     }
         self.run_quality(
             ledger,
@@ -1427,9 +1435,25 @@ class Port:
             raw_claims = reindex_data.get("claims") or []
             raw_findings = reindex_data.get("findings") or []
             if raw_claims and raw_findings:
+                restored_findings = [_restore_finding(f) for f in raw_findings]
+                from graph.lenses import LENS_ORDER
+                findings_by_dim: dict[str, list] = {}
+                for f in restored_findings:
+                    findings_by_dim.setdefault(f.dimension, []).append(f)
+
+                raw_dims = reindex_data.get("dimensions") or {}
+                dims: dict[str, object] = {}
+                for name in LENS_ORDER:
+                    if raw_dims.get(name) in ("none_in_transcript", "not_evaluated"):
+                        dims[name] = raw_dims[name]
+                    elif name in findings_by_dim:
+                        dims[name] = findings_by_dim[name]
+                    else:
+                        dims[name] = "none_in_transcript"
+
                 existing_kwargs = {
                     "existing_claims": [_restore_claim(c) for c in raw_claims],
-                    "existing_findings": [_restore_finding(f) for f in raw_findings],
+                    "existing_findings": restored_findings,
                     "existing_synthesis": [_restore_sentence(s) for s in (reindex_data.get("synthesis") or [])],
                     "existing_omissions": [
                         Omission(span_id=o["span_id"], reason=o.get("reason", ""))
@@ -1442,7 +1466,7 @@ class Port:
                         if isinstance(g, dict)
                     ],
                     "existing_disagreements": reindex_data.get("disagreements") or [],
-                    "existing_dimensions": reindex_data.get("dimensions") or {},
+                    "existing_dimensions": dims,
                 }
         try:
             result = self._quality_run(
