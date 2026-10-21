@@ -15,7 +15,7 @@ from graph.claim import finalize_claim
 from graph.cross import overlapping, record_cross
 from graph.publish import gate
 from jev.sort import apply_order
-from graph.state import Claim, Gap, Omission
+from graph.state import Claim, Finding, Gap, Omission, Sentence
 from graph.synth import dissent_payload, dropped_ids, sentences_from, synthesis_omissions, synthesis_payload
 from loop.pool import map_ordered
 from media.compact import apply_omissions
