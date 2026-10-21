@@ -10,10 +10,10 @@ from conftest import open_session, rpc
 
 EXPECTED = {
     "submit_meeting": {
-        "taskSupport": "required",
+        "taskSupport": "optional",
         "readOnlyHint": False,
         "destructiveHint": False,
-        "required": ["object_key"],
+        "required": [],
     },
     "prepare_context": {
         "taskSupport": "forbidden",
@@ -133,12 +133,17 @@ def test_task_support_errors_and_no_meetings_route():
         assert client.get("/meetings").status_code == 404
         assert client.post("/v1/meetings").status_code == 404
         headers = open_session(client)
-        missing_task = rpc(
+        # Calling submit_meeting without a task is now supported directly for standard MCP clients
+        direct_submit = rpc(
             client,
             headers,
             "tools/call",
-            {"name": "submit_meeting", "arguments": {"object_key": "media/a.mp4"}},
+            {"name": "submit_meeting", "arguments": {"object_key": "derivatives/meeting.mp4", "upload_complete": True}},
         )
+        assert "result" in direct_submit
+        assert not direct_submit["result"].get("isError")
+
+        # Calling get_meeting with a task is forbidden
         forbidden = rpc(
             client,
             headers,
@@ -149,7 +154,6 @@ def test_task_support_errors_and_no_meetings_route():
                 "task": {"ttl": 1000},
             },
         )
-    assert missing_task["error"]["code"] == -32601
     assert forbidden["error"]["code"] == -32601
 
 

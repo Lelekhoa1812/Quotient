@@ -77,9 +77,9 @@ TOOLS: list[dict] = [
                     "description": "Optional, at most 2000 characters: what the meeting is about, in the person's words. Reference only.",
                 },
             },
-            ["object_key"],
+            [],
         ),
-        "execution": {"taskSupport": "required"},
+        "execution": {"taskSupport": "optional"},
         "annotations": {
             "title": "Submit meeting",
             "readOnlyHint": False,
@@ -335,7 +335,7 @@ def task_mode_error(name: str, params: dict, request_id: object) -> dict | None:
     tool = _BY_NAME.get(name)
     if tool is None:
         return error(INVALID_PARAMS, f"Unknown tool: {name}", request_id)
-    support = tool["execution"]["taskSupport"]
+    support = tool.get("execution", {}).get("taskSupport", "optional")
     has_task = "task" in params and params.get("task") is not None
     if support == "required" and not has_task:
         return error(METHOD_NOT_FOUND, "Task augmentation required for this tool", request_id)
@@ -528,7 +528,9 @@ def _optional_cursor(cursor: object) -> int:
 
 def validate_submit_arguments(arguments: dict) -> str | None:
     key = arguments.get("object_key")
-    if not isinstance(key, str):
+    if key is None or not isinstance(key, str) or not key.strip():
+        if arguments.get("filename"):
+            return None
         return "object_key is required"
     if "upload_complete" in arguments and not isinstance(arguments.get("upload_complete"), bool):
         return "upload_complete must be a boolean"
@@ -559,9 +561,7 @@ def validate_submit_arguments(arguments: dict) -> str | None:
 
 def upload_incomplete(arguments: dict) -> bool:
     key = arguments.get("object_key")
-    if not isinstance(key, str):
-        return False
-    if not key.strip():
+    if key is None or not isinstance(key, str) or not key.strip():
         return True
     return arguments.get("upload_complete") is False
 

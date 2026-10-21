@@ -166,21 +166,23 @@ sequenceDiagram
 
 ## Tools
 
-`tools/list` returns the ten tools below. Each description is safe to show before consent. `execution.taskSupport` is `required` or `forbidden`. Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
+`tools/list` returns the ten tools below. Each description is safe to show before consent. `execution.taskSupport` is `optional` (for `submit_meeting`) or `forbidden` (for all other tools). Annotations are hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. `openWorldHint` is false for every tool. `destructiveHint` is false except on `cancel_meeting`, where the spec default would otherwise treat the tool as destructive.
 
-A `forbidden` tool invoked with `params.task` returns `-32601`. `submit_meeting` invoked without `params.task` returns `-32601`.
+A `forbidden` tool invoked with `params.task` returns `-32601`. `submit_meeting` supports both standard direct tool calls (from ChatGPT, Claude, and clients without task augmentation) and task-augmented tool calls.
 
 Playback paths in tool results use `meetings/{meeting_id}?t={start_ms}`.
 
 ### `submit_meeting`
 
-`taskSupport`: `required`. Not read-only. Not destructive.
+`taskSupport`: `optional`. Not read-only. Not destructive.
 
-Starts analysis of one object already stored in the Quotient media bucket.
+Starts analysis of one media object or issues an S3 upload target for a new recording.
+- **Requesting an upload target:** Call with `filename` (e.g. `"recording.mp4"`), `media_type` (e.g. `"video/mp4"`), and an empty or omitted `object_key`. Quotient returns an upload target containing a signed HTTP PUT `upload_url` and an `object_key`.
+- **Submitting the recording:** Once uploaded (or using an existing key), call with `object_key` and `upload_complete: true` to begin analysis.
 
 | Argument | Required | Meaning |
 | --- | --- | --- |
-| `object_key` | yes | Storage key. Not a speaker name and not an action owner. |
+| `object_key` | no | Storage key in Quotient storage. Omit or leave empty when requesting an upload target. |
 | `upload_complete` | no | `false` while the multipart upload is still open. |
 | `context_names` | no | Up to 32 short strings (64 characters each) forwarded to the worker as context. They are not written onto the transcript. |
 | `idempotency_key` | no | Same key and same authorization subject return the same meeting. |

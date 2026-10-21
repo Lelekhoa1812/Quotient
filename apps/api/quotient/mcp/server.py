@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import time
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
@@ -32,6 +33,7 @@ from quotient.mcp.errors import (
     result,
 )
 from quotient.mcp.jobs import (
+    _names,
     cancel_meeting_tasks,
     notify_resources,
     resolve_client_response,
@@ -42,7 +44,8 @@ from quotient.mcp.page import decode_cursor, encode_cursor
 from quotient.mcp.prompts import get_prompt, list_prompts
 from quotient.mcp.resources import list_resources, list_templates, read_resource, reject_cursor, subscribe, unsubscribe
 from quotient.mcp.session import Session
-from quotient.mcp.tasks import LimitError, clamp_ttl, missing_task
+from quotient.mcp.tasks import LimitError, clamp_ttl, missing_task, tool_text
+from quotient.worker.port import PortError
 from quotient.mcp.tools import (
     TOOLS,
     call_immediate,
@@ -354,7 +357,9 @@ async def _tools_call(params: dict, request_id: object, session: Session, runtim
     if mode is not None:
         return mode
     if name == "submit_meeting":
-        return await _submit(params, request_id, session, runtime)
+        if "task" in params and params.get("task") is not None:
+            return await _submit(params, request_id, session, runtime)
+        return _submit_direct(params, request_id, session, runtime)
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else params.get("arguments")
     message = call_immediate(
         name,
@@ -371,6 +376,103 @@ async def _tools_call(params: dict, request_id: object, session: Session, runtim
             if name == "cancel_meeting" and isinstance(meeting_id, str):
                 cancel_meeting_tasks(runtime, session.auth.subject, meeting_id)
     return message
+
+
+def _submit_direct(params: dict, request_id: object, session: Session, runtime: object) -> dict:
+    arguments = params.get("arguments")
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return error(INVALID_PARAMS, "arguments must be an object", request_id)
+
+    key = str(arguments.get("object_key") or "").strip()
+    is_incomplete = upload_incomplete(arguments) or not key
+
+    # Case 1: Incomplete upload or requesting an upload target
+    if is_incomplete:
+        port = runtime.port  # type: ignore[attr-defined]
+        signer = getattr(port, "upload_target", None)
+        if callable(signer):
+            upload_id = secrets.token_hex(8)
+            filename = arguments.get("filename") or "recording.mp4"
+            media_type = arguments.get("media_type") or "video/mp4"
+            byte_size = arguments.get("byte_size")
+            try:
+                target = signer(upload_id, filename, media_type, byte_size)
+            except PortError as exc:
+                return {"jsonrpc": "2.0", "id": request_id, "result": tool_text({"error": exc.message}, is_error=True)}
+            except Exception as exc:
+                return {"jsonrpc": "2.0", "id": request_id, "result": tool_text({"error": str(exc)}, is_error=True)}
+            if target:
+                payload = {
+                    "status": "upload_target_issued",
+                    "upload_url": target["upload_url"],
+                    "object_key": target["object_key"],
+                    "headers": target.get("headers", {}),
+                    "method": target.get("method", "PUT"),
+                    "instructions": (
+                        "Upload target issued. Upload the recording via HTTP PUT to 'upload_url' with the specified headers. "
+                        "After the upload completes, call 'submit_meeting' with 'object_key' set to this object_key and 'upload_complete': true."
+                    ),
+                }
+                return {"jsonrpc": "2.0", "id": request_id, "result": tool_text(payload)}
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": tool_text(
+                {"error": "Object storage is not configured to issue upload targets. Provide a completed object_key under 'derivatives/'."},
+                is_error=True,
+            ),
+        }
+
+    # Case 2: Submitting an existing or uploaded object_key
+    problem = validate_submit_arguments(arguments)
+    if problem:
+        return error(INVALID_PARAMS, problem, request_id)
+
+    port = runtime.port  # type: ignore[attr-defined]
+    batch = arguments.get("context_batch")
+    if isinstance(batch, str) and batch and not arguments.get("idempotency_key"):
+        known = getattr(port, "context_items", None)
+        if not callable(known) or known(session.auth.subject, batch) is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": tool_text({"error": "The context you added was not found. Add it again and start the analysis."}, is_error=True),
+            }
+
+    extra = {}
+    if isinstance(batch, str) and batch:
+        extra["context_batch"] = batch
+    if isinstance(arguments.get("purpose"), str) and arguments["purpose"].strip():
+        extra["purpose"] = arguments["purpose"].strip()
+
+    try:
+        meeting_id = port.submit(
+            subject=session.auth.subject,
+            object_key=key,
+            context_names=_names(arguments.get("context_names")),
+            idempotency_key=arguments.get("idempotency_key"),
+            **extra,
+        )
+    except PortError as exc:
+        return {"jsonrpc": "2.0", "id": request_id, "result": tool_text({"error": exc.message}, is_error=True)}
+    except Exception as exc:
+        return {"jsonrpc": "2.0", "id": request_id, "result": tool_text({"error": str(exc)}, is_error=True)}
+
+    notify_resources(runtime, session.auth.subject, meeting_id)
+
+    payload = {
+        "status": "submitted",
+        "meeting_id": meeting_id,
+        "object_key": key,
+        "message": (
+            f"Meeting {meeting_id} submitted and queued for analysis. "
+            f"Poll 'get_meeting' with meeting_id='{meeting_id}' to monitor analysis progress. "
+            "When status is 'ready' or 'needs_review', use prompts/get (e.g. 'brief_this_meeting') or 'read_graph' to inspect findings."
+        ),
+    }
+    return {"jsonrpc": "2.0", "id": request_id, "result": tool_text(payload)}
 
 
 async def _submit(params: dict, request_id: object, session: Session, runtime: object) -> dict:
