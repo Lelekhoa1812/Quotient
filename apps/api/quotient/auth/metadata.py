@@ -30,6 +30,7 @@ class AuthSettings:
     # Fix: COGNITO_SCOPE, when set, is the scope in the metadata document, the
     # challenge, and the allow check. Unset keeps quotient:meetings.
     oauth_scope: str = SCOPE
+    cognito_domain: str = ""
 
     def document(self) -> dict:
         return {
@@ -38,6 +39,24 @@ class AuthSettings:
             "bearer_methods_supported": ["header"],
             "scopes_supported": [self.oauth_scope],
             "resource_name": "Quotient",
+        }
+
+    def authorization_server_document(self) -> dict:
+        base = self.cognito_domain.rstrip("/") if self.cognito_domain else ""
+        auth_endpoint = f"{base}/oauth2/authorize" if base else f"{self.authorization_server}/oauth2/authorize"
+        token_endpoint = f"{base}/oauth2/token" if base else f"{self.authorization_server}/oauth2/token"
+        return {
+            "issuer": self.authorization_server,
+            "authorization_endpoint": auth_endpoint,
+            "token_endpoint": token_endpoint,
+            "userinfo_endpoint": f"{base}/oauth2/userInfo" if base else "",
+            "jwks_uri": f"{self.authorization_server}/.well-known/jwks.json",
+            "response_types_supported": ["code", "token"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+            "scopes_supported": ["openid", "email", self.oauth_scope],
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+            "code_challenge_methods_supported": ["S256"],
         }
 
     def challenge(self, *, error: str | None = None) -> str:
@@ -107,6 +126,10 @@ def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> A
     resource_origin = _resource_origin(resource)
     if resource_origin:
         origins = origins | frozenset({resource_origin})
+    for extra_key in ("ALB_ORIGIN", "PUBLIC_ORIGIN", "CLOUDFRONT_ORIGIN"):
+        val = _resource_origin(env.get(extra_key, "").strip())
+        if val:
+            origins = origins | frozenset({val})
     # Motivation vs Logic
     # Motivation: The bypass makes every caller the shared subject "local-dev". It was locked
     # only for staging and production, so an unset or misspelled QUOTIENT_ENVIRONMENT ("prod")
@@ -127,4 +150,5 @@ def load_auth_settings(env: Mapping[str, str], *, auth_bypass: bool | None) -> A
         allowed_origins=origins,
         auth_bypass=enabled,
         oauth_scope=env.get("COGNITO_SCOPE", "").strip() or SCOPE,
+        cognito_domain=env.get("COGNITO_DOMAIN", "").strip(),
     )

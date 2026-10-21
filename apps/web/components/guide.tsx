@@ -9,6 +9,7 @@
  */
 import { useState, useSyncExternalStore } from "react";
 import { Check, Code, Copy, Download, FileText } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Markdown } from "@/components/markdown";
 import { apiBase, localHost } from "@/lib/origin";
 
@@ -34,15 +35,15 @@ export function ApiScreen({ contract }: { contract: string }) {
   const [message, setMessage] = useState("");
 
   async function copy(id: string, value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
+    const ok = await copyToClipboard(value);
+    if (ok) {
       setCopied(id);
       setMessage(`Copied ${label}.`);
       window.setTimeout(() => {
         setCopied((current) => (current === id ? null : current));
         setMessage("");
-      }, 1600);
-    } catch {
+      }, 2000);
+    } else {
       setMessage("That text could not be copied.");
     }
   }

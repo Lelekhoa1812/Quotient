@@ -179,14 +179,24 @@ function isDown(status: number): boolean {
 async function post(payload: unknown, timeoutMs: number): Promise<Response> {
   const headers = baseHeaders("application/json, text/event-stream");
   headers.set("content-type", "application/json");
-  try {
-    const response = await fetch(parameters.endpointPath, {
+  const attempt = async () => {
+    return await fetch(parameters.endpointPath, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
       cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
     });
+  };
+  try {
+    let response: Response;
+    try {
+      response = await attempt();
+    } catch {
+      // Retry once after a brief pause to handle transient backend CPU bursts gracefully
+      await new Promise((res) => setTimeout(res, 1200));
+      response = await attempt();
+    }
     const sid = response.headers.get("mcp-session-id");
     if (sid) sessionId = sid;
     return response;
@@ -251,7 +261,7 @@ async function readUntil(body: ReadableStream<Uint8Array>, id: number, timeoutMs
   throw new Error("MCP stream ended without a result");
 }
 
-async function request(method: string, params: unknown, timeoutMs = 20000): Promise<unknown> {
+async function request(method: string, params: unknown, timeoutMs = 45000): Promise<unknown> {
   const id = ++nextId;
   const response = await post({ jsonrpc: "2.0", id, method, params }, timeoutMs);
   if (isDown(response.status)) {

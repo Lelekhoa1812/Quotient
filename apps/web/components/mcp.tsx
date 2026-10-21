@@ -12,6 +12,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Check, Code, Copy, Download, FileText } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Markdown } from "@/components/markdown";
 import { McpDisconnected, mcp, type Phase, type ToolCatalog } from "@/lib/mcp/client";
 import { localHost } from "@/lib/origin";
@@ -101,13 +102,14 @@ export function McpScreen({ contract }: { contract: string }) {
   }, [phase]);
 
   async function copy(id: string, value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
+    const ok = await copyToClipboard(value);
+    if (ok) {
       setCopied(id);
+      setMessage("");
       window.setTimeout(() => {
         setCopied((current) => (current === id ? null : current));
-      }, 1600);
-    } catch {
+      }, 2000);
+    } else {
       setMessage("That text could not be copied.");
     }
   }

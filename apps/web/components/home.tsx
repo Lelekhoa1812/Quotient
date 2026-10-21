@@ -133,8 +133,8 @@ export function Home() {
         const linkOfMeeting = new Map<string, { taskId: string | null; sourceName: string | null }>();
         setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
         setProgress({ done: 0, total: rowsNow.length });
-        for (let start = 0; start < rowsNow.length && !cancel; start += 6) {
-          const batch = rowsNow.slice(start, start + 6);
+        for (let start = 0; start < rowsNow.length && !cancel; start += 3) {
+          const batch = rowsNow.slice(start, start + 3);
           const done = await Promise.all(batch.map(async (row) => {
             if (!row.meetingId) return row;
             try {
@@ -157,7 +157,7 @@ export function Home() {
               return { ...row, status: "unavailable" };
             }
           }));
-          rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 6)];
+          rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 3)];
           // Tie a submission made on this browser to the meeting the server lists for it, so one upload is one row.
           const merged = reconcileOrphans(rowsNow, (id) => linkOfMeeting.get(id) ?? null);
           if (merged.length !== rowsNow.length) {
@@ -167,6 +167,7 @@ export function Home() {
           if (!cancel) {
             setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
             setProgress({ done: Math.min(start + batch.length, rowsNow.length), total: rowsNow.length });
+            await new Promise((res) => setTimeout(res, 50));
           }
         }
       } catch (error) {

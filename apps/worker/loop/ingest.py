@@ -57,9 +57,10 @@ def _transcript_cache(scope: str | None, pcm: bytes, registry, context: str | No
     if directory.lower() == "off" or not scope:
         return None
     if not directory:
-        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
-            return None
-        directory = str(repo_root() / ".local" / "run" / "transcripts")
+        if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+            directory = str(repo_root() / ".local" / "run" / "transcripts")
+        else:
+            directory = str(Path(tempfile.gettempdir()) / "quotient" / "transcripts")
     key = cache_key(
         scope, pcm, handoff=SONIC_HANDOFF_SAMPLES, model=SONIC_MODEL, version=registry.prompt(SONIC).version, context=context
     )

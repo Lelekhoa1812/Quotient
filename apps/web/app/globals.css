@@ -2518,6 +2518,17 @@ label:has(input[type="file"]:focus-visible) {
   background: color-mix(in srgb, var(--mark) 9%, transparent);
 }
 .q-stale p { margin: 0; flex: 1 1 16rem; }
+.q-stale.is-working {
+  border-color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 14%, transparent);
+}
+.q-spin {
+  animation: q-spin 1s linear infinite;
+}
+@keyframes q-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 .q-voice-dialog { width: min(40rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); }
 .q-voice-dialog .q-dialog-body { max-height: calc(100vh - 2rem); overflow-y: auto; }

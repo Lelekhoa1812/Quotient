@@ -27,9 +27,10 @@ def artifact_dir(scope: str | None) -> Path | None:
         return None
     if configured:
         return Path(configured) / "artifacts"
-    if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local":
-        return None
-    return Path(__file__).resolve().parents[3] / ".local" / "run" / "artifacts"
+    if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+        return Path(__file__).resolve().parents[3] / ".local" / "run" / "artifacts"
+    # Container / staging environment: cache in temp directory so reindex reuses scans
+    return Path(tempfile.gettempdir()) / "quotient" / "artifacts"
 
 
 def artifact_key(scope: str, kind: str, pcm: bytes, *settings: object) -> str:

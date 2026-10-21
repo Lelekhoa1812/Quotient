@@ -329,3 +329,50 @@ def test_the_session_store_is_bounded():
         store.create(auth)
     assert len(store._items) == sessions.MAX_SESSIONS
     assert store.get(first.session_id) is None and first.closed
+
+
+def test_oauth_authorization_server_and_openid_configuration_discovery():
+    app = create_app(
+        auth_bypass=True,
+        port=MemoryPort(),
+        environ={
+            "QUOTIENT_ENVIRONMENT": "local",
+            "COGNITO_ISSUER": ISSUER,
+            "COGNITO_DOMAIN": "https://test.auth.ap-southeast-2.amazoncognito.com",
+            "COGNITO_SCOPE": SCOPE,
+        },
+    )
+    with TestClient(app) as client:
+        auth_server = client.get("/.well-known/oauth-authorization-server")
+        assert auth_server.status_code == 200
+        auth_data = auth_server.json()
+        assert auth_data["issuer"] == ISSUER
+        assert auth_data["authorization_endpoint"] == "https://test.auth.ap-southeast-2.amazoncognito.com/oauth2/authorize"
+        assert auth_data["token_endpoint"] == "https://test.auth.ap-southeast-2.amazoncognito.com/oauth2/token"
+
+        openid_config = client.get("/.well-known/openid-configuration")
+        assert openid_config.status_code == 200
+        openid_data = openid_config.json()
+        assert openid_data["issuer"] == ISSUER
+        assert openid_data["token_endpoint"] == "https://test.auth.ap-southeast-2.amazoncognito.com/oauth2/token"
+
+
+def test_post_mcp_accepts_application_json_or_wildcard():
+    app = create_app(auth_bypass=True, port=MemoryPort(), environ={"QUOTIENT_ENVIRONMENT": "local"})
+    with TestClient(app) as client:
+        init_body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"},
+            },
+        }
+        res_json = client.post("/mcp", headers={"Accept": "application/json"}, json=init_body)
+        assert res_json.status_code == 200
+        assert res_json.json()["result"]["serverInfo"]["name"] == "quotient"
+
+        res_wildcard = client.post("/mcp", headers={"Accept": "*/*"}, json=init_body)
+        assert res_wildcard.status_code == 200

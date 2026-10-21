@@ -122,6 +122,16 @@ def mcp_routes(runtime: object) -> list:
         await _audit_http(request, response, started, operation="metadata")
         return response
 
+    async def auth_server_metadata(request: Request) -> Response:
+        if request.method == "OPTIONS":
+            return _cors(request, runtime, Response(status_code=204))
+        started = time.perf_counter()
+        doc = getattr(runtime.settings, "authorization_server_document", None)
+        payload = doc() if callable(doc) else runtime.settings.document()  # type: ignore[attr-defined]
+        response = _cors(request, runtime, JSONResponse(payload))
+        await _audit_http(request, response, started, operation="auth_metadata")
+        return response
+
     # Motivation vs Logic
     # Motivation: The load balancer target check must not read meetings, tokens,
     # or the ledger. A 200 here only means the process is accepting HTTP.
@@ -138,6 +148,8 @@ def mcp_routes(runtime: object) -> list:
             endpoint=metadata,
             methods=["GET", "OPTIONS"],
         ),
+        Route("/.well-known/oauth-authorization-server", endpoint=auth_server_metadata, methods=["GET", "OPTIONS"]),
+        Route("/.well-known/openid-configuration", endpoint=auth_server_metadata, methods=["GET", "OPTIONS"]),
     ]
 
 
@@ -557,13 +569,15 @@ def _session(request: Request, runtime: object, auth: AuthContext) -> Session | 
 
 
 def _accepts(header: str | None, *, both: bool) -> Response | None:
-    parts = set()
-    if header:
-        parts = {piece.split(";", 1)[0].strip().lower() for piece in header.split(",")}
+    if not header:
+        return None
+    parts = {piece.split(";", 1)[0].strip().lower() for piece in header.split(",")}
+    if "*/*" in parts:
+        return None
     if both:
-        ok = "application/json" in parts and "text/event-stream" in parts
+        ok = "application/json" in parts or "text/event-stream" in parts
     else:
-        ok = "text/event-stream" in parts
+        ok = "text/event-stream" in parts or "application/json" in parts
     if ok:
         return None
     return _json(error(INVALID_REQUEST, "Accept must include the required media types", None), status=406)

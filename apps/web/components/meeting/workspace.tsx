@@ -133,20 +133,53 @@ export function Workspace({ meetingId }: { meetingId: string }) {
     if (Number.isFinite(start)) playerRef.current?.seek(start);
   }, [loaded, requestedTime]);
 
-  // A meeting opened mid-analysis refreshes itself until it reaches a final status.
+  // A meeting opened mid-analysis refreshes itself adaptively until it reaches a final status.
   const working = meeting?.status === "queued" || meeting?.status === "working";
   useEffect(() => {
     if (!loaded || !working) return;
-    const timer = window.setInterval(() => {
-      void mcp
-        .getMeeting(meetingId)
-        .then(async (status) => {
-          setMeeting(status);
-          if (status.status !== "queued" && status.status !== "working") setGraph(await mcp.readGraph(meetingId));
-        })
-        .catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    let cancel = false;
+    let timeoutId: number | null = null;
+    let delay = 5000;
+
+    const poll = async () => {
+      if (cancel) return;
+      try {
+        const status = await mcp.getMeeting(meetingId);
+        if (cancel) return;
+        setMeeting(status);
+        if (status.status !== "queued" && status.status !== "working") {
+          const finalGraph = await mcp.readGraph(meetingId);
+          if (!cancel) setGraph(finalGraph);
+          return;
+        }
+        delay = typeof document !== "undefined" && document.hidden ? 15000 : 5000;
+      } catch {
+        delay = Math.min(delay * 1.5, 30000);
+      }
+      if (!cancel) {
+        timeoutId = window.setTimeout(() => void poll(), delay);
+      }
+    };
+
+    timeoutId = window.setTimeout(() => void poll(), delay);
+
+    const onVisibilityChange = () => {
+      if (typeof document !== "undefined" && !document.hidden && !cancel) {
+        if (timeoutId) window.clearTimeout(timeoutId);
+        void poll();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
+    return () => {
+      cancel = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
   }, [loaded, working, meetingId]);
 
   function setQuery(key: string, value: string) {
@@ -482,7 +515,12 @@ export function Workspace({ meetingId }: { meetingId: string }) {
         cancelLabel="Not now"
         onConfirm={() => {
           setConfirmReindex(false);
-          fire(() => mcp.reindexMeeting(meetingId));
+          setNotice("Reindexing identity in the background. Your current analysis remains available while this runs.");
+          fire(async () => {
+            await mcp.reindexMeeting(meetingId);
+            const status = await mcp.getMeeting(meetingId);
+            setMeeting(status);
+          });
         }}
         onCancel={() => setConfirmReindex(false)}
       />

@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from "react";
 import { Check, Code, Copy, Download, FileText } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Markdown } from "@/components/markdown";
 import { McpDisconnected, mcp, type SkillSummary } from "@/lib/mcp/client";
 
@@ -52,15 +53,16 @@ export function Skills() {
   }, []);
 
   async function copy(skill: Skill) {
-    try {
-      await navigator.clipboard.writeText(skill.text);
-      setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, copied: true } : item));
+    const ok = await copyToClipboard(skill.text);
+    if (ok) {
+      setSkills((current) => current.map((item) => (item.name === skill.name ? { ...item, copied: true } : item)));
       setAnnounce(`Copied ${skill.title}.`);
+      setMessage("");
       window.setTimeout(() => {
-        setSkills((current) => current.map((item) => item.name === skill.name ? { ...item, copied: false } : item));
+        setSkills((current) => current.map((item) => (item.name === skill.name ? { ...item, copied: false } : item)));
         setAnnounce("");
-      }, 1600);
-    } catch {
+      }, 2000);
+    } else {
       setMessage("That skill could not be copied.");
     }
   }

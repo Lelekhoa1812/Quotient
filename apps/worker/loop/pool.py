@@ -13,12 +13,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 def width() -> int:
-    raw = os.environ.get("QUOTIENT_WORKERS", "10")
-    try:
-        value = int(raw)
-    except ValueError:
-        value = 10
-    return max(1, min(value, 32))
+    raw = os.environ.get("QUOTIENT_WORKERS", "").strip()
+    if raw:
+        try:
+            return max(1, min(int(raw), 32))
+        except ValueError:
+            pass
+    # Scale appropriately for container environment: don't exhaust 1-2 vCPU tasks
+    cores = os.cpu_count() or 2
+    return max(2, min(cores * 2, 6))
 
 
 def map_ordered[T, R](fn: Callable[[T], R], items: Iterable[T]) -> list[R]:

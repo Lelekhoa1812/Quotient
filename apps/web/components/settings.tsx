@@ -8,6 +8,8 @@
  * when the field is filled. Blank secrets keep the saved value.
  */
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+import { Check, Copy } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { apiBase } from "@/lib/origin";
 import type { SettingField } from "@/lib/settings";
 
@@ -34,6 +36,7 @@ function IntegrationKey() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -87,11 +90,15 @@ function IntegrationKey() {
 
   async function copy() {
     if (!record?.token) return;
-    try {
-      await navigator.clipboard.writeText(record.token);
+    const ok = await copyToClipboard(record.token);
+    if (ok) {
+      setCopied(true);
       setMessage("Copied API key.");
       setError("");
-    } catch {
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    } else {
       setMessage("");
       setError("The API key could not be copied.");
     }
@@ -132,7 +139,15 @@ function IntegrationKey() {
             <button className="q-btn-ghost" type="button" aria-pressed={visible} onClick={() => setVisible((current) => !current)}>
               {visible ? "Hide" : "Show"}
             </button>
-            <button className="q-btn-ghost" type="button" onClick={() => void copy()}>Copy</button>
+            <button
+              className="q-btn-ghost inline-flex items-center gap-1.5"
+              type="button"
+              aria-label={copied ? "Copied API key" : "Copy API key"}
+              onClick={() => void copy()}
+            >
+              {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+              <span>{copied ? "Copied" : "Copy"}</span>
+            </button>
             <button className="q-btn-ghost" type="button" disabled={busy} onClick={() => void send("revoke")}>
               {busy ? "Revoking" : "Revoke"}
             </button>

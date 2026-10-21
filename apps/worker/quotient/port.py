@@ -14,6 +14,7 @@ import importlib.util
 import shutil
 import json
 import os
+import queue
 import secrets
 import subprocess
 import sys
@@ -383,13 +384,16 @@ class Port:
                 if isinstance(idem, str):
                     self._idempotency[(str(row.get("subject", "")), idem)] = row["meeting_id"]
             self._save_locked()
+        self._work_queue: queue.Queue[str] = queue.Queue()
+        self._active_analysis: str | None = None
+        self._worker_thread = threading.Thread(
+            target=self._queue_worker,
+            daemon=True,
+            name="quotient-analysis-worker",
+        )
+        self._worker_thread.start()
         for meeting_id in resume_ids:
-            threading.Thread(
-                target=self._analyze,
-                args=(meeting_id,),
-                name="quotient-analysis-resume",
-                daemon=True,
-            ).start()
+            self._enqueue_analysis(meeting_id)
 
     @staticmethod
     def _claim_store(state_path: Path | None):
@@ -494,18 +498,8 @@ class Port:
                 raise
             if idempotency_key:
                 self._idempotency[(subject, idempotency_key)] = meeting_id
-        # Bugs vs Fixes
-        # Bug: submit stored a queued row and returned. Nothing called Sonic,
-        # Pegasus, or the publish gate, so tasks/get stayed queued.
-        # Fix: Start one daemon thread per new meeting. It resolves the object
-        # key, runs the ledger, then projects the gate. A second idempotent
-        # submit does not start another thread.
-        threading.Thread(
-            target=self._analyze,
-            args=(meeting_id,),
-            name="quotient-analysis",
-            daemon=True,
-        ).start()
+        # Queue for sequential background analysis so multiple concurrent jobs never saturate Fargate CPU/memory.
+        self._enqueue_analysis(meeting_id)
         return meeting_id
 
     def prepare_context(self, subject: str, files: list[dict]) -> dict | None:
@@ -615,11 +609,37 @@ class Port:
         except Exception:
             pass
 
+    def _enqueue_analysis(self, meeting_id: str) -> None:
+        """Enqueue a meeting for sequential background analysis so concurrent jobs never saturate Fargate CPU/memory."""
+        with self._lock:
+            if self._active_analysis is not None and self._active_analysis != meeting_id:
+                row = self._rows.get(meeting_id)
+                if row and row.get("status") == "queued":
+                    row["progress_message"] = "Queued: waiting for active analysis to finish"
+                    self._save_locked()
+        self._work_queue.put(meeting_id)
+
+    def _queue_worker(self) -> None:
+        """Single-task background worker: processes meetings one at a time to preserve system stability."""
+        while True:
+            meeting_id = self._work_queue.get()
+            try:
+                with self._lock:
+                    self._active_analysis = meeting_id
+                self._analyze(meeting_id)
+            except Exception as exc:
+                print(f"analysis queue worker error for {meeting_id}: {exc}", file=sys.stderr, flush=True)
+            finally:
+                with self._lock:
+                    if self._active_analysis == meeting_id:
+                        self._active_analysis = None
+                self._work_queue.task_done()
+
     def _analyze(self, meeting_id: str) -> None:
         try:
             with self._lock:
                 row = self._rows.get(meeting_id)
-                if row is None or row["status"] in {"cancelled", "failed"}:
+                if row is None or row["status"] in {"cancelled", "failed"} or _reindex_stopped(row):
                     return
                 object_key = row["object_key"]
                 names = tuple(
@@ -627,6 +647,8 @@ class Port:
                 )
                 reindex = bool(row.get("reindexing"))
                 row["status"] = "working"
+                if reindex:
+                    row["progress_message"] = "Reindexing identities"
                 row["updated_at"] = _now()
                 self._save_locked()
             self._run_meeting(meeting_id, object_key, names, reindex=reindex)
@@ -656,6 +678,8 @@ class Port:
         local cache when they are there; the language-model stages run again."""
         with self._lock:
             row = self._owned(meeting_id, subject)
+            if row.get("reindexing") and row.get("status") in {"queued", "working"}:
+                return copy.deepcopy(row)
             if row["status"] in {"queued", "working"}:
                 _raise("conflict", "The analysis is still running.")
             if row["status"] == "cancelled":
@@ -669,12 +693,7 @@ class Port:
             row["updated_at"] = _now()
             self._save_locked()
             result = copy.deepcopy(row)
-        threading.Thread(
-            target=self._analyze,
-            args=(meeting_id,),
-            name="quotient-reindex",
-            daemon=True,
-        ).start()
+        self._enqueue_analysis(meeting_id)
         return result
 
     def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...], reindex: bool = False) -> None:

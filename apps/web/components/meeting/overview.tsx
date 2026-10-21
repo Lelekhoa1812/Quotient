@@ -171,7 +171,14 @@ export function Overview({
   const unknownSet = new Set(unknown);
   return (
     <section className="q-overview" aria-label="Meeting overview">
-      {identity && !identity.reindexing && (identity.stale || identity.error) ? (
+      {identity && identity.reindexing ? (
+        <div className="q-stale is-working" role="status">
+          <RotateCw size={16} className="q-spin" aria-hidden="true" />
+          <p>
+            Reindexing identity is currently running in the background. The earlier analysis remains active while updates are being calculated.
+          </p>
+        </div>
+      ) : identity && !identity.reindexing && (identity.stale || identity.error) ? (
         <div className="q-stale" role="status">
           <RotateCw size={16} aria-hidden="true" />
           <p>
