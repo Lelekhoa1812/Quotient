@@ -11,7 +11,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Check, Code, Copy, Download, FileText } from "lucide-react";
 import { copyToClipboard } from "@/lib/clipboard";
 import { Markdown } from "@/components/markdown";
-import { apiBase, localHost } from "@/lib/origin";
+import { httpMcpUrl, httpsMcpUrl, localHost } from "@/lib/origin";
 
 type View = "formatted" | "source";
 
@@ -29,7 +29,9 @@ export function ApiScreen({ contract }: { contract: string }) {
   const origin = useSyncExternalStore(originSubscribe, () => window.location.origin, () => "");
   const hostname = useSyncExternalStore(originSubscribe, () => window.location.hostname, () => "");
   const location = hostname ? { hostname, origin } : null;
-  const base = apiBase(location);
+  const isLocal = !location || localHost(location.hostname);
+  const secureBase = httpsMcpUrl(location).replace(/\/mcp$/, "");
+  const directBase = httpMcpUrl(location).replace(/\/mcp$/, "");
   const [view, setView] = useState<View>("formatted");
   const [copied, setCopied] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -59,7 +61,8 @@ export function ApiScreen({ contract }: { contract: string }) {
   }
 
   const rows: { id: string; label: string; value: string; note?: string }[] = [
-    { id: "base", label: "API base", value: base, note: location && !localHost(location.hostname) ? "This deployment." : "Local default." },
+    { id: "base-https", label: "API base (HTTPS)", value: secureBase, note: "Recommended for external apps requiring TLS encryption." },
+    { id: "base-http", label: "API base (HTTP)", value: directBase, note: isLocal ? "Local development default." : "Direct ALB origin for existing integrations." },
     { id: "header", label: "Header", value: "Authorization" },
     { id: "bearer", label: "Authorization", value: "Bearer qnt_<key_id>_<secret>", note: "The key from Settings. It does not expire." },
     { id: "on", label: "Streaming on", value: "GET /v1/jobs/{job_id}/events", note: "Set stream to true. Read progress, then one result." },

@@ -15,7 +15,7 @@ import { Check, Code, Copy, Download, FileText } from "lucide-react";
 import { copyToClipboard } from "@/lib/clipboard";
 import { Markdown } from "@/components/markdown";
 import { McpDisconnected, mcp, type Phase, type ToolCatalog } from "@/lib/mcp/client";
-import { localHost } from "@/lib/origin";
+import { httpMcpUrl, httpsMcpUrl, localHost } from "@/lib/origin";
 
 type View = "formatted" | "source";
 
@@ -50,7 +50,7 @@ function formatTool(tool: ToolCatalog): string {
   return lines.join("\n");
 }
 
-export function McpScreen({ contract }: { contract: string }) {
+export function McpScreen({ contract, cloudfrontMcpUrl }: { contract: string; cloudfrontMcpUrl?: string }) {
   const phase = useSyncExternalStore(subscribe, () => mcp.phase(), () => "idle" as Phase);
   const sessionId = useSyncExternalStore(subscribe, () => mcp.getSessionId(), () => null);
   const origin = useSyncExternalStore(originSubscribe, () => window.location.origin, () => "");
@@ -65,6 +65,10 @@ export function McpScreen({ contract }: { contract: string }) {
   const link = mcp.parameters();
   const portalUrl = origin ? `${origin}${link.endpointPath}` : link.endpointPath;
   const label = phaseLabel(phase);
+  const location = hostname ? { hostname, origin } : null;
+  const isLocal = !hostname || localHost(hostname);
+  const secureMcpUrl = httpsMcpUrl(location, cloudfrontMcpUrl);
+  const directMcpUrl = httpMcpUrl(location);
 
   useEffect(() => {
     if (mcp.phase() === "idle") {
@@ -131,8 +135,21 @@ export function McpScreen({ contract }: { contract: string }) {
   }
 
   const rows: { id: string; label: string; value: string; note?: string; copyValue: string | null }[] = [
-    { id: "url", label: "MCP URL", value: portalUrl, note: "Same origin", copyValue: portalUrl },
-    { id: "api", label: "API", value: link.apiUrl, note: hostname && !localHost(hostname) ? "This deployment." : "Local default.", copyValue: link.apiUrl },
+    {
+      id: "https-mcp",
+      label: "HTTPS MCP URL (ChatGPT & TLS)",
+      value: secureMcpUrl,
+      note: "Required for ChatGPT & external TLS clients.",
+      copyValue: secureMcpUrl,
+    },
+    {
+      id: "http-mcp",
+      label: "HTTP MCP URL (Direct API)",
+      value: directMcpUrl,
+      note: isLocal ? "Local development default." : "Direct ALB endpoint for existing integrations.",
+      copyValue: directMcpUrl,
+    },
+    { id: "url", label: "Browser proxy path", value: portalUrl, note: "Same origin", copyValue: portalUrl },
     { id: "protocol", label: "Protocol", value: link.protocolVersion, copyValue: link.protocolVersion },
     { id: "protocol-header", label: "Protocol header", value: link.protocolHeader, copyValue: link.protocolHeader },
     { id: "session-header", label: "Session header", value: link.sessionHeader, copyValue: link.sessionHeader },
@@ -165,6 +182,9 @@ export function McpScreen({ contract }: { contract: string }) {
       <section className="q-mcp-block" aria-labelledby="mcp-parameters-heading">
         <h2 id="mcp-parameters-heading">Parameters</h2>
         {message ? <p role="alert">{message}</p> : null}
+        <div className="q-mcp-notice">
+          <strong>External Assistant &amp; ChatGPT Connection:</strong> For ChatGPT, Claude, and external clients requiring TLS encryption, connect to the <strong>HTTPS MCP URL</strong> (<code>{secureMcpUrl}</code>). The <strong>HTTP MCP URL</strong> (<code>{directMcpUrl}</code>) remains fully operational for existing direct integrations.
+        </div>
         <dl className="q-mcp-params">
           {rows.map((row) => (
             <div className="q-mcp-row" key={row.id}>

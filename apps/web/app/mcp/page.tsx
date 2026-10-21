@@ -15,5 +15,6 @@ export const metadata: Metadata = { title: "MCP" };
 
 export default async function Page() {
   const contract = await readFile(path.join(process.cwd(), "../../MCP.md"), "utf8");
-  return <McpScreen contract={contract} />;
+  const cloudfrontMcpUrl = process.env.QUOTIENT_CLOUDFRONT_MCP_URL || process.env.NEXT_PUBLIC_CLOUDFRONT_MCP_URL;
+  return <McpScreen contract={contract} cloudfrontMcpUrl={cloudfrontMcpUrl} />;
 }
