@@ -220,6 +220,50 @@ def _record(item: object, fields: tuple[str, ...]) -> dict:
     return {name: getattr(item, name) for name in fields}
 
 
+def _restore_claim(raw: dict) -> object:
+    from graph.state import Claim
+    citations = raw.get("citations") or []
+    c = citations[0] if citations else {}
+    return Claim(
+        id=raw.get("claim_id", ""),
+        meeting_id="",
+        kind=raw.get("kind", "factual"),
+        proposition=raw.get("text", ""),
+        paraphrase=raw.get("text", ""),
+        quote=c.get("quote", ""),
+        span_id=c.get("span_id"),
+        char_start=c.get("char_start"),
+        char_end=c.get("char_end"),
+        start_ms=c.get("start_ms"),
+        end_ms=c.get("end_ms"),
+        status=raw.get("status", "unresolved"),
+        decision_status=raw.get("decision_status"),
+        origin=raw.get("origin", "model"),
+        coarse=bool(raw.get("coarse")),
+        overlap=bool(raw.get("overlap")),
+        confidence=raw.get("confidence", "unverified"),
+    )
+
+
+def _restore_finding(raw: dict) -> object:
+    from graph.state import Finding
+    return Finding(
+        id=raw.get("finding_id", ""),
+        dimension=raw.get("dimension", ""),
+        stance=raw.get("stance", "supported"),
+        claim_ids=list(raw.get("claim_ids") or []),
+        text=raw.get("text", ""),
+    )
+
+
+def _restore_sentence(raw: dict) -> object:
+    from graph.state import Sentence
+    return Sentence(
+        text=raw.get("text", ""),
+        finding_ids=list(raw.get("finding_ids") or []),
+    )
+
+
 # Motivation vs Logic
 # Motivation: failure_message is shown to people and returned to MCP clients. It used to be
 # "<ExceptionType>: <raw message>", which exposed local file paths and ffprobe command
@@ -782,6 +826,22 @@ class Port:
         registry = Registry()
         reasoner = Reasoner(registry, Transport())
         print("analysis stage: quality", file=sys.stderr, flush=True)
+        existing_data = None
+        if reindex:
+            with self._lock:
+                row = self._rows.get(meeting_id) or {}
+                raw_claims = row.get("claims")
+                raw_findings = row.get("findings")
+                if raw_claims and raw_findings:
+                    existing_data = {
+                        "claims": raw_claims,
+                        "findings": raw_findings,
+                        "synthesis": row.get("synthesis"),
+                        "omissions": row.get("omissions"),
+                        "gaps": row.get("gaps"),
+                        "disagreements": row.get("disagreements"),
+                        "dimensions": {name: "none_in_transcript" for name in (row.get("none_in_transcript") or [])},
+                    }
         self.run_quality(
             ledger,
             reasoner,
@@ -790,6 +850,7 @@ class Port:
             f"{self._subject_of(meeting_id)}:{meeting_id}:{self._reindex_count(meeting_id)}" if reindex else None,
             stage_callback=lambda message: self._set_progress(meeting_id, message),
             should_stop=lambda: self._is_cancelled(meeting_id),
+            reindex_data=existing_data,
         )
         for item in reasoner.fallback_log:
             print(
@@ -1235,6 +1296,7 @@ class Port:
         iteration_ceiling: int | None = None,
         stage_callback=None,
         should_stop=None,
+        reindex_data: dict | None = None,
     ):
         """Quality entrypoint. Calls loop.quality.run and stores its gate result."""
 
@@ -1252,6 +1314,31 @@ class Port:
             # Fix: Scope the checkpoint by subject. The API already scopes idempotency per subject.
             subject = (row or {}).get("subject") or ""
             checkpoint = f"{subject}\u0000{key or (row or {}).get('idempotency_key') or meeting_id or ''}"
+
+        existing_kwargs = {}
+        if reindex_data:
+            from graph.state import Gap, Omission
+
+            raw_claims = reindex_data.get("claims") or []
+            raw_findings = reindex_data.get("findings") or []
+            if raw_claims and raw_findings:
+                existing_kwargs = {
+                    "existing_claims": [_restore_claim(c) for c in raw_claims],
+                    "existing_findings": [_restore_finding(f) for f in raw_findings],
+                    "existing_synthesis": [_restore_sentence(s) for s in (reindex_data.get("synthesis") or [])],
+                    "existing_omissions": [
+                        Omission(span_id=o["span_id"], reason=o.get("reason", ""))
+                        for o in (reindex_data.get("omissions") or [])
+                        if isinstance(o, dict) and "span_id" in o
+                    ],
+                    "existing_gaps": [
+                        Gap(span_ids=g.get("span_ids", []), reason=g.get("reason", ""))
+                        for g in (reindex_data.get("gaps") or [])
+                        if isinstance(g, dict)
+                    ],
+                    "existing_disagreements": reindex_data.get("disagreements") or [],
+                    "existing_dimensions": reindex_data.get("dimensions") or {},
+                }
         try:
             result = self._quality_run(
                 ledger,
@@ -1262,6 +1349,7 @@ class Port:
                 iteration_ceiling=iteration_ceiling,
                 stage_callback=stage_callback,
                 should_stop=should_stop,
+                **existing_kwargs,
             )
         except RuntimeError as exc:
             if "queued claim" in str(exc):

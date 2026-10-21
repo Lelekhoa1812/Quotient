@@ -32,17 +32,29 @@ def cache_key(scope: str, pcm: bytes, *, handoff: int, model: str, version: obje
 
 
 class TranscriptCache:
-    def __init__(self, root: Path, key: str) -> None:
+    def __init__(self, root: Path, key: str, fallback_keys: tuple[str, ...] = ()) -> None:
         self.root = Path(root)
         self.path = self.root / f"{key}.json"
+        self.fallback_paths = [self.root / f"{k}.json" for k in fallback_keys if k != key]
         self._data = self._read()
 
     def _read(self) -> dict:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
+        candidates = [self.path, *self.fallback_paths]
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data:
+                    if candidate != self.path and not self.path.exists():
+                        try:
+                            self.root.mkdir(parents=True, exist_ok=True)
+                            self.path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                            os.chmod(self.path, 0o600)
+                        except OSError:
+                            pass
+                    return data
+            except (OSError, ValueError):
+                continue
+        return {}
 
     def get(self, session_id: str, lo: int, hi: int) -> dict | None:
         if session_id not in self._data:

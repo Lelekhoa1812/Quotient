@@ -54,17 +54,27 @@ def _transcript_cache(scope: str | None, pcm: bytes, registry, context: str | No
     from sonic.cache import TranscriptCache, cache_key
 
     directory = os.environ.get("QUOTIENT_TRANSCRIPT_CACHE_DIR", "").strip()
-    if directory.lower() == "off" or not scope:
+    if directory.lower() == "off" or not hasattr(registry, "prompt"):
         return None
     if not directory:
         if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
             directory = str(repo_root() / ".local" / "run" / "transcripts")
-        else:
+        elif scope:
             directory = str(Path(tempfile.gettempdir()) / "quotient" / "transcripts")
-    key = cache_key(
-        scope, pcm, handoff=SONIC_HANDOFF_SAMPLES, model=SONIC_MODEL, version=registry.prompt(SONIC).version, context=context
+        else:
+            return None
+    version = getattr(registry.prompt(SONIC), "version", 1)
+    primary_key = cache_key(
+        scope or "", pcm, handoff=SONIC_HANDOFF_SAMPLES, model=SONIC_MODEL, version=version, context=context
     )
-    return TranscriptCache(Path(directory), key)
+    fallback_keys = [
+        cache_key(
+            fb_scope, pcm, handoff=SONIC_HANDOFF_SAMPLES, model=SONIC_MODEL, version=version, context=context
+        )
+        for fb_scope in ("local-dev", "portal", "", "staging")
+        if fb_scope != (scope or "")
+    ]
+    return TranscriptCache(Path(directory), primary_key, fallback_keys=tuple(fallback_keys))
 
 
 def resolve_object(object_key: str) -> Path:

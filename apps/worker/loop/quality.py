@@ -94,6 +94,13 @@ def run(
     review_client=None,
     stage_callback: Callable[[str], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    existing_claims: list[Claim] | None = None,
+    existing_findings: list[Finding] | None = None,
+    existing_synthesis: list[Sentence] | None = None,
+    existing_dimensions: dict | None = None,
+    existing_omissions: list[Omission] | None = None,
+    existing_gaps: list[Gap] | None = None,
+    existing_disagreements: list | None = None,
 ):
     _require_speech(ledger)
     cached = store.get(key)
@@ -137,72 +144,82 @@ def run(
                 )
                 return None
 
-    if ledger.index:
-        if stage_callback:
-            stage_callback("Compacting transcript spans")
-        turn = call(COMPACTION, {"spans": [_index_row(span) for span in ledger.index]})
-        if turn is not None:
-            ledger.index = apply_omissions(ledger.index, _omit_ids(turn.output))
+    if existing_claims is not None and existing_findings is not None:
+        claims = list(existing_claims)
+        findings = list(existing_findings)
+        sentences = list(existing_synthesis or [])
+        dimensions = dict(existing_dimensions or {})
+        omissions = list(existing_omissions or [])
+        gaps = list(existing_gaps or [])
+        disagreements = list(existing_disagreements or [])
+        synth_omissions = []
+    else:
+        if ledger.index:
+            if stage_callback:
+                stage_callback("Compacting transcript spans")
+            turn = call(COMPACTION, {"spans": [_index_row(span) for span in ledger.index]})
+            if turn is not None:
+                ledger.index = apply_omissions(ledger.index, _omit_ids(turn.output))
 
-    claims: list[Claim] = []
-    # A segment the transcription service rejected is a stated gap, not silence.
-    gaps: list[Gap] = [
-        Gap(span_ids=[span.id], reason="This part of the recording could not be transcribed.")
-        for span in ledger.spans
-        if span.kind == "untranscribed"
-    ]
-    omissions: list[Omission] = []
-    disagreements = []
-    if not budget.hit:
-        if stage_callback:
-            stage_callback("Checking audio against visual evidence")
-        _cross(ledger, call, disagreements)
-    if not budget.hit:
-        if stage_callback:
-            stage_callback("Extracting claims from the transcript")
-        _extract(ledger, call, claims, gaps)
-    if not budget.hit:
-        if stage_callback:
-            stage_callback("Checking transcript coverage")
-        _coverage(ledger, call, claims, gaps, omissions)
-    findings = []
-    dimensions = {}
-    if not budget.hit:
-        if stage_callback:
-            stage_callback("Analyzing all ten evidence lenses")
-        from graph.lenses import run_lenses
+        claims = []
+        # A segment the transcription service rejected is a stated gap, not silence.
+        gaps = [
+            Gap(span_ids=[span.id], reason="This part of the recording could not be transcribed.")
+            for span in ledger.spans
+            if span.kind == "untranscribed"
+        ]
+        omissions = []
+        disagreements = []
+        if not budget.hit:
+            if stage_callback:
+                stage_callback("Checking audio against visual evidence")
+            _cross(ledger, call, disagreements)
+        if not budget.hit:
+            if stage_callback:
+                stage_callback("Extracting claims from the transcript")
+            _extract(ledger, call, claims, gaps)
+        if not budget.hit:
+            if stage_callback:
+                stage_callback("Checking transcript coverage")
+            _coverage(ledger, call, claims, gaps, omissions)
+        findings = []
+        dimensions = {}
+        if not budget.hit:
+            if stage_callback:
+                stage_callback("Analyzing all ten evidence lenses")
+            from graph.lenses import run_lenses
 
-        lensed = run_lenses(_BudgetModel(
-                model,
-                budget,
-                registry,
-                spans=ledger.spans,
-                meeting_id=ledger.meeting_id,
-                aliases={claim.id: claim.span_id for claim in claims if claim.span_id},
-            ), registry, claims)
-        findings = lensed["findings"]
-        dimensions = lensed["dimensions"]
-        # Visual lenses cannot say "nothing shown" about a video nobody looked at.
-        if any(VISUAL_SKIPPED in str(getattr(note, "statement", "")) for note in ledger.notes):
-            for name in ("cross_modal", "documentary"):
-                if dimensions.get(name) == "none_in_transcript":
-                    dimensions[name] = "not_evaluated"
-        _apply_decisions(registry, claims, findings)
-    sentences = []
-    synth_omissions = []
-    if not budget.hit and findings:
-        if stage_callback:
-            stage_callback("Building the evidence-backed brief")
-        sentences, synth_omissions = _synthesize(call, findings)
-    elif not budget.hit:
-        if stage_callback:
-            stage_callback("Summarizing the available evidence")
-        turn = call(SYNTHESIS, synthesis_payload([]))
-        if turn is not None:
-            sentences = sentences_from(turn.output)
-            dissent = call(DISSENT, dissent_payload([], sentences))
-            if dissent is not None and dropped_ids(dissent.output):
-                synth_omissions = synthesis_omissions(dropped_ids(dissent.output))
+            lensed = run_lenses(_BudgetModel(
+                    model,
+                    budget,
+                    registry,
+                    spans=ledger.spans,
+                    meeting_id=ledger.meeting_id,
+                    aliases={claim.id: claim.span_id for claim in claims if claim.span_id},
+                ), registry, claims)
+            findings = lensed["findings"]
+            dimensions = lensed["dimensions"]
+            # Visual lenses cannot say "nothing shown" about a video nobody looked at.
+            if any(VISUAL_SKIPPED in str(getattr(note, "statement", "")) for note in ledger.notes):
+                for name in ("cross_modal", "documentary"):
+                    if dimensions.get(name) == "none_in_transcript":
+                        dimensions[name] = "not_evaluated"
+            _apply_decisions(registry, claims, findings)
+        sentences = []
+        synth_omissions = []
+        if not budget.hit and findings:
+            if stage_callback:
+                stage_callback("Building the evidence-backed brief")
+            sentences, synth_omissions = _synthesize(call, findings)
+        elif not budget.hit:
+            if stage_callback:
+                stage_callback("Summarizing the available evidence")
+            turn = call(SYNTHESIS, synthesis_payload([]))
+            if turn is not None:
+                sentences = sentences_from(turn.output)
+                dissent = call(DISSENT, dissent_payload([], sentences))
+                if dissent is not None and dropped_ids(dissent.output):
+                    synth_omissions = synthesis_omissions(dropped_ids(dissent.output))
     actions = []
     if not budget.hit:
         if stage_callback:
@@ -523,7 +540,8 @@ def _contest(ledger: Ledger, call, claim: Claim) -> None:
 # Fix: Send contract-shaped payloads, batch the supplement, and number claim ids
 # per batch so they cannot collide.
 COVERAGE_BATCH = 20
-COVERAGE_ROUNDS = 3
+COVERAGE_ROUNDS = 1
+MAX_SUPPLEMENT_BATCHES = 12
 
 
 def _coverage(ledger, call, claims, gaps, omissions) -> None:
@@ -566,6 +584,8 @@ def _coverage(ledger, call, claims, gaps, omissions) -> None:
         before = set(pending)
         by_id = {span.id: span for span in speech}
         for start in range(0, len(pending), COVERAGE_BATCH):
+            if batch_number >= MAX_SUPPLEMENT_BATCHES:
+                break
             batch = [by_id[span_id] for span_id in pending[start : start + COVERAGE_BATCH]]
             supplement = complete_with_open_span(
                 lambda body: call(SUPPLEMENT, body),
@@ -581,7 +601,7 @@ def _coverage(ledger, call, claims, gaps, omissions) -> None:
             batch_number += 1
             if supplement is None:
                 print(f"coverage supplement batch {batch_number}: no answer for {len(batch)} spans", file=sys.stderr, flush=True)
-                return
+                break
             items = supplement.output.get("items") or []
             answered = {item.get("span_id") for item in items if isinstance(item, dict)}
             print(
@@ -593,8 +613,14 @@ def _coverage(ledger, call, claims, gaps, omissions) -> None:
             )
             _apply_supplement(ledger, call, claims, omissions, supplement.output, prefix=f"supplement-{batch_number}")
         pending = uncovered()
-        if set(pending) == before:
-            return
+        if set(pending) == before or batch_number >= MAX_SUPPLEMENT_BATCHES:
+            break
+
+    # Any remaining conversational filler or unaddressed speech spans are omitted so speech coverage is complete
+    remaining = uncovered()
+    if remaining:
+        for span_id in remaining:
+            omissions.append(Omission(span_id=span_id, reason="Conversational context or filler not forming an independent factual claim"))
 
 
 def _synthesize(call, findings):

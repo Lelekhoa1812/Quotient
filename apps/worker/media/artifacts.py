@@ -43,20 +43,38 @@ def artifact_key(scope: str, kind: str, pcm: bytes, *settings: object) -> str:
 
 
 class ArtifactCache:
-    def __init__(self, root: Path | None, key: str) -> None:
-        self.path = Path(root) / f"{key}.json" if root is not None else None
+    def __init__(self, root: Path | None, key: str, fallback_keys: tuple[str, ...] = ()) -> None:
+        self.root = Path(root) if root is not None else None
+        self.path = self.root / f"{key}.json" if self.root is not None else None
+        self.fallback_paths = [self.root / f"{k}.json" for k in fallback_keys if k != key] if self.root is not None else []
 
     @classmethod
     def for_audio(cls, scope: str | None, kind: str, pcm: bytes, *settings: object) -> "ArtifactCache":
-        return cls(artifact_dir(scope), artifact_key(scope or "", kind, pcm, *settings))
+        primary = artifact_key(scope or "", kind, pcm, *settings)
+        fallbacks = [
+            artifact_key(fb_scope, kind, pcm, *settings)
+            for fb_scope in ("local-dev", "portal", "", "staging")
+            if fb_scope != (scope or "")
+        ]
+        return cls(artifact_dir(scope), primary, fallback_keys=tuple(fallbacks))
 
     def get(self):
         if self.path is None:
             return None
-        try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
+        candidates = [self.path, *self.fallback_paths]
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                if data is not None:
+                    if candidate != self.path and not self.path.exists():
+                        try:
+                            self.put(data)
+                        except Exception:
+                            pass
+                    return data
+            except (OSError, ValueError):
+                continue
+        return None
 
     def put(self, value) -> None:
         if self.path is None:
