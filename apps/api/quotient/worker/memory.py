@@ -366,6 +366,16 @@ class MemoryPort:
             row["updated_at"] = _now()
             return copy.deepcopy(row)
 
+    def rename_meeting(self, meeting_id: str, subject: str, title: str) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            cleaned = title.strip()
+            row["title"] = cleaned
+            row["updated_at"] = _now()
+            if isinstance(row.get("digest"), dict):
+                row["digest"]["title"] = cleaned
+            return copy.deepcopy(row)
+
     def cancel(self, meeting_id: str, subject: str) -> dict:
         with self._lock:
             row = self._owned(meeting_id, subject)

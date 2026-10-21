@@ -107,9 +107,8 @@ def test_local_startup_queues_interrupted_analysis_for_automatic_resume(tmp_path
     assert row["status"] == "queued"
     assert row["failure_message"] is None
     assert row["progress_message"] == "Restarting analysis from the source after the local app restarted"
-    assert len(scheduled) == 1
-    assert scheduled[0][1] == ("resume-me",)
-    assert scheduled[0][2:] == ("quotient-analysis-resume", True)
+    assert port._work_queue.get_nowait() == "resume-me"
+    assert any(s[2] == "quotient-analysis-worker" for s in scheduled)
 
 
 def _presign_keys(tmp_path, monkeypatch, *, own_copy_exists):
@@ -231,7 +230,8 @@ def test_a_restart_loop_cannot_resume_the_same_meeting_forever(tmp_path):
     fresh = port.meeting("loop", "owner")
     assert fresh["status"] == "failed"
     assert "interrupted too many times" in fresh["failure_message"]
-    assert scheduled == []
+    resume_threads = [s for s in scheduled if s.get("name") not in {"quotient-analysis-worker", "quotient-s3-saver"}]
+    assert resume_threads == []
 
 
 def test_claim_rows_keep_the_verdict_diagnostics_but_the_api_view_does_not_expose_them():
@@ -287,3 +287,32 @@ def test_a_ledger_that_is_damaged_or_the_wrong_shape_is_refused_and_left_exactly
         with pytest.raises(ValueError, match=str(state)):
             module.Port(None, None, None, None, state_path=state)
         assert state.read_text(encoding="utf-8") == body, name
+
+
+def test_rename_meeting_persists_title_and_updates_digest(tmp_path):
+    Port = _port_type()
+    state = tmp_path / "meetings.json"
+    port = Port(None, None, None, None, state_path=state)
+    port._rows["m1"] = {
+        "meeting_id": "m1",
+        "subject": "owner",
+        "status": "ready",
+        "title": "Old Title",
+        "digest": {"title": "Old Title"},
+        "artifacts": {},
+        "spans": [],
+    }
+    with port._lock:
+        port._save_locked()
+
+    res = port.rename_meeting("m1", "owner", "New Strategic Title")
+    assert res["title"] == "New Strategic Title"
+    assert port._rows["m1"]["title"] == "New Strategic Title"
+    assert port._rows["m1"]["digest"]["title"] == "New Strategic Title"
+
+    # Verify persisted to disk
+    restored = Port(None, None, None, None, state_path=state)
+    meeting = restored.meeting("m1", "owner")
+    assert meeting["title"] == "New Strategic Title"
+    assert meeting["digest"]["title"] == "New Strategic Title"
+

@@ -306,6 +306,23 @@ TOOLS: list[dict] = [
         "annotations": {"title": "Revise transcript text", "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
+        "name": "rename_meeting",
+        "title": "Rename meeting",
+        "description": "Rename the display title of a meeting. Updates the meeting headline and walkaway.",
+        "inputSchema": _schema({
+            "meeting_id": _MEETING,
+            "title": {"type": "string", "description": "New display title for the meeting."},
+        }, ["meeting_id", "title"]),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {
+            "title": "Rename meeting",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    },
+    {
         "name": "cancel_meeting",
         "title": "Cancel meeting",
         "description": (
@@ -372,6 +389,7 @@ def _handlers() -> dict[str, Callable]:
         "merge_speakers": _merge_speakers,
         "reindex_meeting": _reindex_meeting,
         "revise_text": _revise_text,
+        "rename_meeting": _rename_meeting,
         "cancel_meeting": _cancel_meeting,
     }
 
@@ -495,6 +513,13 @@ def _revise_text(arguments: dict, subject: str, port: object) -> dict:
         if span.get("span_id") == span_id:
             return span
     raise PortError("not_found", "Span not found.")
+
+
+def _rename_meeting(arguments: dict, subject: str, port: object) -> dict:
+    meeting_id = _required_id(arguments, "meeting_id")
+    title = _required_text(arguments, "title")
+    raw = port.rename_meeting(meeting_id, subject, title)  # type: ignore[attr-defined]
+    return summary(project_meeting(raw))
 
 
 def _cancel_meeting(arguments: dict, subject: str, port: object) -> dict:

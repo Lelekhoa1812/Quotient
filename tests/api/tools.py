@@ -69,6 +69,12 @@ EXPECTED = {
         "destructiveHint": False,
         "required": ["meeting_id", "span_id", "text"],
     },
+    "rename_meeting": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "required": ["meeting_id", "title"],
+    },
     "cancel_meeting": {
         "taskSupport": "forbidden",
         "readOnlyHint": False,
@@ -189,6 +195,28 @@ def test_prepare_context_validates_input_and_returns_one_target_per_file():
         assert body["batch_id"] == "batch1" and [u["index"] for u in body["uploads"]] == [0, 1]
         for bad in ({"files": []}, {"files": "x"}, {"files": [{}]}, {"files": [{"filename": "a.md", "byte_size": -1}]}, {"files": [{"filename": "a.md", "media_type": 5}]}, {"files": [{"filename": "x" * 201}]}, {"files": [{"filename": "a.md"}] * 21}):
             assert "error" in _call(client, headers, "prepare_context", bad)
+
+
+def test_rename_meeting_tool():
+    port = MemoryPort()
+    with TestClient(create_app(auth_bypass=True, port=port, environ={})) as client:
+        headers = open_session(client)
+        port._rows["m1"] = {
+            "meeting_id": "m1",
+            "subject": "local-dev",
+            "object_key": "rec.mp4",
+            "status": "ready",
+            "title": "Initial",
+            "artifacts": {},
+            "spans": [],
+            "review_counts": {"unresolved": 0, "contradicted": 0, "numeric_failed": 0},
+            "playback": "media",
+            "withheld": False,
+        }
+        res = _call(client, headers, "rename_meeting", {"meeting_id": "m1", "title": "Updated Title"})
+        assert "result" in res
+        assert port._rows["m1"]["title"] == "Updated Title"
+
 
 
 def test_prepare_context_without_object_storage_says_so_plainly():

@@ -738,6 +738,9 @@ export const mcp = {
   async reviseText(meetingId: string, spanId: string, text: string): Promise<void> {
     await callTool("revise_text", { meeting_id: meetingId, span_id: spanId, text });
   },
+  async renameMeeting(meetingId: string, title: string): Promise<void> {
+    await callTool("rename_meeting", { meeting_id: meetingId, title });
+  },
   async cancelMeeting(meetingId: string): Promise<void> {
     await callTool("cancel_meeting", { meeting_id: meetingId });
   },

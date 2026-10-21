@@ -66,6 +66,9 @@ def create_app(
             import asyncio
 
             await asyncio.gather(*jobs, return_exceptions=True)
+        flush_fn = getattr(runtime.port, "flush_storage", None)
+        if callable(flush_fn):
+            flush_fn()
 
     app = Starlette(routes=[*mcp_routes(runtime), *public_routes(runtime)], lifespan=lifespan)
     app.state.runtime = runtime

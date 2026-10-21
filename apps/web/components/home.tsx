@@ -247,6 +247,9 @@ export function Home() {
     // Bug: Replacing rows with the stored copy dropped each row's looked-up status, so every row showed Unknown.
     // Fix: Change only the matching row in state; the stored copy never holds the looked-up status.
     setRows((prev) => prev.map((item) => (isSameRow(item, row) ? { ...item, title: name, renamed: true } : item)));
+    if (row.meetingId) {
+      void mcp.renameMeeting(row.meetingId, name).catch(() => undefined);
+    }
   }
 
   function removeRow(row: LibraryRecord) {

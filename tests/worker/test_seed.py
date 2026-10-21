@@ -92,3 +92,45 @@ def test_a_non_list_and_an_oversized_document_are_skipped():
 
     env = {"QUOTIENT_ENVIRONMENT": "staging", "ARTIFACTS_BUCKET": "artifacts"}
     assert seed.read_remote(env, run=huge) is None
+
+
+def test_save_remote_state_writes_to_state_key():
+    seed = _seed()
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    env = {"QUOTIENT_ENVIRONMENT": "staging", "ARTIFACTS_BUCKET": "artifacts"}
+    doc = {"version": 1, "meetings": [{"meeting_id": "test-1", "subject": "portal"}]}
+    assert seed.save_remote_state(doc, env, run=run) is True
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[1] == "s3api" and cmd[2] == "put-object"
+    assert cmd[cmd.index("--key") + 1] == "state/meetings.json"
+    assert cmd[cmd.index("--bucket") + 1] == "artifacts"
+
+
+def test_read_state_or_seed_prefers_state_over_seed():
+    seed = _seed()
+    state_body = {"version": 1, "meetings": [{"meeting_id": "from-state", "subject": "portal"}]}
+    seed_body = {"version": 1, "meetings": [{"meeting_id": "from-seed", "subject": "portal"}]}
+
+    def run(command, **kwargs):
+        key = command[command.index("--key") + 1]
+        target = Path(command[-1])
+        if key == "state/meetings.json":
+            target.write_text(json.dumps(state_body), encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        elif key == "seed/meetings.json":
+            target.write_text(json.dumps(seed_body), encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="NoSuchKey")
+
+    env = {"QUOTIENT_ENVIRONMENT": "staging", "ARTIFACTS_BUCKET": "artifacts"}
+    doc, key = seed.read_state_or_seed(env, run=run)
+    assert doc is not None
+    assert key == "state/meetings.json"
+    assert doc["meetings"][0]["meeting_id"] == "from-state"
+

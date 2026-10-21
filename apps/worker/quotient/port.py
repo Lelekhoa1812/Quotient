@@ -388,10 +388,28 @@ class Port:
         self._active_analysis: str | None = None
         self._worker_thread = threading.Thread(
             target=self._queue_worker,
+            args=(),
             daemon=True,
             name="quotient-analysis-worker",
         )
         self._worker_thread.start()
+        self._remote_save_lock = threading.Lock()
+        self._remote_save_event = threading.Event()
+        self._pending_remote_save: dict | None = None
+        self._remote_save_thread: threading.Thread | None = None
+        self._stopping_remote_saver = False
+        artifacts_bucket = os.environ.get("ARTIFACTS_BUCKET", "").strip()
+        is_local = os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local"
+        self._remote_storage_enabled = bool(artifacts_bucket) and not is_local
+
+        if self._remote_storage_enabled:
+            self._remote_save_thread = threading.Thread(
+                target=self._remote_saver_loop,
+                args=(),
+                daemon=True,
+                name="quotient-s3-saver",
+            )
+            self._remote_save_thread.start()
         for meeting_id in resume_ids:
             self._enqueue_analysis(meeting_id)
 
@@ -412,22 +430,61 @@ class Port:
             raise RuntimeError("Another Quotient process is already using this meeting store. Stop it first.") from None
         return handle
 
-    def _save_locked(self) -> None:
-        if self._state_path is None:
+    def _remote_saver_loop(self) -> None:
+        while not self._stopping_remote_saver:
+            triggered = self._remote_save_event.wait(timeout=1.0)
+            if not triggered and not self._stopping_remote_saver:
+                continue
+            self._remote_save_event.clear()
+            payload = None
+            with self._remote_save_lock:
+                if self._pending_remote_save is not None:
+                    payload = self._pending_remote_save
+                    self._pending_remote_save = None
+            if payload is not None:
+                try:
+                    mod = _seed_module()
+                    if mod is not None:
+                        mod.save_remote_state(payload)
+                except Exception as exc:
+                    print(f"remote state save error: {exc}", file=sys.stderr, flush=True)
+
+    def flush_storage(self, timeout: float = 10.0) -> None:
+        if not getattr(self, "_remote_storage_enabled", False):
             return
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        # default=str: one unexpected value (an enum, a Path) must not make every later save raise.
-        encoded = json.dumps({"version": 1, "meetings": list(self._rows.values())}, ensure_ascii=False, default=str)
-        fd, temporary = tempfile.mkstemp(prefix="meetings-", suffix=".json", dir=self._state_path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self._state_path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        payload = None
+        with self._remote_save_lock:
+            payload = self._pending_remote_save
+            self._pending_remote_save = None
+        if payload is not None:
+            try:
+                mod = _seed_module()
+                if mod is not None:
+                    mod.save_remote_state(payload)
+            except Exception as exc:
+                print(f"remote state flush error: {exc}", file=sys.stderr, flush=True)
+
+    def _save_locked(self) -> None:
+        payload = {"version": 1, "meetings": list(self._rows.values())}
+        if self._state_path is not None:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            # default=str: one unexpected value (an enum, a Path) must not make every later save raise.
+            encoded = json.dumps(payload, ensure_ascii=False, default=str)
+            fd, temporary = tempfile.mkstemp(prefix="meetings-", suffix=".json", dir=self._state_path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self._state_path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+
+        if getattr(self, "_remote_storage_enabled", False):
+            with self._remote_save_lock:
+                self._pending_remote_save = payload
+            self._remote_save_event.set()
 
     def _set_progress(self, meeting_id: str, message: str) -> None:
         with self._lock:
@@ -1051,6 +1108,17 @@ class Port:
             self._save_locked()
             return copy.deepcopy(row)
 
+    def rename_meeting(self, meeting_id: str, subject: str, title: str) -> dict:
+        with self._lock:
+            row = self._owned(meeting_id, subject)
+            cleaned = title.strip()
+            row["title"] = cleaned
+            row["updated_at"] = _now()
+            if isinstance(row.get("digest"), dict):
+                row["digest"]["title"] = cleaned
+            self._save_locked()
+            return copy.deepcopy(row)
+
     def export_bytes(self, meeting_id: str, subject: str, name: str) -> tuple[str, bytes] | None:
         with self._lock:
             row = self._rows.get(meeting_id)
@@ -1457,37 +1525,50 @@ def _load_entrypoints():
 
 def load_port() -> Port:
     quality_run, checkpoints, classify_file, model_plan = _load_entrypoints()
+    is_local = os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local"
     local_state = None
-    if os.environ.get("QUOTIENT_ENVIRONMENT", "").strip().lower() == "local":
+    if is_local:
         configured = os.environ.get("QUOTIENT_LOCAL_STATE_PATH", "").strip()
         local_state = Path(configured) if configured else Path(__file__).resolve().parents[3] / ".local" / "run" / "meetings.json"
+    else:
+        local_state = Path("/tmp/quotient/meetings.json")
     port = Port(
         quality_run,
         checkpoints,
         classify_file,
         model_plan,
         state_path=local_state,
-        resume_interrupted=local_state is not None,
+        resume_interrupted=is_local,
     )
-    # Motivation vs Logic
-    # Motivation: Staging keeps each meeting in this process. Replacing the
-    # task opens an empty portal, so the review examples have to be reloaded.
-    # Logic: Read seed/meetings.json from the artifacts bucket. A local boot
-    # already restored the file ledger and skips this.
-    if local_state is None:
+    if not is_local:
         _load_seed(port)
     return port
 
 
-def _load_seed(port: Port) -> None:
+def _seed_module():
+    mod = sys.modules.get("quotient_worker_seed")
+    if mod is not None:
+        return mod
     path = Path(__file__).with_name("seed.py")
     spec = importlib.util.spec_from_file_location("quotient_worker_seed", path)
     if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        sys.modules["quotient_worker_seed"] = mod
+        return mod
+    except Exception as exc:
+        print(f"seed module exec error: {exc}", file=sys.stderr, flush=True)
+        return None
+
+
+def _load_seed(port: Port) -> None:
+    module = _seed_module()
+    if module is None:
         print("meeting seed skipped: seed module is missing", file=sys.stderr, flush=True)
         return
-    module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)
         module.load_into(port)
     except Exception as exc:
         print(f"meeting seed skipped: {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr, flush=True)
