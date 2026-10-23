@@ -2,18 +2,18 @@
   "release": "meeting.v1",
   "models": {
     "llm": {
-      "inference_profile": "global.openai.gpt-6.1-sol",
-      "fallback_inference_profile": "global.openai.gpt-6-sol",
+      "inference_profile": "au.anthropic.claude-haiku-5-5",
+      "fallback_inference_profile": "global.anthropic.claude-haiku-5-5",
       "region": "ap-southeast-2",
-      "max_output_tokens": 131072,
+      "max_output_tokens": 128000,
       "context_tokens": 1000000
     },
     "slm": {
-      "inference_profile": "global.openai.gpt-6-luna",
+      "inference_profile": "au.anthropic.claude-haiku-5-5",
       "fallback_inference_profile": null,
       "region": "ap-southeast-2",
       "max_output_tokens": 128000,
-      "context_tokens": 1050000
+      "context_tokens": 1000000
     }
   },
   "prompt_cache": {

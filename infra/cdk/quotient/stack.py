@@ -55,7 +55,8 @@ class StagingStack(Stack):
         )
         machine = MeetingMachine(self, "Workflow", queue=queue.queue, state_logs=groups.states)
         roles.grant_orchestration(machine=machine.machine, queue=queue.queue)
-        compute.api_container.add_environment("STATE_MACHINE_ARN", machine.machine.state_machine_arn)
+        compute.api_fn.add_environment("STATE_MACHINE_ARN", machine.machine.state_machine_arn)
+        compute.worker_fn.add_environment("STATE_MACHINE_ARN", machine.machine.state_machine_arn)
         compute.worker_container.add_environment("STATE_MACHINE_ARN", machine.machine.state_machine_arn)
         alarms = BillingAlarms(self, "Alarms", dlq=queue.dlq)
 
@@ -63,11 +64,13 @@ class StagingStack(Stack):
 
     def _outputs(self, network, buckets, tables, queue, auth, roles, compute, machine, alarms) -> None:
         vpc = network.vpc
+        priv_subnets = vpc.isolated_subnets if vpc.isolated_subnets else vpc.private_subnets or vpc.public_subnets
         pairs = {
             "VpcId": vpc.vpc_id,
             "PublicSubnetIds": Fn.join(",", [subnet.subnet_id for subnet in vpc.public_subnets]),
-            "PrivateSubnetIds": Fn.join(",", [subnet.subnet_id for subnet in vpc.private_subnets]),
-            "AlbDnsName": compute.alb.load_balancer_dns_name,
+            "PrivateSubnetIds": Fn.join(",", [subnet.subnet_id for subnet in priv_subnets]),
+            "ApiFunctionUrl": compute.api_fn_url.url,
+            "WebFunctionUrl": compute.web_fn_url.url,
             "McpResourceUrl": compute.mcp_resource_url,
             "CloudFrontDomain": compute.cloudfront_domain,
             "CloudFrontUrl": compute.cloudfront_url,

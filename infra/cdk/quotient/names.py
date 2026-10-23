@@ -16,8 +16,15 @@ SONIC_REGION = "ap-northeast-1"
 
 # Global inference profiles invoked from Sydney. The fallback id is the
 # pre-6.1 Sol profile used when gpt-6.1-sol is not invocable.
+PEGASUS_PROFILE = "global.twelvelabs.pegasus-1-5-v1:0"
+LLM_PROFILE = "au.anthropic.claude-haiku-5-5"
+SLM_PROFILE = "au.anthropic.claude-haiku-5-5"
+LLM_FALLBACK_PROFILE = "global.anthropic.claude-haiku-5-5"
+
 GLOBAL_PROFILES = (
-    "global.twelvelabs.pegasus-1-5-v1:0",
+    PEGASUS_PROFILE,
+    LLM_PROFILE,
+    LLM_FALLBACK_PROFILE,
     "global.openai.gpt-6.1-sol",
     "global.openai.gpt-6-luna",
     "global.openai.gpt-6-sol",
@@ -26,6 +33,7 @@ GLOBAL_PROFILES = (
 # Foundation models behind those profiles. Sonic is intentionally absent.
 GLOBAL_FOUNDATION_MODELS = (
     "twelvelabs.pegasus-1-5-v1:0",
+    "anthropic.claude-haiku-5-5",
     "openai.gpt-6.1-sol",
     "openai.gpt-6-luna",
     "openai.gpt-6-sol",

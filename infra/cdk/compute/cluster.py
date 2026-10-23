@@ -1,32 +1,28 @@
 # Motivation vs Logic
-# Motivation: Run the MCP API at a floor of one task and keep workers at zero
-# until the stage queue has depth. Chart code runs as a separate task.
-# The meeting loop still runs inside the API process, so 0.25 vCPU and 0.5 GB
-# exhausts memory on a real recording. 1 vCPU and 2 GB is the smallest Fargate
-# size that can hold ffmpeg plus an in-process analysis.
-# Logic: ARM64 Fargate in private subnets behind one public ALB. DesiredCount
-# is removed from the service resources so CloudFormation does not wait for a
-# healthy image during the first deploy and does not reset a live worker on
-# update. Application Auto Scaling owns the counts: API min 1 max 2 on CPU,
-# worker min 0 max 10 at exact queue depth (visible + in flight). The sandbox
-# task is not a service. Its image is the worker image; the worker must pass
-# the sandbox task role at RunTask. On-demand Fargate, not Spot.
+# Motivation: Run Quotient as a 100% on-demand serverless architecture to achieve
+# near-$0 idle costs while keeping fast, elastic response when active.
+# Logic: ARM64 Lambda functions with Function URLs behind CloudFront.
+# API and Web containers run with aws-lambda-adapter.
+# The worker runs on-demand via SQS event source mapping with awslambdaric (up to 15 min).
+# The ECS cluster and task definitions are retained solely for on-demand Fargate Spot
+# fallback (RunTask) for chart sandbox and long-running batch jobs.
+# Application Load Balancer and continuous ECS services are removed.
 
 from aws_cdk import (
     Aws,
     Duration,
     Fn,
     RemovalPolicy,
-    aws_applicationautoscaling as appscaling,
+    Size,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
-    aws_cloudwatch as cloudwatch,
     aws_ec2 as ec2,
     aws_ecr as ecr,
     aws_ecs as ecs,
-    aws_elasticloadbalancingv2 as elbv2,
-    aws_s3 as s3,
     aws_iam as iam,
+    aws_lambda as lambda_,
+    aws_lambda_event_sources as lambda_event_sources,
+    aws_s3 as s3,
     aws_secretsmanager as secretsmanager,
     aws_sqs as sqs,
 )
@@ -42,9 +38,13 @@ from quotient.names import (
     DERIVATIVES_PREFIX,
     GLOBAL_PROFILES,
     IMAGE_TAG,
+    LLM_FALLBACK_PROFILE,
+    LLM_PROFILE,
+    PEGASUS_PROFILE,
     PREFIX,
     REGION,
     SANDBOX_PREFIX,
+    SLM_PROFILE,
     SONIC_MODEL_ID,
     SONIC_REGION,
 )
@@ -91,11 +91,7 @@ class MeetingCompute(Construct):
             )
         )
 
-        # Bugs vs Fixes
-        # Bug: enable_fargate_capacity_providers leaves FARGATE associated, and
-        # CloudFormation cannot delete the cluster (ResourceInUseException).
-        # Fix: Launch type FARGATE is on-demand without a capacity-provider
-        # association, so rollback and delete can remove the cluster.
+        # ECS Cluster retained at 0 cost for ephemeral RunTask (chart sandbox and long jobs)
         self.cluster = ecs.Cluster(
             self,
             "Cluster",
@@ -115,60 +111,10 @@ class MeetingCompute(Construct):
             self,
             "SandboxSg",
             vpc=vpc,
-            description="Chart sandbox tasks. IAM denies Bedrock and S3 writes outside the sandbox prefix. Egress stays open so Fargate can pull the image.",
+            description="Chart sandbox tasks. IAM denies Bedrock and S3 writes outside the sandbox prefix.",
             allow_all_outbound=True,
         )
 
-        # Motivation vs Logic
-        # Motivation: A streamed analysis stays connected for a long recording.
-        # Logic: Raise the idle timeout to the load balancer maximum. The event
-        # stream also sends a comment every 15 seconds.
-        self.alb = elbv2.ApplicationLoadBalancer(
-            self,
-            "Alb",
-            vpc=vpc,
-            internet_facing=True,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-            load_balancer_name=PREFIX,
-            drop_invalid_header_fields=True,
-            http2_enabled=True,
-            idle_timeout=Duration.seconds(4000),
-        )
-        self.alb.log_access_logs(buckets.logs, "alb")
-        self.mcp_resource_url = Fn.join("", ["http://", self.alb.load_balancer_dns_name, "/mcp"])
-        self.public_origin = Fn.join("", ["http://", self.alb.load_balancer_dns_name])
-
-        # Motivation: ChatGPT and external AI assistants strictly require HTTPS for MCP.
-        # Logic: CloudFront provides an automatic, trusted https://*.cloudfront.net endpoint
-        # while keeping the ALB port 80 HTTP origin fully active for existing API clients.
-        alb_origin = origins.HttpOrigin(
-            self.alb.load_balancer_dns_name,
-            http_port=80,
-            protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-            read_timeout=Duration.seconds(60),
-            keepalive_timeout=Duration.seconds(60),
-        )
-        self.distribution = cloudfront.Distribution(
-            self,
-            "Distribution",
-            comment="Quotient MCP and Portal HTTPS distribution",
-            default_behavior=cloudfront.BehaviorOptions(
-                origin=alb_origin,
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
-                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-            ),
-        )
-        self.cloudfront_domain = self.distribution.distribution_domain_name
-        self.cloudfront_url = Fn.join("", ["https://", self.cloudfront_domain])
-        self.cloudfront_mcp_url = Fn.join("", ["https://", self.cloudfront_domain, "/mcp"])
-        # Motivation vs Logic
-        # Motivation: Settings on the load balancer has to mint the integration
-        # key. The API refuses every peer that is not loopback.
-        # Logic: One generated token is injected into the portal and the API.
-        # The portal sends it as X-Quotient-Portal. The browser never sees it.
         self.portal_token = secretsmanager.Secret(
             self,
             "PortalToken",
@@ -180,214 +126,17 @@ class MeetingCompute(Construct):
         )
         self.portal_token.grant_read(self.execution_role)
 
-        api_task = ecs.FargateTaskDefinition(
-            self,
-            "ApiTask",
-            family=f"{PREFIX}-api",
-            cpu=2048,
-            memory_limit_mib=4096,
-            runtime_platform=_PLATFORM,
-            execution_role=self.execution_role,
-            task_role=roles.api,
-        )
-        self.api_container = api_task.add_container(
-            "Api",
-            image=ecs.ContainerImage.from_ecr_repository(self.api_repo, IMAGE_TAG),
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="api", log_group=groups.api),
-            environment=self._api_environment(auth, tables, buckets),
-            secrets={"QUOTIENT_PORTAL_TOKEN": ecs.Secret.from_secrets_manager(self.portal_token)},
-            port_mappings=[ecs.PortMapping(container_port=API_PORT, protocol=ecs.Protocol.TCP)],
-            essential=True,
-        )
-        self.api_service = ecs.FargateService(
-            self,
-            "ApiService",
-            service_name=f"{PREFIX}-api",
-            cluster=self.cluster,
-            task_definition=api_task,
-            desired_count=1,
-            min_healthy_percent=100,
-            max_healthy_percent=200,
-            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
-            assign_public_ip=False,
-            security_groups=[self.api_sg],
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            health_check_grace_period=Duration.seconds(120),
-            propagate_tags=ecs.PropagatedTagSource.SERVICE,
-            enable_ecs_managed_tags=True,
-            enable_execute_command=False,
-            availability_zone_rebalancing=ecs.AvailabilityZoneRebalancing.DISABLED,
-        )
-        # Motivation vs Logic
-        # Motivation: A browser opening the load balancer asks for /. The API
-        # has no page there, so Starlette answers "Not Found".
-        # Logic: The portal is the default target, including a browser GET of
-        # /mcp. Protocol /mcp (Accept includes text/event-stream), /health,
-        # /v1, and the OAuth metadata paths stay on the API. No circuit
-        # breaker on the portal service: the first task cannot start until
-        # the image exists, and a breaker would roll the whole stack back.
-        self.web_sg = ec2.SecurityGroup(self, "WebSg", vpc=vpc, description="Quotient portal tasks.", allow_all_outbound=True)
-        # The load balancer name is only known after the bucket exists, and
-        # the bucket policy already depends on the load balancer's log bucket.
-        # A hostname pattern avoids that cycle. Presigned URLs remain the
-        # credential; CORS only lets the browser send them.
+        # S3 CORS
         for bucket in (buckets.media, buckets.artifacts):
             bucket.add_cors_rule(
                 allowed_methods=[s3.HttpMethods.GET, s3.HttpMethods.HEAD, s3.HttpMethods.PUT, s3.HttpMethods.POST],
-                allowed_origins=["http://*.elb.amazonaws.com"],
+                allowed_origins=["*"],
                 allowed_headers=["*"],
                 exposed_headers=["ETag"],
                 max_age=3600,
             )
-        web_task = ecs.FargateTaskDefinition(
-            self,
-            "WebTask",
-            family=f"{PREFIX}-web",
-            cpu=512,
-            memory_limit_mib=1024,
-            runtime_platform=_PLATFORM,
-            execution_role=self.execution_role,
-        )
-        web_task.add_container(
-            "Web",
-            image=ecs.ContainerImage.from_ecr_repository(self.web_repo, IMAGE_TAG),
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="web", log_group=groups.web),
-            environment={
-                "HOSTNAME": "0.0.0.0",
-                "PORT": str(WEB_PORT),
-                "QUOTIENT_ENVIRONMENT": "staging",
-                "QUOTIENT_API_ORIGIN": self.public_origin,
-                "QUOTIENT_MCP_URL": self.mcp_resource_url,
-                "QUOTIENT_CLOUDFRONT_ORIGIN": self.cloudfront_url,
-                "QUOTIENT_CLOUDFRONT_MCP_URL": self.cloudfront_mcp_url,
-                "NEXT_PUBLIC_CLOUDFRONT_MCP_URL": self.cloudfront_mcp_url,
-            },
-            secrets={"QUOTIENT_PORTAL_TOKEN": ecs.Secret.from_secrets_manager(self.portal_token)},
-            port_mappings=[ecs.PortMapping(container_port=WEB_PORT, protocol=ecs.Protocol.TCP)],
-            essential=True,
-        )
-        self.web_service = ecs.FargateService(
-            self,
-            "WebService",
-            service_name=f"{PREFIX}-web",
-            cluster=self.cluster,
-            task_definition=web_task,
-            desired_count=1,
-            min_healthy_percent=0,
-            max_healthy_percent=200,
-            assign_public_ip=False,
-            security_groups=[self.web_sg],
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            health_check_grace_period=Duration.seconds(180),
-            propagate_tags=ecs.PropagatedTagSource.SERVICE,
-            enable_ecs_managed_tags=True,
-            enable_execute_command=False,
-            availability_zone_rebalancing=ecs.AvailabilityZoneRebalancing.DISABLED,
-        )
-        listener = self.alb.add_listener("Http", port=80, open=True, protocol=elbv2.ApplicationProtocol.HTTP)
-        api_targets = listener.add_targets(
-            "Api",
-            priority=10,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/health", "/.well-known", "/.well-known/*", "/v1", "/v1/*"]),
-            ],
-            port=API_PORT,
-            protocol=elbv2.ApplicationProtocol.HTTP,
-            targets=[self.api_service],
-            deregistration_delay=Duration.seconds(30),
-            health_check=elbv2.HealthCheck(
-                path="/health",
-                healthy_http_codes="200",
-                interval=Duration.seconds(30),
-                timeout=Duration.seconds(5),
-                healthy_threshold_count=2,
-                unhealthy_threshold_count=3,
-            ),
-        )
-        listener.add_action(
-            "McpMethods",
-            priority=12,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_request_methods(["POST", "DELETE", "OPTIONS"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_action(
-            "McpProtocol",
-            priority=15,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_header("Accept", ["*text/event-stream*"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_action(
-            "McpJsonProtocol",
-            priority=16,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_header("Accept", ["*application/json*"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_action(
-            "McpProtocolHeader",
-            priority=17,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_header("MCP-Protocol-Version", ["*"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_action(
-            "McpSessionHeader",
-            priority=18,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_header("MCP-Session-Id", ["*"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_action(
-            "McpAuthHeader",
-            priority=19,
-            conditions=[
-                elbv2.ListenerCondition.path_patterns(["/mcp", "/mcp/*"]),
-                elbv2.ListenerCondition.http_header("Authorization", ["*"]),
-            ],
-            action=elbv2.ListenerAction.forward([api_targets]),
-        )
-        listener.add_targets(
-            "Portal",
-            port=WEB_PORT,
-            protocol=elbv2.ApplicationProtocol.HTTP,
-            targets=[self.web_service],
-            deregistration_delay=Duration.seconds(30),
-            health_check=elbv2.HealthCheck(
-                path="/",
-                healthy_http_codes="200",
-                interval=Duration.seconds(30),
-                timeout=Duration.seconds(5),
-                healthy_threshold_count=2,
-                unhealthy_threshold_count=3,
-            ),
-        )
-        # Bugs vs Fixes
-        # Bug: CPU scale-out started a second API task. The meeting lives in
-        # the first process, so a poll that landed on the new task marked the
-        # job failed ("no longer on this server") while analysis was still
-        # running.
-        # Fix: Keep a single API task. A second task does not share that
-        # memory, and the worker service is what scales with the queue.
-        api_scale = self.api_service.auto_scale_task_count(min_capacity=1, max_capacity=1)
-        api_scale.scale_on_cpu_utilization(
-            "Cpu",
-            target_utilization_percent=70,
-            scale_in_cooldown=Duration.minutes(5),
-            scale_out_cooldown=Duration.minutes(1),
-        )
 
+        # Sandbox Task Definition (for ephemeral chart generation via RunTask)
         self.sandbox_task = ecs.FargateTaskDefinition(
             self,
             "SandboxTask",
@@ -412,7 +161,8 @@ class MeetingCompute(Construct):
             essential=True,
         )
 
-        worker_task = ecs.FargateTaskDefinition(
+        # Worker Task Definition (retained for fallback long-running batch execution via RunTask)
+        self.worker_task = ecs.FargateTaskDefinition(
             self,
             "WorkerTask",
             family=f"{PREFIX}-worker",
@@ -422,39 +172,161 @@ class MeetingCompute(Construct):
             execution_role=self.execution_role,
             task_role=roles.worker,
         )
-        self.worker_container = worker_task.add_container(
+        self.worker_container = self.worker_task.add_container(
             "Worker",
             image=ecs.ContainerImage.from_ecr_repository(self.worker_repo, IMAGE_TAG),
             logging=ecs.LogDrivers.aws_logs(stream_prefix="worker", log_group=groups.worker),
             environment=self._worker_environment(tables, buckets, work, vpc),
             essential=True,
         )
-        self.worker_service = ecs.FargateService(
-            self,
-            "WorkerService",
-            service_name=f"{PREFIX}-worker",
-            cluster=self.cluster,
-            task_definition=worker_task,
-            desired_count=0,
-            min_healthy_percent=0,
-            max_healthy_percent=100,
-            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
-            assign_public_ip=False,
-            security_groups=[self.worker_sg],
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            propagate_tags=ecs.PropagatedTagSource.SERVICE,
-            enable_ecs_managed_tags=True,
-            enable_execute_command=False,
-            availability_zone_rebalancing=ecs.AvailabilityZoneRebalancing.DISABLED,
-        )
-        self._scale_workers(work)
-        _release_desired_count(self.api_service)
-        _release_desired_count(self.worker_service)
+
         roles.grant_sandbox_launch(
             cluster=self.cluster,
             sandbox_task=self.sandbox_task,
             execution_role=self.execution_role,
         )
+
+        # Serverless API Lambda Function
+        api_env = self._api_environment(auth, tables, buckets)
+        api_env["QUOTIENT_PORTAL_TOKEN"] = self.portal_token.secret_value.unsafe_unwrap()
+        api_env["PORT"] = "8080"
+        api_env["AWS_LWA_PORT"] = "8080"
+        api_env["AWS_LWA_READINESS_CHECK_PATH"] = "/health"
+        api_env["WORK_QUEUE_URL"] = work.queue_url
+
+        self.api_fn = lambda_.DockerImageFunction(
+            self,
+            "ApiFn",
+            function_name=f"{PREFIX}-api",
+            code=lambda_.DockerImageCode.from_ecr(self.api_repo, tag_or_digest=IMAGE_TAG),
+            architecture=lambda_.Architecture.ARM_64,
+            memory_size=2048,
+            timeout=Duration.seconds(300),
+            role=roles.api,
+            environment=api_env,
+            log_group=groups.api,
+        )
+        self.api_fn_url = self.api_fn.add_function_url(
+            auth_type=lambda_.FunctionUrlAuthType.NONE,
+            invoke_mode=lambda_.InvokeMode.BUFFERED,
+        )
+
+        # Serverless Web (Portal) Lambda Function
+        self.web_role = iam.Role(
+            self,
+            "WebRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            description="Quotient staging web Lambda execution role.",
+        )
+        self.web_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
+        )
+        self.portal_token.grant_read(self.web_role)
+
+        self.web_fn = lambda_.DockerImageFunction(
+            self,
+            "WebFn",
+            function_name=f"{PREFIX}-web",
+            code=lambda_.DockerImageCode.from_ecr(self.web_repo, tag_or_digest=IMAGE_TAG),
+            architecture=lambda_.Architecture.ARM_64,
+            memory_size=1024,
+            timeout=Duration.seconds(60),
+            role=self.web_role,
+            environment={
+                "HOSTNAME": "0.0.0.0",
+                "PORT": "3000",
+                "AWS_LWA_PORT": "3000",
+                "QUOTIENT_ENVIRONMENT": "staging",
+                "QUOTIENT_PORTAL_TOKEN": self.portal_token.secret_value.unsafe_unwrap(),
+                "QUOTIENT_CLOUDFRONT_ORIGIN": "https://d13b140h08qjom.cloudfront.net",
+                "QUOTIENT_CLOUDFRONT_MCP_URL": "https://d13b140h08qjom.cloudfront.net/mcp",
+                "NEXT_PUBLIC_CLOUDFRONT_MCP_URL": "https://d13b140h08qjom.cloudfront.net/mcp",
+                "QUOTIENT_API_ORIGIN": "https://d13b140h08qjom.cloudfront.net",
+            },
+            log_group=groups.web,
+        )
+        self.web_fn_url = self.web_fn.add_function_url(
+            auth_type=lambda_.FunctionUrlAuthType.NONE,
+            invoke_mode=lambda_.InvokeMode.BUFFERED,
+        )
+
+        # Serverless SQS Worker Lambda Function (Primary on-demand executor)
+        worker_env = self._worker_environment(tables, buckets, work, vpc)
+        self.worker_fn = lambda_.DockerImageFunction(
+            self,
+            "WorkerFn",
+            function_name=f"{PREFIX}-worker",
+            code=lambda_.DockerImageCode.from_ecr(
+                self.worker_repo,
+                tag_or_digest=IMAGE_TAG,
+                entrypoint=["/usr/local/bin/python", "-m", "awslambdaric"],
+                cmd=["lambda_runner.handler"],
+            ),
+            architecture=lambda_.Architecture.ARM_64,
+            memory_size=2048,
+            ephemeral_storage_size=Size.gibibytes(2),
+            timeout=Duration.minutes(15),
+            role=roles.worker,
+            environment=worker_env,
+            log_group=groups.worker,
+        )
+        self.worker_fn.add_event_source(
+            lambda_event_sources.SqsEventSource(
+                work,
+                batch_size=1,
+                max_concurrency=10,
+            )
+        )
+
+        # CloudFront Distribution pointing to Serverless Function URLs
+        api_domain = Fn.select(2, Fn.split("/", self.api_fn_url.url))
+        web_domain = Fn.select(2, Fn.split("/", self.web_fn_url.url))
+
+        api_origin = origins.HttpOrigin(
+            api_domain,
+            protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+        )
+        web_origin = origins.HttpOrigin(
+            web_domain,
+            protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+        )
+
+        api_behavior = cloudfront.BehaviorOptions(
+            origin=api_origin,
+            viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+            cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+            cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+            origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        )
+
+        self.distribution = cloudfront.Distribution(
+            self,
+            "Distribution",
+            comment="Quotient Serverless HTTPS distribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=web_origin,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            ),
+            additional_behaviors={
+                "/health": api_behavior,
+                "/.well-known": api_behavior,
+                "/.well-known/*": api_behavior,
+                "/v1": api_behavior,
+                "/v1/*": api_behavior,
+                "/mcp": api_behavior,
+                "/mcp/*": api_behavior,
+            },
+        )
+        self.cloudfront_domain = self.distribution.distribution_domain_name
+        self.cloudfront_url = Fn.join("", ["https://", self.cloudfront_domain])
+        self.cloudfront_mcp_url = Fn.join("", ["https://", self.cloudfront_domain, "/mcp"])
+        self.public_origin = self.cloudfront_url
+        self.mcp_resource_url = self.cloudfront_mcp_url
 
     def _execution_role(self, groups: MeetingLogs) -> iam.Role:
         del groups
@@ -492,19 +364,16 @@ class MeetingCompute(Construct):
             ["https://cognito-idp.", Aws.REGION, ".amazonaws.com/", auth.pool.user_pool_id],
         )
         return {
-            "AWS_REGION": REGION,
-            "AWS_DEFAULT_REGION": REGION,
             "QUOTIENT_ENV": "staging",
             "QUOTIENT_ENVIRONMENT": "staging",
             "QUOTIENT_ROLE": "api",
             "QUOTIENT_MEDIA_BUCKET": buckets.media.bucket_name,
             "QUOTIENT_TRANSCRIPT_CACHE_DIR": "/tmp/quotient",
-            "PORT": str(API_PORT),
             "MCP_PROTOCOL_VERSION": "2025-11-25",
-            "MCP_RESOURCE_URL": self.mcp_resource_url,
-            "CLOUDFRONT_RESOURCE_URL": self.cloudfront_mcp_url,
-            "CLOUDFRONT_ORIGIN": self.cloudfront_url,
-            "ALB_ORIGIN": self.public_origin,
+            "MCP_RESOURCE_URL": "https://d13b140h08qjom.cloudfront.net/mcp",
+            "CLOUDFRONT_RESOURCE_URL": "https://d13b140h08qjom.cloudfront.net/mcp",
+            "CLOUDFRONT_ORIGIN": "https://d13b140h08qjom.cloudfront.net",
+            "ALB_ORIGIN": "https://d13b140h08qjom.cloudfront.net",
             "COGNITO_ISSUER": issuer,
             "COGNITO_CLIENT_ID": auth.client.user_pool_client_id,
             "COGNITO_DOMAIN": auth.domain.base_url(),
@@ -527,10 +396,7 @@ class MeetingCompute(Construct):
         work: sqs.IQueue,
         vpc: ec2.IVpc,
     ) -> dict[str, str]:
-        pegasus, llm, slm, fallback = GLOBAL_PROFILES
         return {
-            "AWS_REGION": REGION,
-            "AWS_DEFAULT_REGION": REGION,
             "QUOTIENT_ENV": "staging",
             "QUOTIENT_ENVIRONMENT": "staging",
             "QUOTIENT_ROLE": "worker",
@@ -547,53 +413,12 @@ class MeetingCompute(Construct):
             "BEDROCK_REGION": REGION,
             "BEDROCK_SONIC_MODEL_ID": SONIC_MODEL_ID,
             "BEDROCK_SONIC_REGION": SONIC_REGION,
-            "BEDROCK_PEGASUS_PROFILE": pegasus,
-            "BEDROCK_LLM_PROFILE": llm,
-            "BEDROCK_SLM_PROFILE": slm,
-            "BEDROCK_LLM_FALLBACK_PROFILE": fallback,
+            "BEDROCK_PEGASUS_PROFILE": PEGASUS_PROFILE,
+            "BEDROCK_LLM_PROFILE": LLM_PROFILE,
+            "BEDROCK_SLM_PROFILE": SLM_PROFILE,
+            "BEDROCK_LLM_FALLBACK_PROFILE": LLM_FALLBACK_PROFILE,
             "CLUSTER_ARN": self.cluster.cluster_arn,
             "SANDBOX_TASK_DEFINITION_ARN": self.sandbox_task.task_definition_arn,
             "SANDBOX_SECURITY_GROUP_ID": self.sandbox_sg.security_group_id,
-            "SANDBOX_SUBNET_IDS": Fn.join(",", [subnet.subnet_id for subnet in vpc.private_subnets]),
+            "SANDBOX_SUBNET_IDS": Fn.join(",", [subnet.subnet_id for subnet in vpc.public_subnets]),
         }
-
-    def _scale_workers(self, work: sqs.IQueue) -> None:
-        depth = cloudwatch.MathExpression(
-            expression="FILL(visible, 0) + FILL(inflight, 0)",
-            using_metrics={
-                "visible": work.metric_approximate_number_of_messages_visible(
-                    period=Duration.minutes(1),
-                    statistic="Maximum",
-                ),
-                "inflight": work.metric_approximate_number_of_messages_not_visible(
-                    period=Duration.minutes(1),
-                    statistic="Maximum",
-                ),
-            },
-            period=Duration.minutes(1),
-            label="VisiblePlusInFlight",
-        )
-        scaling = self.worker_service.auto_scale_task_count(min_capacity=0, max_capacity=10)
-        scaling.scale_on_metric(
-            "QueueDepth",
-            metric=depth,
-            adjustment_type=appscaling.AdjustmentType.EXACT_CAPACITY,
-            metric_aggregation_type=appscaling.MetricAggregationType.MAXIMUM,
-            evaluation_periods=1,
-            datapoints_to_alarm=1,
-            cooldown=Duration.minutes(2),
-            scaling_steps=[
-                appscaling.ScalingInterval(upper=0, change=0),
-                appscaling.ScalingInterval(lower=1, change=1),
-                appscaling.ScalingInterval(lower=2, change=2),
-                appscaling.ScalingInterval(lower=4, change=4),
-                appscaling.ScalingInterval(lower=8, change=10),
-            ],
-        )
-
-
-def _release_desired_count(service: ecs.FargateService) -> None:
-    # Autoscaling owns the count. A pinned DesiredCount makes the first deploy
-    # wait for a task that cannot start before the image exists, and a later
-    # deploy would force workers back to the template value.
-    service.node.default_child.add_property_deletion_override("DesiredCount")

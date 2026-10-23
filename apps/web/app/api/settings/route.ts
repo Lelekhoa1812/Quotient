@@ -16,8 +16,8 @@ const RELEASE: Record<string, string> = {
   AWS_BEDROCK_TRANSCRIBE: "amazon.nova-2-5-sonic",
   AWS_BEDROCK_TRANSCRIBE_REGION: "ap-northeast-1",
   AWS_BEDROCK_MEETING: "global.twelvelabs.pegasus-1-5-v1:0",
-  AWS_BEDROCK_LLM: "global.openai.gpt-6.1-sol",
-  AWS_BEDROCK_SLM: "global.openai.gpt-6-luna",
+  AWS_BEDROCK_LLM: "au.anthropic.claude-haiku-5-5",
+  AWS_BEDROCK_SLM: "au.anthropic.claude-haiku-5-5",
 };
 
 export const dynamic = "force-dynamic";

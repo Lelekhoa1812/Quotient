@@ -17,6 +17,7 @@ RUN apt-get update \
     && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 WORKDIR /app
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/api apps/api

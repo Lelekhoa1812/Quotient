@@ -28,7 +28,7 @@ class WorkQueue(Construct):
             "Work",
             queue_name=f"{PREFIX}-work",
             retention_period=Duration.days(4),
-            visibility_timeout=Duration.minutes(5),
+            visibility_timeout=Duration.minutes(16),
             receive_message_wait_time=Duration.seconds(20),
             encryption=sqs.QueueEncryption.SQS_MANAGED,
             enforce_ssl=True,

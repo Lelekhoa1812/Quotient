@@ -111,3 +111,72 @@ def test_pegasus_1_5_stop_reason_becomes_finish_reason():
         }
     )
     assert mapped == {"finishReason": "length", "message": '{"observations":[]}'}
+
+
+def test_to_converse_body_and_response_extraction():
+    from bedrock.wire import _converse_response, _to_converse_body
+
+    req = {
+        "model": "au.anthropic.claude-haiku-5-5",
+        "max_output_tokens": 128000,
+        "effort": "xhigh",
+        "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "System prefix prompt",
+                        "prompt_cache_breakpoint": {"mode": "explicit"},
+                    }
+                ],
+            },
+            {"role": "user", "content": [{"type": "input_text", "text": "Hello world"}]},
+        ],
+        "tools": [
+            {
+                "name": "search_docs",
+                "description": "Search internal docs",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ],
+    }
+
+    body = _to_converse_body(req)
+    assert body["additionalModelRequestFields"]["thinking"]["type"] == "adaptive"
+    assert body["additionalModelRequestFields"]["output_config"]["effort"] == "xhigh"
+    assert body["inferenceConfig"]["maxTokens"] == 128000
+    assert body["system"][0]["text"] == "System prefix prompt"
+    assert body["system"][1] == {"cachePoint": {"type": "default"}}
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["content"][0]["text"] == "Hello world"
+    assert body["toolConfig"]["tools"][0]["toolSpec"]["name"] == "search_docs"
+    assert body["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]["additionalProperties"] is False
+
+    # Test response parsing
+    mock_data = {
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"reasoningContent": {"reasoningText": {"text": "thinking..."}}},
+                    {"text": "Here is the result"},
+                    {"toolUse": {"name": "search_docs", "input": {"query": "pricing"}}},
+                ],
+            }
+        },
+        "usage": {
+            "cacheReadInputTokens": 1024,
+            "inputTokens": 200,
+            "outputTokens": 50,
+        },
+    }
+    parsed = _converse_response(mock_data)
+    assert parsed["output_text"] == "Here is the result"
+    assert parsed["tool_calls"] == [{"name": "search_docs", "arguments": {"query": "pricing"}}]
+    assert parsed["usage"]["cached_tokens"] == 1024

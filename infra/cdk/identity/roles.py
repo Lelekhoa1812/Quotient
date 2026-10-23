@@ -146,13 +146,20 @@ class TaskRoles(Construct):
         )
 
     def _role(self, construct_id: str, suffix: str) -> iam.Role:
-        return iam.Role(
+        role = iam.Role(
             self,
             construct_id,
             role_name=f"{PREFIX}-{suffix}",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            assumed_by=iam.CompositePrincipal(
+                iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+                iam.ServicePrincipal("lambda.amazonaws.com"),
+            ),
             description=f"Quotient staging {suffix} task role.",
         )
+        role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")
+        )
+        return role
 
     def _deny_bedrock(self, role: iam.Role) -> None:
         role.add_to_policy(

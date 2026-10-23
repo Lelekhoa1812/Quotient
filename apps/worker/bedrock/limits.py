@@ -34,10 +34,15 @@ def pegasus_output_tokens(duration_ms: int) -> int:
     raw = (duration_ms * PEGASUS_DENSITY_TOKENS + PEGASUS_DENSITY_WINDOW_MS - 1) // PEGASUS_DENSITY_WINDOW_MS
     return min(PEGASUS_MAX_OUTPUT_TOKENS, max(PEGASUS_MIN_OUTPUT_TOKENS, raw))
 
-SOL_MODEL = "global.openai.gpt-6.1-sol"
-SOL_FALLBACK = "global.openai.gpt-6-sol"
-SOL_MAX_OUTPUT_TOKENS = 131072
-LUNA_MODEL = "global.openai.gpt-6-luna"
-LUNA_MAX_OUTPUT_TOKENS = 128000
+HAIKU_MODEL = "au.anthropic.claude-haiku-5-5"
+HAIKU_FALLBACK = "global.anthropic.claude-haiku-5-5"
+HAIKU_MAX_OUTPUT_TOKENS = 128000
+
+# Haiku 5.5 is pinned for both LLM and SLM roles (with adaptive thinking effort)
+SOL_MODEL = HAIKU_MODEL
+SOL_FALLBACK = HAIKU_FALLBACK
+SOL_MAX_OUTPUT_TOKENS = HAIKU_MAX_OUTPUT_TOKENS
+LUNA_MODEL = HAIKU_MODEL
+LUNA_MAX_OUTPUT_TOKENS = HAIKU_MAX_OUTPUT_TOKENS
 REASON_REGION = "ap-southeast-2"
 INPUT_TOKEN_BUDGET = 272_000

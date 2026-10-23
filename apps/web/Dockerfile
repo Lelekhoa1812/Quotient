@@ -16,6 +16,8 @@ COPY MCP.md /MCP.md
 COPY API.md /API.md
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
-ENV NODE_ENV=production
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
+ENV NODE_ENV=production \
+    PORT=3000
 EXPOSE 3000
 CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]

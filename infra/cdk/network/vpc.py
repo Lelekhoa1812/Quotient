@@ -23,7 +23,7 @@ class MeetingVpc(Construct):
             vpc_name=PREFIX,
             ip_addresses=ec2.IpAddresses.cidr(VPC_CIDR),
             max_azs=2,
-            nat_gateways=1,
+            nat_gateways=0,
             restrict_default_security_group=True,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
@@ -33,7 +33,7 @@ class MeetingVpc(Construct):
                 ),
                 ec2.SubnetConfiguration(
                     name="private",
-                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
                     cidr_mask=24,
                 ),
             ],
@@ -41,5 +41,4 @@ class MeetingVpc(Construct):
         self.vpc.add_gateway_endpoint(
             "S3",
             service=ec2.GatewayVpcEndpointAwsService.S3,
-            subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)],
         )

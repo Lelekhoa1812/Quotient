@@ -162,10 +162,12 @@ class Reasoner:
         # rejected: the marker has to sit on a cacheable content block.
         # Fix: Put mode explicit on an input_text block. The prefix stays the
         # cached span and the user text stays after it.
+        effort = "xhigh" if prompt.model_role == "llm" else "medium"
         request = {
             "model": model_id,
             "region": REASON_REGION,
             "max_output_tokens": cap,
+            "effort": effort,
             "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
             "input": [
                 {

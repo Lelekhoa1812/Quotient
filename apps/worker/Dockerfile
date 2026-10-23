@@ -21,6 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/api apps/api
 COPY apps/worker apps/worker
+COPY apps/worker/lambda_runner.py /app/lambda_runner.py
 COPY contracts contracts
 COPY cache/transcripts/ /tmp/quotient/
 COPY cache/artifacts/ /tmp/quotient/artifacts/
@@ -28,5 +29,6 @@ RUN useradd --create-home --uid 10001 quotient \
     && chown -R quotient:quotient /app /tmp/quotient
 USER quotient
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app/apps/worker:/app/apps/api" \
     QUOTIENT_TRANSCRIPT_CACHE_DIR=/tmp/quotient
 CMD ["python", "apps/worker/idle.py"]

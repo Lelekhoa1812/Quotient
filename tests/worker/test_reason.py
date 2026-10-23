@@ -38,8 +38,10 @@ def test_two_passes_use_vendor_max_and_cache_the_prefix():
     first, second = transport.requests
     assert first["text"]["format"]["type"] == "json_schema"
     assert second["text"]["format"]["type"] == "json_schema"
-    assert first["max_output_tokens"] == SOL_MAX_OUTPUT_TOKENS == 131072
-    assert second["max_output_tokens"] == 131072
+    assert first["max_output_tokens"] == SOL_MAX_OUTPUT_TOKENS == 128000
+    assert second["max_output_tokens"] == 128000
+    assert first["effort"] == "xhigh"
+    assert second["effort"] == "xhigh"
     assert first["region"] == "ap-southeast-2"
     assert first["prompt_cache_options"] == {"mode": "explicit", "ttl": "30m"}
     assert first["input"][0]["content"][0]["prompt_cache_breakpoint"] == {"mode": "explicit"}
@@ -81,6 +83,7 @@ def test_tool_round_returns_before_the_schema_fill():
     assert sent["tools"][0]["name"] == "open_span"
     assert "$schema" not in sent["tools"][0]["parameters"]
     assert "text" not in sent
+    assert sent["effort"] == "medium"
     assert sent["max_output_tokens"] == LUNA_MAX_OUTPUT_TOKENS
 
 

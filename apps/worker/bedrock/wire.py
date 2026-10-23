@@ -195,12 +195,24 @@ class Transport:
 
     def respond(self, request: dict) -> dict:
         region = request.get("region") or "ap-southeast-2"
+        model_id = str(request.get("model") or "")
+        if _is_converse_model(model_id):
+            url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{urllib.parse.quote(model_id, safe='')}/converse"
+            converse_body = _to_converse_body(request)
+            data = self._post(
+                url,
+                converse_body,
+                model_id=model_id,
+                operation="converse",
+                timeout=180,
+            )
+            return _converse_response(data)
         body = {key: value for key, value in request.items() if key != "region"}
         url = f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1/responses"
         data = self._post(
             url,
             body,
-            model_id=str(request.get("model") or ""),
+            model_id=model_id,
             operation="respond",
             timeout=180,
         )
@@ -790,6 +802,142 @@ def _output_text(data: dict) -> str:
     if isinstance(direct, str):
         return _strip_fence(direct)
     return ""
+
+
+def _is_converse_model(model_id: str) -> bool:
+    lowered = model_id.lower()
+    return any(marker in lowered for marker in ("anthropic", "haiku", "sonnet", "opus"))
+
+
+def _has_disallowed_schema(node: object) -> bool:
+    if isinstance(node, dict):
+        if "oneOf" in node or "anyOf" in node:
+            return True
+        return any(_has_disallowed_schema(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_has_disallowed_schema(item) for item in node)
+    return False
+
+
+def _ensure_additional_properties_false(node: object) -> object:
+    if isinstance(node, dict):
+        res = {}
+        for k, v in node.items():
+            if k not in {"$schema", "$id", "title", "description", "uniqueItems"}:
+                res[k] = _ensure_additional_properties_false(v)
+        if res.get("type") == "object" and "additionalProperties" not in res:
+            res["additionalProperties"] = False
+        return res
+    if isinstance(node, list):
+        return [_ensure_additional_properties_false(item) for item in node]
+    return node
+
+
+def _to_converse_body(request: dict) -> dict:
+    system_blocks: list[dict] = []
+    messages: list[dict] = []
+    for msg in request.get("input") or []:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        contents = msg.get("content") or []
+        if role == "system":
+            for c in contents:
+                text = c.get("text") if isinstance(c, dict) else str(c)
+                if text:
+                    system_blocks.append({"text": text})
+                    if isinstance(c, dict) and (c.get("prompt_cache_breakpoint") or request.get("prompt_cache_options")):
+                        system_blocks.append({"cachePoint": {"type": "default"}})
+        elif role in ("user", "assistant"):
+            c_blocks = []
+            for c in contents:
+                text = c.get("text") if isinstance(c, dict) else str(c)
+                if text:
+                    c_blocks.append({"text": text})
+            if c_blocks:
+                messages.append({"role": role, "content": c_blocks})
+
+    effort = str(request.get("effort") or "medium")
+    body: dict = {
+        "messages": messages,
+        "additionalModelRequestFields": {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": effort},
+        },
+    }
+    if system_blocks:
+        body["system"] = system_blocks
+
+    max_tokens = request.get("max_output_tokens")
+    if isinstance(max_tokens, int) and max_tokens > 0:
+        body["inferenceConfig"] = {"maxTokens": max_tokens}
+
+    tools_in = request.get("tools")
+    if isinstance(tools_in, list) and tools_in:
+        tools = []
+        for t in tools_in:
+            if isinstance(t, dict) and isinstance(t.get("name"), str):
+                params = t.get("parameters") if isinstance(t.get("parameters"), dict) else {"type": "object", "properties": {}}
+                clean_params = _ensure_additional_properties_false(params) if isinstance(params, dict) else params
+                tools.append({
+                    "toolSpec": {
+                        "name": t["name"],
+                        "description": str(t.get("description") or ""),
+                        "inputSchema": {"json": clean_params},
+                    }
+                })
+        if tools:
+            body["toolConfig"] = {"tools": tools, "toolChoice": {"auto": {}}}
+
+    text_cfg = request.get("text")
+    if isinstance(text_cfg, dict):
+        fmt = text_cfg.get("format")
+        if isinstance(fmt, dict) and fmt.get("type") == "json_schema" and isinstance(fmt.get("schema"), dict):
+            schema = fmt["schema"]
+            if schema.get("type") == "object" and not _has_disallowed_schema(schema):
+                name = str(fmt.get("name") or "schema").replace(".", "_")
+                body["outputConfig"] = {
+                    "textFormat": {
+                        "type": "json_schema",
+                        "structure": {
+                            "jsonSchema": {
+                                "name": name,
+                                "schema": json.dumps(_ensure_additional_properties_false(schema)),
+                            }
+                        },
+                    }
+                }
+    return body
+
+
+def _converse_response(data: dict) -> dict:
+    message = data.get("output", {}).get("message", {}) if isinstance(data.get("output"), dict) else {}
+    content = message.get("content") or []
+    text_chunks: list[str] = []
+    tool_calls: list[dict] = []
+    for item in content:
+        if isinstance(item, dict):
+            if "text" in item and isinstance(item["text"], str):
+                text_chunks.append(item["text"])
+            if "toolUse" in item and isinstance(item["toolUse"], dict):
+                tu = item["toolUse"]
+                name = tu.get("name")
+                args = tu.get("input")
+                if isinstance(name, str) and isinstance(args, dict):
+                    tool_calls.append({"name": name, "arguments": args})
+    output_text = _strip_fence("".join(text_chunks))
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    cached = int(
+        usage.get("cacheReadInputTokens")
+        or usage.get("cacheReadInputTokenCount")
+        or usage.get("cached_tokens")
+        or 0
+    )
+    return {
+        "output_text": output_text,
+        "tool_calls": tool_calls,
+        "usage": {"cached_tokens": cached},
+    }
 
 
 def _strip_fence(text: str) -> str:

@@ -47,6 +47,7 @@ PINS = {
     "screen_use": "llm",
     "dissent": "slm",
     "chart": "slm",
+    "identity_fuse": "slm",
     # Motivation vs Logic
     # Motivation: The worker imports Sonic, Pegasus, the length continuation, and the Sol cross-modal pass by id.
     # Logic: Pin those routes to sonic, pegasus, or llm so isolation fails closed when a file is absent.
@@ -195,7 +196,7 @@ def test_registry_pins() -> None:
         raise AssertionError(sorted(set(routes) ^ set(PINS)))
     for route, role in PINS.items():
         entry = routes[route]
-        prompt_id = f"meeting.{route}.v1"
+        prompt_id = entry["prompt_id"] if route == "identity_fuse" else f"meeting.{route}.v1"
         if entry["active"] is not True or entry["version"] != 1:
             raise AssertionError(route)
         if role is None:
@@ -221,13 +222,13 @@ def test_model_profiles() -> None:
     registry = load_registry()
     llm = registry["models"]["llm"]
     slm = registry["models"]["slm"]
-    if llm["inference_profile"] != "global.openai.gpt-6.1-sol":
+    if llm["inference_profile"] != "au.anthropic.claude-haiku-5-5":
         raise AssertionError(llm["inference_profile"])
-    if llm["fallback_inference_profile"] != "global.openai.gpt-6-sol":
+    if llm["fallback_inference_profile"] != "global.anthropic.claude-haiku-5-5":
         raise AssertionError(llm["fallback_inference_profile"])
-    if llm["max_output_tokens"] != 131072 or llm["region"] != "ap-southeast-2":
+    if llm["max_output_tokens"] != 128000 or llm["region"] != "ap-southeast-2":
         raise AssertionError(llm)
-    if slm["inference_profile"] != "global.openai.gpt-6-luna":
+    if slm["inference_profile"] != "au.anthropic.claude-haiku-5-5":
         raise AssertionError(slm["inference_profile"])
     if slm["fallback_inference_profile"] is not None:
         raise AssertionError(slm["fallback_inference_profile"])

@@ -711,13 +711,31 @@ class Port:
             pass
 
     def _enqueue_analysis(self, meeting_id: str) -> None:
-        """Enqueue a meeting for sequential background analysis so concurrent jobs never saturate Fargate CPU/memory."""
+        """Enqueue a meeting for sequential background analysis so concurrent jobs never saturate compute."""
         with self._lock:
             if self._active_analysis is not None and self._active_analysis != meeting_id:
                 row = self._rows.get(meeting_id)
                 if row and row.get("status") == "queued":
                     row["progress_message"] = "Queued: waiting for active analysis to finish"
                     self._save_locked()
+        queue_url = os.environ.get("WORK_QUEUE_URL", "").strip()
+        if queue_url:
+            try:
+                import botocore.session
+                from bedrock.wire import iam_credentials
+                session = botocore.session.get_session()
+                creds = iam_credentials()
+                kwargs = {"region_name": os.environ.get("AWS_REGION") or "ap-southeast-2"}
+                if creds is not None:
+                    kwargs["aws_access_key_id"] = creds.access_key
+                    kwargs["aws_secret_access_key"] = creds.secret_key
+                    kwargs["aws_session_token"] = creds.token
+                sqs = session.create_client("sqs", **kwargs)
+                sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps({"meeting_id": meeting_id}))
+                print(f"enqueued meeting {meeting_id} to SQS {queue_url}", file=sys.stderr, flush=True)
+                return
+            except Exception as exc:
+                print(f"failed to enqueue to SQS: {exc}; falling back to local thread", file=sys.stderr, flush=True)
         self._work_queue.put(meeting_id)
 
     def _queue_worker(self) -> None:
