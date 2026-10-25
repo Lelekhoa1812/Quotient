@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContextModal } from "@/components/context-modal";
+import { useMcpPhase } from "@/components/shell";
 import {
   ACCEPT_ATTRIBUTE,
   EMPTY_CONTEXT,
@@ -99,11 +100,14 @@ export function Home() {
   // Set when the meeting started but some context could not be uploaded; the person opens it from here.
   const [startedTask, setStartedTask] = useState<string | null>(null);
   const contextButton = useRef<HTMLButtonElement>(null);
+  const phase = useMcpPhase();
+  const connecting = phase === "idle" || phase === "connecting";
 
   useEffect(() => {
     let cancel = false;
     const local = readLibrary();
     setRows(local);
+    setEnriching(true);
     void (async () => {
       try {
         await mcp.connect();
@@ -182,7 +186,7 @@ export function Home() {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [phase === "connected"]);
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -352,7 +356,7 @@ export function Home() {
       } else {
         setMessage(
           error instanceof McpDisconnected
-            ? "Quotient is offline, so the recording was not sent. Start Quotient and try again."
+            ? "Quotient cloud service is unreachable. Please wait a moment for services to wake up and try again."
             : sendingContext
               ? "The meeting could not be started. Try again, or remove the context to start without it."
               : "The meeting could not be started. Check that the file is an audio or video recording and try again.",
@@ -363,7 +367,9 @@ export function Home() {
   }
 
   const emptyCopy = rows.length === 0
-    ? "Meetings you start appear here."
+    ? connecting
+      ? "Starting Quotient and looking for meetings…"
+      : "Meetings you start appear here."
     : query.trim()
       ? "Nothing matches that search."
       : "Nothing matches that filter.";
@@ -481,7 +487,14 @@ export function Home() {
             />
           </label>
         </div>
-        {enriching && rows.length === 0 ? <HomeLoader done={progress.done} total={progress.total} /> : (
+        {enriching && rows.length === 0 ? (
+          <HomeLoader
+            done={progress.done}
+            total={progress.total}
+            title={connecting ? "Starting Quotient" : "Loading your meetings"}
+            subtitle={connecting ? "Warming up cloud services on AWS…" : undefined}
+          />
+        ) : (
           <>
             {rows.length > 0 ? (
               <div className="q-filters" role="group" aria-label="Filter meetings">
@@ -576,7 +589,20 @@ export function Home() {
                         <Trash2 size={14} aria-hidden="true" />
                       </button>
                     </span>
-                    {label ? <span className="q-status" data-tone={statusTone(row.status)}>{label}</span> : <span className="q-status" data-tone="quiet">{enriching ? "…" : "Unknown"}</span>}
+                    {label ? (
+                      <span className="q-status" data-tone={statusTone(row.status)}>{label}</span>
+                    ) : (
+                      <span className="q-status" data-tone={connecting || enriching ? "working" : "quiet"}>
+                        {connecting || enriching ? (
+                          <>
+                            <span className="q-pulse-dot" aria-hidden="true" style={{ marginRight: 6 }} />
+                            Warming up…
+                          </>
+                        ) : (
+                          "Cached"
+                        )}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -596,7 +622,7 @@ export function Home() {
       />
       <ConfirmDialog
         open={removing !== null}
-        title="Remove this meeting from this computer's list?"
+        title="Remove this meeting from your browser's saved list?"
         message="The recording and its analysis are not deleted; the meeting is only hidden from this list."
         confirmLabel="Remove"
         cancelLabel="Cancel"

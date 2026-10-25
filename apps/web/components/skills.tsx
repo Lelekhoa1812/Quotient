@@ -44,7 +44,7 @@ export function Skills() {
         }
       } catch (error) {
         if (!cancel && !(error instanceof McpDisconnected)) setMessage("Skills could not be loaded.");
-        if (!cancel && error instanceof McpDisconnected) setMessage("Quotient is offline. Skills appear when it is reachable.");
+        if (!cancel && error instanceof McpDisconnected) setMessage("Quotient cloud service is warming up. Skills appear when reachable.");
       }
     })();
     return () => {

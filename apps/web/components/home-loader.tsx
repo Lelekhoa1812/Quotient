@@ -29,7 +29,17 @@ function readColor(name: string, fallback: string): THREE.Color {
 
 type Satellite = { mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; ring: number; angle: number; index: number };
 
-export function HomeLoader({ done, total }: { done: number; total: number }) {
+export function HomeLoader({
+  done,
+  total,
+  title,
+  subtitle,
+}: {
+  done: number;
+  total: number;
+  title?: string;
+  subtitle?: string;
+}) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const progressRef = useRef({ done, total });
@@ -216,8 +226,8 @@ export function HomeLoader({ done, total }: { done: number; total: number }) {
       <div className="q-loader-stage" ref={stageRef}>
         <canvas ref={canvasRef} aria-hidden="true" />
       </div>
-      <p className="q-loader-title">Loading your meetings</p>
-      <p className="q-loader-count">{total > 0 ? `Checked ${done} of ${total}` : "Looking for meetings"}</p>
+      <p className="q-loader-title">{title ?? "Loading your meetings"}</p>
+      <p className="q-loader-count">{subtitle ?? (total > 0 ? `Checked ${done} of ${total}` : "Looking for meetings")}</p>
     </div>
   );
 }

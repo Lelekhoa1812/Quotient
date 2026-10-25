@@ -97,7 +97,7 @@ export function McpScreen({ contract, cloudfrontMcpUrl }: { contract: string; cl
         if (cancel) return;
         setTools([]);
         setToolsReady(true);
-        setToolsNote(error instanceof McpDisconnected ? "Quotient is offline." : "Tools could not be loaded.");
+        setToolsNote(error instanceof McpDisconnected ? "Quotient cloud service is warming up or unreachable." : "Tools could not be loaded.");
       },
     );
     return () => {
@@ -224,8 +224,8 @@ export function McpScreen({ contract, cloudfrontMcpUrl }: { contract: string; cl
         </div>
         {phase === "disconnected" ? (
           <div className="q-mcp-offline">
-            <p>Quotient is offline.</p>
-            <button className="q-btn-ghost" type="button" onClick={retry}>Try again</button>
+            <p>Quotient cloud service is warming up or unreachable.</p>
+            <button className="q-btn-ghost" type="button" onClick={retry}>Wake up service</button>
           </div>
         ) : null}
         {phase !== "disconnected" && !toolsReady ? <p className="q-muted">Loading tools.</p> : null}

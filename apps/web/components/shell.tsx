@@ -104,6 +104,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (mcp.phase() === "idle") {
       void mcp.connect().catch(() => undefined);
+    } else if (phase === "disconnected") {
+      const timer = setTimeout(() => {
+        mcp.reset();
+        void mcp.connect().catch(() => undefined);
+      }, 4000);
+      return () => clearTimeout(timer);
     }
   }, [phase]);
 
@@ -147,7 +153,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <PrimaryLinks pathname={pathname} />
         </nav>
         <div className="q-header-end">
-          {connecting ? <span className="q-quiet">Connecting</span> : null}
+          {connecting ? (
+            <span className="q-starting-badge">
+              <span className="q-pulse-dot" aria-hidden="true" />
+              <span>Starting app…</span>
+            </span>
+          ) : null}
           <button
             className="q-nav-toggle"
             type="button"
@@ -166,9 +177,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
+      {connecting ? (
+        <div className="q-banner is-connecting" role="status">
+          <span className="q-pulse-dot" aria-hidden="true" />
+          <p>Starting the app… Quotient cloud services are warming up on AWS.</p>
+        </div>
+      ) : null}
       {phase === "disconnected" ? (
-        <div className="q-banner" role="status">
-          <p>Quotient is offline. Meetings saved on this computer are still listed.</p>
+        <div className="q-banner is-offline" role="status">
+          <p>Quotient cloud service is warming up or temporarily unreachable. Cached meetings in your browser are still listed.</p>
           <button
             className="q-btn-ghost"
             type="button"
@@ -177,7 +194,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               void mcp.connect().catch(() => undefined);
             }}
           >
-            Try again
+            Wake up service
           </button>
         </div>
       ) : null}

@@ -324,6 +324,44 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px solid var(--line);
 }
 
+.q-banner.is-connecting {
+  background: color-mix(in srgb, var(--mark) 10%, var(--surface));
+  border-bottom-color: color-mix(in srgb, var(--mark) 35%, transparent);
+}
+
+.q-banner.is-offline {
+  background: color-mix(in srgb, #e67e22 10%, var(--surface));
+  border-bottom-color: color-mix(in srgb, #e67e22 35%, transparent);
+}
+
+.q-starting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 12%, transparent);
+  padding: 0.2rem 0.65rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--mark) 30%, transparent);
+}
+
+.q-pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mark);
+  box-shadow: 0 0 6px var(--mark);
+  animation: q-pulse 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes q-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
 .q-body { min-height: calc(100vh - 64px); }
 
 .q-portal {
