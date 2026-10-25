@@ -91,6 +91,19 @@ class SessionStore:
             old.close()
         return session
 
+    def adopt(self, session_id: str, auth: AuthContext) -> Session:
+        session = Session(session_id, auth)
+        session.ready = True
+        evicted: list[Session] = []
+        with self._lock:
+            self._items[session.session_id] = session
+            while len(self._items) > MAX_SESSIONS:
+                oldest = next(iter(self._items))
+                evicted.append(self._items.pop(oldest))
+        for old in evicted:
+            old.close()
+        return session
+
     def get(self, session_id: str | None) -> Session | None:
         if not session_id:
             return None

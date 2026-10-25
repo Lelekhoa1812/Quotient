@@ -137,28 +137,35 @@ export function Home() {
         const linkOfMeeting = new Map<string, { taskId: string | null; sourceName: string | null }>();
         setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
         setProgress({ done: 0, total: rowsNow.length });
-        for (let start = 0; start < rowsNow.length && !cancel; start += 3) {
-          const batch = rowsNow.slice(start, start + 3);
+        for (let start = 0; start < rowsNow.length && !cancel; start += 2) {
+          const batch = rowsNow.slice(start, start + 2);
           const done = await Promise.all(batch.map(async (row) => {
             if (!row.meetingId) return row;
             try {
-              const status = await mcp.getMeeting(row.meetingId);
+              let status: Awaited<ReturnType<typeof mcp.getMeeting>>;
+              try {
+                status = await mcp.getMeeting(row.meetingId);
+              } catch {
+                await new Promise((res) => setTimeout(res, 600));
+                status = await mcp.getMeeting(row.meetingId);
+              }
               linkOfMeeting.set(row.meetingId, { taskId: status.taskId || null, sourceName: status.sourceName || null });
               const headline = status.headline;
               if (headline && row.meetingId) setHeadlines((current) => ({ ...current, [row.meetingId as string]: headline }));
               // A meeting this browser did not create has no known creation time; use the server's.
               const known = Boolean(row.taskId);
               const when = status.updatedAt || "";
+              const serverTitle = headline?.title || status.sourceName || status.meetingId;
               return {
                 ...row,
                 status: status.status,
                 reviewCount: status.reviewCount,
-                title: row.title && row.title !== row.meetingId ? row.title : status.sourceName || row.title || status.meetingId,
+                title: row.renamed ? row.title : (serverTitle || row.title),
                 updatedAt: when || row.updatedAt,
                 createdAt: known ? row.createdAt : when || row.createdAt,
               };
             } catch {
-              return { ...row, status: "unavailable" };
+              return { ...row, status: row.status && row.status !== "unavailable" ? row.status : "unavailable" };
             }
           }));
           rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 3)];

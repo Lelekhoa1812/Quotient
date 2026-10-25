@@ -667,7 +667,14 @@ def _session(request: Request, runtime: object, auth: AuthContext) -> Session | 
         return _json(error(INVALID_REQUEST, "MCP-Protocol-Version must be 2025-11-25", None), status=400)
     session = runtime.sessions.get(header)  # type: ignore[attr-defined]
     if session is None:
-        return _json(error(INVALID_REQUEST, "Session not found", None), status=404)
+        # In serverless multi-instance deployments (e.g. AWS Lambda), another
+        # execution environment may have initialized this session. Because auth
+        # is already verified, adopt the session locally so horizontal
+        # scaling doesn't fail requests with 404.
+        if len(header) >= 16 and all(c.isalnum() or c in "_-" for c in header):
+            session = runtime.sessions.adopt(header, auth)  # type: ignore[attr-defined]
+        if session is None:
+            return _json(error(INVALID_REQUEST, "Session not found", None), status=404)
     if session.auth.subject != auth.subject:
         return JSONResponse(
             {"error": "insufficient_scope"},
