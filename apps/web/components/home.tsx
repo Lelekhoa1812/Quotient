@@ -168,7 +168,7 @@ export function Home() {
               return { ...row, status: row.status && row.status !== "unavailable" ? row.status : "unavailable" };
             }
           }));
-          rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 3)];
+          rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 2)];
           // Tie a submission made on this browser to the meeting the server lists for it, so one upload is one row.
           const merged = reconcileOrphans(rowsNow, (id) => linkOfMeeting.get(id) ?? null);
           if (merged.length !== rowsNow.length) {
@@ -193,7 +193,7 @@ export function Home() {
     return () => {
       cancel = true;
     };
-  }, [phase === "connected"]);
+  }, [phase]);
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
