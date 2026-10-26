@@ -208,7 +208,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </header>
       {showTelemetry ? (
         <QuantumLoader
-          phase={phase}
+          phase="connecting"
           onBypass={() => setShowTelemetry(false)}
           hasCachedData={true}
         />
