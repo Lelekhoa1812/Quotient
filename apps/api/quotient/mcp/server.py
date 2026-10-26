@@ -136,14 +136,36 @@ def mcp_routes(runtime: object) -> list:
         return response
 
     # Motivation vs Logic
-    # Motivation: The load balancer target check must not read meetings, tokens,
-    # or the ledger. A 200 here only means the process is accepting HTTP.
-    # Logic: GET /health returns a fixed object and skips authorization.
-    async def health(_: Request) -> Response:
-        return JSONResponse({"status": "ok"})
+    # Motivation: The health and warmup checks must not read meetings, tokens,
+    # or the ledger. A 200 here immediately proves process liveness and warms compute.
+    # Logic: GET/HEAD /health and /warmup return fixed metadata and skip authorization.
+    async def health(request: Request) -> Response:
+        if request.method == "OPTIONS":
+            return _cors(request, runtime, Response(status_code=204))
+        return _cors(
+            request,
+            runtime,
+            JSONResponse({"status": "ok"}),
+        )
+
+    async def warmup(request: Request) -> Response:
+        if request.method == "OPTIONS":
+            return _cors(request, runtime, Response(status_code=204))
+        return _cors(
+            request,
+            runtime,
+            JSONResponse({
+                "status": "warm",
+                "version": SERVER_VERSION,
+                "server": SERVER_NAME,
+                "compute": "on-demand-lambda",
+                "region": "ap-southeast-2",
+            }),
+        )
 
     return [
-        Route("/health", endpoint=health, methods=["GET"]),
+        Route("/health", endpoint=health, methods=["GET", "HEAD", "OPTIONS"]),
+        Route("/warmup", endpoint=warmup, methods=["GET", "HEAD", "POST", "OPTIONS"]),
         Route("/mcp", endpoint=endpoint, methods=["POST", "GET", "DELETE", "OPTIONS"]),
         Route("/.well-known/oauth-protected-resource", endpoint=metadata, methods=["GET", "OPTIONS"]),
         Route(

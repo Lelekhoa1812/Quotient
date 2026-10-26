@@ -19,8 +19,13 @@ def test_health_is_ok_and_names_no_meeting():
     app = create_app(auth_bypass=True, port=MemoryPort(), environ={})
     with TestClient(app) as client:
         response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        head_resp = client.head("/health")
+        assert head_resp.status_code == 200
+        warmup_resp = client.get("/warmup")
+        assert warmup_resp.status_code == 200
+        assert warmup_resp.json().get("status") == "warm"
 
 
 def test_mcp_audit_records_method_and_tool_name(monkeypatch, tmp_path):

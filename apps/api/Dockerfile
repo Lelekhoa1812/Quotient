@@ -25,10 +25,12 @@ COPY apps/worker apps/worker
 COPY contracts contracts
 COPY cache/transcripts/ /tmp/quotient/
 COPY cache/artifacts/ /tmp/quotient/artifacts/
+RUN python -m compileall -q /app
 RUN useradd --create-home --uid 10001 quotient \
     && chown -R quotient:quotient /app /tmp/quotient
 USER quotient
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONOPTIMIZE=1 \
     QUOTIENT_TRANSCRIPT_CACHE_DIR=/tmp/quotient
 EXPOSE 8080
 CMD ["python", "-m", "uvicorn", "quotient.app:create_app", "--factory", "--app-dir", "apps/api", "--host", "0.0.0.0", "--port", "8080"]

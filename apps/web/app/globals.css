@@ -346,6 +346,17 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid color-mix(in srgb, var(--mark) 30%, transparent);
 }
 
+.q-starting-badge-btn {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.q-starting-badge-btn:hover {
+  background: color-mix(in srgb, var(--mark) 22%, transparent);
+  border-color: var(--mark);
+}
+
 .q-pulse-dot {
   display: inline-block;
   width: 7px;
@@ -2591,3 +2602,410 @@ label:has(input[type="file"]:focus-visible) {
 .q-screen-head strong { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
 .q-screen-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.875rem; }
 .q-screen summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
+
+/* ==========================================================================
+   QUANTUM AWAKENING LOADER & TELEMETRY HUD (SCALE-TO-ZERO SERVERLESS)
+   ========================================================================== */
+
+.q-quantum-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 45%, #071326 0%, #03070E 80%);
+  color: var(--ink);
+  overflow: hidden;
+  transition: opacity 600ms cubic-bezier(0.16, 1, 0.3, 1), transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+:root[data-theme="light"] .q-quantum-overlay {
+  background: radial-gradient(circle at 50% 45%, #F0F5FF 0%, #FFFFFF 85%);
+}
+
+.q-quantum-overlay.is-dismissing {
+  opacity: 0;
+  transform: scale(1.02);
+  pointer-events: none;
+}
+
+.q-quantum-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.q-quantum-canvas-wrap:active {
+  cursor: grabbing;
+}
+
+.q-quantum-canvas-wrap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.q-quantum-hud {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding: 1.5rem 2rem;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .q-quantum-hud {
+    padding: 1rem;
+  }
+}
+
+.q-quantum-hud * {
+  pointer-events: auto;
+}
+
+/* Head */
+.q-quantum-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.q-quantum-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.q-quantum-pulse-beacon {
+  position: relative;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+}
+
+.q-quantum-pulse-beacon-inner {
+  position: absolute;
+  inset: 0;
+  background: var(--mark);
+  border-radius: 50%;
+  animation: q-beacon-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes q-beacon-pulse {
+  0% { transform: scale(0.9); opacity: 0.9; box-shadow: 0 0 0 0 color-mix(in srgb, var(--mark) 60%, transparent); }
+  70% { transform: scale(1.5); opacity: 0.3; box-shadow: 0 0 0 8px transparent; }
+  100% { transform: scale(0.9); opacity: 0.9; box-shadow: 0 0 0 0 transparent; }
+}
+
+.q-quantum-brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.q-quantum-sys-title {
+  font-family: var(--font-display, var(--font-body));
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.q-quantum-sub-title {
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.q-quantum-timer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: var(--mark-text, var(--mark));
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.q-quantum-spin-icon {
+  animation: q-spin 3s linear infinite;
+}
+
+/* Center Stage Card */
+.q-quantum-stage-card {
+  align-self: center;
+  width: min(34rem, 100%);
+  padding: 1.75rem 2rem;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mark) 35%, var(--line));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .q-quantum-stage-card {
+    padding: 1.25rem;
+  }
+}
+
+.q-quantum-step-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.q-quantum-step-pill {
+  padding: 0.2rem 0.5rem;
+  background: color-mix(in srgb, var(--mark) 18%, transparent);
+  border: 1px solid var(--mark);
+  color: var(--mark-text, var(--mark));
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.q-quantum-step-status {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.q-quantum-step-heading {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.q-quantum-step-detail {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.45;
+  min-height: 2.6rem;
+}
+
+/* Progress bar */
+.q-quantum-progress-bar-bg {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: color-mix(in srgb, var(--line) 80%, transparent);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.q-quantum-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #125DE8 0%, #2F6BEE 50%, #60A5FA 100%);
+  box-shadow: 0 0 12px var(--mark);
+  transition: width 250ms ease-out;
+}
+
+.q-quantum-progress-bar-fill.is-connected {
+  background: linear-gradient(90deg, #10B981 0%, #34D399 100%);
+  box-shadow: 0 0 14px #10B981;
+}
+
+/* Stepper dots */
+.q-quantum-stepper-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.q-quantum-stepper-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.q-quantum-stepper-line {
+  height: 2px;
+  background: var(--line);
+  transition: background 300ms ease;
+}
+
+.q-quantum-stepper-node.is-complete .q-quantum-stepper-line {
+  background: var(--mark);
+}
+
+.q-quantum-stepper-node.is-active .q-quantum-stepper-line {
+  background: #60A5FA;
+  box-shadow: 0 0 8px #60A5FA;
+}
+
+.q-quantum-stepper-label {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.q-quantum-stepper-node.is-active .q-quantum-stepper-label,
+.q-quantum-stepper-node.is-complete .q-quantum-stepper-label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Deck */
+.q-quantum-deck {
+  align-self: center;
+  width: min(34rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.q-quantum-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: center;
+}
+
+.q-quantum-modes-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  margin-right: 0.25rem;
+}
+
+.q-quantum-mode-btn {
+  padding: 0.35rem 0.75rem;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.q-quantum-mode-btn:hover {
+  color: var(--ink);
+  border-color: var(--mark);
+}
+
+.q-quantum-mode-btn.is-active {
+  background: color-mix(in srgb, var(--mark) 18%, transparent);
+  border-color: var(--mark);
+  color: var(--mark-text, var(--mark));
+  font-weight: 600;
+}
+
+.q-quantum-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.q-quantum-pulse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  background: var(--control);
+  color: var(--on-control);
+  border: 1px solid transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--control) 40%, transparent);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.q-quantum-pulse-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--control) 60%, transparent);
+}
+
+.q-quantum-pulse-btn:active {
+  transform: translateY(1px);
+}
+
+.q-quantum-bypass-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease;
+}
+
+.q-quantum-bypass-btn:hover {
+  border-color: var(--mark);
+  color: var(--mark-text, var(--mark));
+}
+
+/* Bottom Telemetry Bar */
+.q-quantum-telemetry-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.q-quantum-tele-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.q-quantum-tele-node strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.q-quantum-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #F59E0B;
+  box-shadow: 0 0 8px #F59E0B;
+}
+
+.q-quantum-status-dot.is-online {
+  background: #10B981;
+  box-shadow: 0 0 10px #10B981;
+}
+

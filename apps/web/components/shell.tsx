@@ -8,11 +8,17 @@
  * banner. The page body stays mounted either way.
  */
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Moon, Sun } from "lucide-react";
+import { Menu, Moon, Sun, Zap } from "lucide-react";
 import { mcp, type Phase } from "@/lib/mcp/client";
 import { useSyncExternalStore } from "react";
+
+const QuantumLoader = dynamic(
+  () => import("@/components/quantum-loader").then((mod) => mod.QuantumLoader),
+  { ssr: false }
+);
 
 function subscribe(listener: () => void): () => void {
   return mcp.subscribe(listener);
@@ -100,6 +106,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const connecting = phase === "idle" || phase === "connecting";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bypassed, setBypassed] = useState(false);
+
+  // Proactive background API warmup on initial browser load
+  useEffect(() => {
+    fetch("/health", { method: "HEAD", cache: "no-store" }).catch(() => undefined);
+    fetch("/warmup", { method: "GET", cache: "no-store" }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (mcp.phase() === "idle") {
@@ -154,10 +167,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="q-header-end">
           {connecting ? (
-            <span className="q-starting-badge">
+            <button
+              className="q-starting-badge q-starting-badge-btn"
+              type="button"
+              onClick={() => setBypassed(false)}
+              title="Click to view Awakening Telemetry HUD"
+              aria-label="View awakening telemetry HUD"
+            >
               <span className="q-pulse-dot" aria-hidden="true" />
-              <span>Starting app…</span>
-            </span>
+              <span>Warming compute…</span>
+            </button>
           ) : null}
           <button
             className="q-nav-toggle"
@@ -177,10 +196,24 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      {connecting ? (
+      {connecting && !bypassed ? (
+        <QuantumLoader
+          phase={phase}
+          onBypass={() => setBypassed(true)}
+          hasCachedData={true}
+        />
+      ) : null}
+      {connecting && bypassed ? (
         <div className="q-banner is-connecting" role="status">
           <span className="q-pulse-dot" aria-hidden="true" />
-          <p>Starting the app… Quotient cloud services are warming up on AWS.</p>
+          <p>Quotient cloud services are warming up on AWS ap-southeast-2.</p>
+          <button
+            className="q-btn-ghost"
+            type="button"
+            onClick={() => setBypassed(false)}
+          >
+            Expand Live HUD
+          </button>
         </div>
       ) : null}
       {phase === "disconnected" ? (
