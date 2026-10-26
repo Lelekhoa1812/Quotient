@@ -60,10 +60,14 @@ function readColor(name: string, fallback: string): THREE.Color {
 
 export function QuantumLoader({
   phase,
+  enriching = false,
+  progress = { done: 0, total: 0 },
   onBypass,
   hasCachedData = false,
 }: {
   phase: Phase;
+  enriching?: boolean;
+  progress?: { done: number; total: number };
   onBypass?: () => void;
   hasCachedData?: boolean;
 }) {
@@ -77,13 +81,15 @@ export function QuantumLoader({
   const shockwaveTriggerRef = useRef<((power?: number) => void) | null>(null);
   const modeRef = useRef<VisualMode>(mode);
 
+  const isReady = phase === "connected" && !enriching;
+
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
 
-  // Handle phase completion: when phase becomes 'connected', celebrate then dismiss
+  // Handle completion: when connection and enrichment complete, celebrate then dismiss
   useEffect(() => {
-    if (phase === "connected") {
+    if (isReady) {
       setCurrentStepIndex(3);
       if (shockwaveTriggerRef.current) shockwaveTriggerRef.current(2.5);
       const timer = setTimeout(() => {
@@ -95,7 +101,7 @@ export function QuantumLoader({
       }, 700);
       return () => clearTimeout(timer);
     }
-  }, [phase, onBypass]);
+  }, [isReady, onBypass]);
 
   // Centisecond stopwatch & stepped telemetry advancement
   useEffect(() => {
@@ -104,17 +110,22 @@ export function QuantumLoader({
       const ms = Math.floor(performance.now() - start);
       setElapsedMs(ms);
 
-      // Advance through steps realistically based on cold start timing
-      if (phase !== "connected") {
-        if (ms < 1400) setCurrentStepIndex(0);
-        else if (ms < 3200) setCurrentStepIndex(1);
-        else if (ms < 5200) setCurrentStepIndex(2);
-        else setCurrentStepIndex(3);
+      // Advance through steps realistically based on cold start timing & connection
+      if (!isReady) {
+        if (phase === "connected") {
+          setCurrentStepIndex(3);
+        } else if (ms < 1200) {
+          setCurrentStepIndex(0);
+        } else if (ms < 2800) {
+          setCurrentStepIndex(1);
+        } else {
+          setCurrentStepIndex(2);
+        }
       }
     }, 40);
 
     return () => clearInterval(interval);
-  }, [phase]);
+  }, [phase, isReady]);
 
   const triggerPulse = useCallback(() => {
     setPulseCount((c) => c + 1);
@@ -501,10 +512,25 @@ export function QuantumLoader({
   };
 
   const currentStep = STEPS[currentStepIndex];
-  const progressPercent =
-    phase === "connected"
-      ? 100
-      : Math.min(95, Math.floor(25 + currentStepIndex * 22 + (elapsedMs % 1000) / 70));
+  const progressPercent = isReady
+    ? 100
+    : progress.total > 0
+    ? Math.min(96, Math.floor(50 + (progress.done / progress.total) * 45))
+    : phase === "connected"
+    ? Math.min(92, Math.floor(65 + ((elapsedMs % 2000) / 2000) * 20))
+    : Math.min(60, Math.floor(15 + currentStepIndex * 15 + ((elapsedMs % 1000) / 1000) * 10));
+
+  const stepHeading = isReady
+    ? "ALL SYSTEMS OPERATIONAL"
+    : currentStepIndex === 3 && progress.total > 0
+    ? `SYNCHRONIZING INTELLIGENCE (${progress.done}/${progress.total})`
+    : currentStep.label;
+
+  const stepDetail = isReady
+    ? "MCP stream established. Intelligence graph synchronized and compute online."
+    : currentStepIndex === 3 && progress.total > 0
+    ? `Synchronizing meeting memory graph and audio pipelines (${progress.done} of ${progress.total})…`
+    : currentStep.detail;
 
   return (
     <div
@@ -543,23 +569,17 @@ export function QuantumLoader({
           <div className="q-quantum-step-meta">
             <span className="q-quantum-step-pill">STEP {currentStep.step}</span>
             <span className="q-quantum-step-status">
-              {phase === "connected" ? "ONLINE" : "WARMING UP COMPUTE"}
+              {isReady ? "ONLINE" : phase === "connected" ? "SYNCHRONIZING" : "WARMING UP COMPUTE"}
             </span>
           </div>
 
-          <h2 className="q-quantum-step-heading">
-            {phase === "connected" ? "ALL SYSTEMS OPERATIONAL" : currentStep.label}
-          </h2>
-          <p className="q-quantum-step-detail">
-            {phase === "connected"
-              ? "MCP stream established. Synchronizing meeting graph and intelligence models…"
-              : currentStep.detail}
-          </p>
+          <h2 className="q-quantum-step-heading">{stepHeading}</h2>
+          <p className="q-quantum-step-detail">{stepDetail}</p>
 
           {/* Stepper Progress Bar */}
           <div className="q-quantum-progress-bar-bg" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
             <div
-              className={`q-quantum-progress-bar-fill ${phase === "connected" ? "is-connected" : ""}`}
+              className={`q-quantum-progress-bar-fill ${isReady ? "is-connected" : ""}`}
               style={{ width: `${progressPercent}%` }}
             />
           </div>
@@ -567,8 +587,8 @@ export function QuantumLoader({
           {/* 4 Multi-step indicators */}
           <div className="q-quantum-stepper-grid">
             {STEPS.map((step, idx) => {
-              const isPast = idx < currentStepIndex || phase === "connected";
-              const isCurrent = idx === currentStepIndex && phase !== "connected";
+              const isPast = idx < currentStepIndex || isReady;
+              const isCurrent = idx === currentStepIndex && !isReady;
               return (
                 <div
                   key={step.step}

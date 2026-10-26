@@ -41,6 +41,11 @@ const HomeLoader = dynamic(() => import("@/components/home-loader").then((mod) =
   ssr: false,
 });
 
+const QuantumLoader = dynamic(
+  () => import("@/components/quantum-loader").then((mod) => mod.QuantumLoader),
+  { ssr: false }
+);
+
 const FILTERS = [
   { id: "all", label: "All" },
   { id: "working", label: "In progress" },
@@ -97,6 +102,7 @@ export function Home() {
   const [contextOpen, setContextOpen] = useState(false);
   const [contextNote, setContextNote] = useState("");
   const [sending, setSending] = useState(false);
+  const [bypassed, setBypassed] = useState(false);
   // Set when the meeting started but some context could not be uploaded; the person opens it from here.
   const [startedTask, setStartedTask] = useState<string | null>(null);
   const contextButton = useRef<HTMLButtonElement>(null);
@@ -171,10 +177,8 @@ export function Home() {
           rowsNow = [...rowsNow.slice(0, start), ...done, ...rowsNow.slice(start + 2)];
           // Tie a submission made on this browser to the meeting the server lists for it, so one upload is one row.
           const merged = reconcileOrphans(rowsNow, (id) => linkOfMeeting.get(id) ?? null);
-          if (merged.length !== rowsNow.length) {
-            rowsNow = merged.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-            writeLibrary(rowsNow);
-          }
+          rowsNow = merged.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          writeLibrary(rowsNow);
           if (!cancel) {
             setRows(rowsNow.filter((row) => !isHidden(row.meetingId, row.taskId)));
             setProgress({ done: Math.min(start + batch.length, rowsNow.length), total: rowsNow.length });
@@ -383,6 +387,15 @@ export function Home() {
 
   return (
     <main id="main" tabIndex={-1} className="q-portal">
+      {(connecting || enriching) && !bypassed ? (
+        <QuantumLoader
+          phase={phase}
+          enriching={enriching}
+          progress={progress}
+          onBypass={() => setBypassed(true)}
+          hasCachedData={rows.length > 0}
+        />
+      ) : null}
       {/* Motivation vs Logic
           Motivation: Sparks should cover the screen and stay out of the way of the start band.
           Logic: Render the field first, fixed to the viewport, so the sheets paint above it. */}
@@ -603,7 +616,7 @@ export function Home() {
                         {connecting || enriching ? (
                           <>
                             <span className="q-pulse-dot" aria-hidden="true" style={{ marginRight: 6 }} />
-                            Warming up…
+                            Syncing…
                           </>
                         ) : (
                           "Cached"

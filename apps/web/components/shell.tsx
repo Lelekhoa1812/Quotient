@@ -196,7 +196,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      {connecting && !bypassed ? (
+      {pathname !== "/" && connecting && !bypassed ? (
         <QuantumLoader
           phase={phase}
           onBypass={() => setBypassed(true)}
