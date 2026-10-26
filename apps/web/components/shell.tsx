@@ -107,6 +107,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const connecting = phase === "idle" || phase === "connecting";
   const [menuOpen, setMenuOpen] = useState(false);
   const [bypassed, setBypassed] = useState(false);
+  const [showTelemetry, setShowTelemetry] = useState(false);
 
   // Proactive background API warmup on initial browser load
   useEffect(() => {
@@ -188,6 +189,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           >
             <Menu size={16} aria-hidden="true" />
           </button>
+          <button
+            className="q-theme"
+            type="button"
+            title="Quantum Awakening Telemetry"
+            aria-label="Quantum Awakening Telemetry"
+            onClick={() => setShowTelemetry(true)}
+          >
+            <Zap size={15} aria-hidden="true" />
+          </button>
           <ThemeToggle />
         </div>
         <div className={menuOpen ? "q-nav-panel is-open" : "q-nav-panel"} id="q-nav-panel">
@@ -196,6 +206,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
+      {showTelemetry ? (
+        <QuantumLoader
+          phase={phase}
+          onBypass={() => setShowTelemetry(false)}
+          hasCachedData={true}
+        />
+      ) : null}
       {pathname !== "/" && connecting && !bypassed ? (
         <QuantumLoader
           phase={phase}

@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import * as THREE from "three";
 import { Activity, Cpu, Radio, Sparkles, Zap, ArrowRight, Layers } from "lucide-react";
 import type { Phase } from "@/lib/mcp/client";
@@ -77,11 +78,23 @@ export function QuantumLoader({
   const [pulseCount, setPulseCount] = useState(0);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [minElapsed, setMinElapsed] = useState(false);
   const [isDismissing, setIsDismissing] = useState(false);
   const shockwaveTriggerRef = useRef<((power?: number) => void) | null>(null);
   const modeRef = useRef<VisualMode>(mode);
+  const [mounted, setMounted] = useState(false);
 
-  const isReady = phase === "connected" && !enriching;
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Guarantee user can see and interact with the futuristic awakening sequence
+  useEffect(() => {
+    const t = setTimeout(() => setMinElapsed(true), 2800);
+    return () => clearTimeout(t);
+  }, []);
+
+  const isReady = phase === "connected" && !enriching && minElapsed;
 
   useEffect(() => {
     modeRef.current = mode;
@@ -112,14 +125,14 @@ export function QuantumLoader({
 
       // Advance through steps realistically based on cold start timing & connection
       if (!isReady) {
-        if (phase === "connected") {
-          setCurrentStepIndex(3);
-        } else if (ms < 1200) {
+        if (ms < 1000) {
           setCurrentStepIndex(0);
-        } else if (ms < 2800) {
+        } else if (ms < 2000) {
           setCurrentStepIndex(1);
-        } else {
+        } else if (ms < 2800 || phase !== "connected") {
           setCurrentStepIndex(2);
+        } else {
+          setCurrentStepIndex(3);
         }
       }
     }, 40);
@@ -532,7 +545,9 @@ export function QuantumLoader({
     ? `Synchronizing meeting memory graph and audio pipelines (${progress.done} of ${progress.total})…`
     : currentStep.detail;
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       className={`q-quantum-overlay ${isDismissing ? "is-dismissing" : ""}`}
       role="dialog"
@@ -668,6 +683,7 @@ export function QuantumLoader({
           </div>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
