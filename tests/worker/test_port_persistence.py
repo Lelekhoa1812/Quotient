@@ -316,3 +316,65 @@ def test_rename_meeting_persists_title_and_updates_digest(tmp_path):
     assert meeting["title"] == "New Strategic Title"
     assert meeting["digest"]["title"] == "New Strategic Title"
 
+
+def test_flush_puts_the_pending_meeting_document(tmp_path, monkeypatch):
+    module = _port_module()
+    written = []
+
+    class _Seed:
+        @staticmethod
+        def save_remote_state(payload, env=None, key=None, run=None):
+            written.append(payload)
+            return True
+
+    monkeypatch.setattr(module, "_seed_module", lambda: _Seed)
+    port = module.Port(None, None, None, None, state_path=tmp_path / "meetings.json")
+    port._remote_storage_enabled = True
+    port._rows["m1"] = {
+        "meeting_id": "m1",
+        "subject": "person@example.test",
+        "status": "failed",
+        "updated_at": "2026-10-28T00:00:02Z",
+        "failure_message": "stopped",
+        "spans": [],
+    }
+    with port._lock:
+        port._save_locked()
+    port.flush_storage()
+    assert written[-1]["meetings"][0]["status"] == "failed"
+
+
+def test_meeting_adopts_a_newer_remote_row_and_keeps_a_newer_local_one(tmp_path, monkeypatch):
+    module = _port_module()
+    remote = {
+        "meetings": [
+            {
+                "meeting_id": "m1",
+                "subject": "person@example.test",
+                "status": "needs_review",
+                "updated_at": "2026-10-28T00:00:05Z",
+                "spans": [],
+            }
+        ]
+    }
+
+    class _Seed:
+        @staticmethod
+        def read_state_or_seed(env=None, run=None):
+            return remote, "state/meetings.json"
+
+    monkeypatch.setattr(module, "_seed_module", lambda: _Seed)
+    port = module.Port(None, None, None, None, state_path=tmp_path / "meetings.json")
+    port._remote_storage_enabled = True
+    port._rows["m1"] = {
+        "meeting_id": "m1",
+        "subject": "person@example.test",
+        "status": "queued",
+        "updated_at": "2026-10-28T00:00:01Z",
+        "spans": [],
+    }
+    assert port.meeting("m1", "person@example.test")["status"] == "needs_review"
+    port._rows["m1"]["status"] = "working"
+    port._rows["m1"]["updated_at"] = "2026-10-28T00:00:09Z"
+    assert port.meeting("m1", "person@example.test")["status"] == "working"
+

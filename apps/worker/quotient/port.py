@@ -438,6 +438,7 @@ class Port:
         )
         self._worker_thread.start()
         self._remote_save_lock = threading.Lock()
+        self._remote_write_lock = threading.Lock()
         self._remote_save_event = threading.Event()
         self._pending_remote_save: dict | None = None
         self._remote_save_thread: threading.Thread | None = None
@@ -480,33 +481,37 @@ class Port:
             if not triggered and not self._stopping_remote_saver:
                 continue
             self._remote_save_event.clear()
-            payload = None
-            with self._remote_save_lock:
-                if self._pending_remote_save is not None:
+            self._drain_remote()
+
+    def flush_storage(self, timeout: float = 30.0) -> None:
+        # Bugs vs Fixes
+        # Bug: Flush took the pending document and returned while the saver
+        # thread could still put an older copy. The Lambda handler then froze,
+        # so the newer meeting row never reached the bucket.
+        # Fix: One drain holds the write lock and puts until the pending slot
+        # is empty, so the last document is the one stored.
+        del timeout
+        self._drain_remote()
+
+    def _drain_remote(self) -> None:
+        if not getattr(self, "_remote_storage_enabled", False):
+            return
+        write_lock = getattr(self, "_remote_write_lock", None)
+        if write_lock is None:
+            return
+        with write_lock:
+            while True:
+                with self._remote_save_lock:
                     payload = self._pending_remote_save
                     self._pending_remote_save = None
-            if payload is not None:
+                if payload is None:
+                    return
                 try:
                     mod = _seed_module()
                     if mod is not None:
                         mod.save_remote_state(payload)
                 except Exception as exc:
                     print(f"remote state save error: {exc}", file=sys.stderr, flush=True)
-
-    def flush_storage(self, timeout: float = 10.0) -> None:
-        if not getattr(self, "_remote_storage_enabled", False):
-            return
-        payload = None
-        with self._remote_save_lock:
-            payload = self._pending_remote_save
-            self._pending_remote_save = None
-        if payload is not None:
-            try:
-                mod = _seed_module()
-                if mod is not None:
-                    mod.save_remote_state(payload)
-            except Exception as exc:
-                print(f"remote state flush error: {exc}", file=sys.stderr, flush=True)
 
     def _save_locked(self) -> None:
         payload = {"version": 1, "meetings": list(self._rows.values())}
@@ -1016,11 +1021,52 @@ class Port:
         ledger.known_names = known
 
     def meeting(self, meeting_id: str, subject: str) -> dict | None:
+        self._pull_remote(meeting_id)
         with self._lock:
             row = self._rows.get(meeting_id)
             if row is None or row["subject"] != subject:
                 return None
             return copy.deepcopy(row)
+
+    def _pull_remote(self, meeting_id: str) -> None:
+        # Bugs vs Fixes
+        # Bug: Submit stores the meeting in the API process. The worker, a
+        # different process, writes the finished row to the artifacts object.
+        # The API kept polling its queued copy, so a finished job stayed queued.
+        # Fix: While the local row is queued or working, adopt the stored row
+        # when its updated_at is later. This read does not write the object back.
+        if not getattr(self, "_remote_storage_enabled", False):
+            return
+        with self._lock:
+            local = self._rows.get(meeting_id)
+            if local is None or local.get("status") not in {"queued", "working"}:
+                return
+        module = _seed_module()
+        if module is None:
+            return
+        try:
+            document, _source = module.read_state_or_seed()
+        except Exception as exc:
+            print(f"remote meeting read error: {exc}", file=sys.stderr, flush=True)
+            return
+        rows = document.get("meetings") if isinstance(document, dict) else None
+        if not isinstance(rows, list):
+            return
+        remote = next(
+            (row for row in rows if isinstance(row, dict) and row.get("meeting_id") == meeting_id),
+            None,
+        )
+        if remote is None:
+            return
+        with self._lock:
+            local = self._rows.get(meeting_id)
+            if local is None or local.get("status") not in {"queued", "working"}:
+                return
+            if str(remote.get("updated_at") or "") <= str(local.get("updated_at") or ""):
+                return
+            if remote.get("subject") != local.get("subject"):
+                return
+            self._rows[meeting_id] = copy.deepcopy(remote)
 
     def list_meetings(self, subject: str) -> list[dict]:
         with self._lock:

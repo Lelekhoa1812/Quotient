@@ -37,5 +37,14 @@ def handler(event: dict, context: object) -> dict:
         except Exception as exc:
             print(f"on-demand worker failed for meeting {meeting_id}: {exc}", file=sys.stderr, flush=True)
             raise
+        finally:
+            # Bugs vs Fixes
+            # Bug: The finished meeting row was only queued for a background S3
+            # put. The handler returned and Lambda froze that thread, so the
+            # API kept reading the queued copy from submit.
+            # Fix: Drain the put before this invocation ends.
+            flush = getattr(port, "flush_storage", None)
+            if callable(flush):
+                flush()
 
     return {"status": "ok", "processed": processed}

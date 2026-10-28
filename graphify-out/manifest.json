@@ -894,9 +894,9 @@
     "semantic_hash": ""
   },
   "infra/cdk/identity/roles.py": {
-    "mtime": 1793161425.898253,
-    "seen": 1793161528.0680819,
-    "ast_hash": "16def9330864087eb395599359ce83c0",
+    "mtime": 1793163390.9005759,
+    "seen": 1793164727.772546,
+    "ast_hash": "bb5394508bc16c24e2d021c174a64aac",
     "semantic_hash": ""
   },
   "infra/cdk/network/__init__.py": {
@@ -1296,9 +1296,9 @@
     "semantic_hash": ""
   },
   "apps/worker/quotient/port.py": {
-    "mtime": 1792727671.4631732,
-    "seen": 1793161528.068047,
-    "ast_hash": "38a8bf1c87f439c422e3254ad912c9ec",
+    "mtime": 1793164680.7468057,
+    "seen": 1793164727.772507,
+    "ast_hash": "c330c9a477155818b8325c3cf06f8363",
     "semantic_hash": ""
   },
   "scripts/start-local.sh": {
@@ -1428,9 +1428,9 @@
     "semantic_hash": ""
   },
   "apps/worker/bedrock/wire.py": {
-    "mtime": 1793161418.0563653,
-    "seen": 1793161528.0680242,
-    "ast_hash": "8cfbaa6243af741382d9acd3347f6125",
+    "mtime": 1793161671.4103909,
+    "seen": 1793164727.7724822,
+    "ast_hash": "fbd99f9635ee37fdc1d98869a165e0e9",
     "semantic_hash": ""
   },
   "apps/worker/loop/ingest.py": {
@@ -2022,9 +2022,9 @@
     "semantic_hash": ""
   },
   "tests/worker/test_port_persistence.py": {
-    "mtime": 1792574336.127111,
-    "seen": 1793161528.0681129,
-    "ast_hash": "343364e66165a044a661141d8042fff3",
+    "mtime": 1793164711.488297,
+    "seen": 1793164727.772579,
+    "ast_hash": "37ebea332cb9034001c45fb33e182fc1",
     "semantic_hash": ""
   },
   "tests/worker/test_prose_scrub.py": {
@@ -2382,9 +2382,9 @@
     "semantic_hash": ""
   },
   "apps/worker/lambda_runner.py": {
-    "mtime": 1792727636.6675797,
-    "seen": 1793161528.068038,
-    "ast_hash": "0815855037f259bb35397e15482b4e93",
+    "mtime": 1793164670.5448484,
+    "seen": 1793164727.772497,
+    "ast_hash": "4e2a4d6f9d7c3f0e5a757903ffb7ca5e",
     "semantic_hash": ""
   },
   "cache/artifacts/0752ef367aafd61f113be9b2ee9a2f48ee47e6f5.json": {

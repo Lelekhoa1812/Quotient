@@ -25,8 +25,14 @@ COPY apps/worker/lambda_runner.py /app/lambda_runner.py
 COPY contracts contracts
 COPY cache/transcripts/ /tmp/quotient/
 COPY cache/artifacts/ /tmp/quotient/artifacts/
+# Bugs vs Fixes
+# Bug: contracts/registry.json is mode 600. Lambda runs the image as its own
+# user and ignores USER, so opening that file raised PermissionError and
+# analysis stopped before transcription.
+# Fix: After the chown, grant every uid read access and directory traversal.
 RUN useradd --create-home --uid 10001 quotient \
-    && chown -R quotient:quotient /app /tmp/quotient
+    && chown -R quotient:quotient /app /tmp/quotient \
+    && chmod -R a+rX /app /tmp/quotient
 USER quotient
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH="/app/apps/worker:/app/apps/api" \

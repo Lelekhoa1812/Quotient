@@ -109,6 +109,12 @@ class TaskRoles(Construct):
                 resources=["*"],
             )
         )
+        # Bugs vs Fixes
+        # Bug: The API enqueues each meeting with sqs:SendMessage, but only the
+        # worker could consume the queue. SendMessage was denied, so analysis
+        # fell back into the API process and ffprobe timed out there.
+        # Fix: Let the API send to the work queue. The worker still consumes it.
+        queue.grant_send_messages(self.api)
         queue.grant_consume_messages(self.worker)
 
     def grant_sandbox_launch(
