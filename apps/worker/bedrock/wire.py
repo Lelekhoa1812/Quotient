@@ -1,7 +1,7 @@
 # Motivation vs Logic
 # Motivation: Local analysis has to call the pinned Bedrock models with the API key
 # and never log that key. Sonic is a bidirectional stream paced by the caller.
-# Logic: Responses and InvokeModel are HTTPS posts. Sonic is HTTP/2 eventstream.
+# Logic: Converse and InvokeModel are HTTPS posts. Sonic is HTTP/2 eventstream.
 # A model-not-found error is NotInvocable so Sol can fall back once.
 
 from __future__ import annotations
@@ -194,33 +194,23 @@ class Transport:
         self._opener = opener
 
     def respond(self, request: dict) -> dict:
+        # Bugs vs Fixes
+        # Bug: Model ids that missed the Converse marker posted to
+        # /openai/v1/responses. Those GPT profiles answer HTTP 401.
+        # Fix: Every reasoning call uses Converse. The Responses URL and its
+        # parsers are gone, so a GPT id cannot reach that endpoint.
         region = request.get("region") or "ap-southeast-2"
         model_id = str(request.get("model") or "")
-        if _is_converse_model(model_id):
-            url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{urllib.parse.quote(model_id, safe='')}/converse"
-            converse_body = _to_converse_body(request)
-            data = self._post(
-                url,
-                converse_body,
-                model_id=model_id,
-                operation="converse",
-                timeout=180,
-            )
-            return _converse_response(data)
-        body = {key: value for key, value in request.items() if key != "region"}
-        url = f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1/responses"
+        quoted = urllib.parse.quote(model_id, safe="")
+        url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{quoted}/converse"
         data = self._post(
             url,
-            body,
+            _to_converse_body(request),
             model_id=model_id,
-            operation="respond",
+            operation="converse",
             timeout=180,
         )
-        return {
-            "output_text": _output_text(data),
-            "tool_calls": _function_calls(data),
-            "usage": {"cached_tokens": _cached_tokens(data)},
-        }
+        return _converse_response(data)
 
     def invoke(self, *, model_id: str, region: str, body: dict) -> dict:
         quoted = urllib.parse.quote(model_id, safe="")
@@ -755,60 +745,6 @@ def _json_object(payload: bytes) -> dict:
     return data
 
 
-def _function_calls(data: dict) -> list[dict]:
-    """Responses function_call items. Arguments stay a JSON object; a bad blob is dropped."""
-
-    calls = []
-    for item in data.get("output") or []:
-        if not isinstance(item, dict) or item.get("type") != "function_call":
-            continue
-        name = item.get("name")
-        arguments = item.get("arguments")
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(name, str) and name and isinstance(arguments, dict):
-            calls.append({"name": name, "arguments": arguments})
-    return calls
-
-
-def _output_text(data: dict) -> str:
-    # Bugs vs Fixes
-    # Bug: Reasoning items and an earlier message were concatenated onto the
-    # schema object, so validation saw two JSON values and rejected the turn.
-    # Fix: Use the last message text. A response with no message keeps output_text.
-    messages: list[str] = []
-    for item in data.get("output") or []:
-        if not isinstance(item, dict) or item.get("type") == "reasoning":
-            continue
-        if item.get("type") not in {None, "message"}:
-            continue
-        chunks: list[str] = []
-        if isinstance(item.get("text"), str):
-            chunks.append(item["text"])
-        for content in item.get("content") or []:
-            if not isinstance(content, dict) or not isinstance(content.get("text"), str):
-                continue
-            if content.get("type") not in {None, "output_text", "text"}:
-                continue
-            chunks.append(content["text"])
-        if chunks:
-            messages.append("".join(chunks))
-    if messages:
-        return _strip_fence(messages[-1])
-    direct = data.get("output_text")
-    if isinstance(direct, str):
-        return _strip_fence(direct)
-    return ""
-
-
-def _is_converse_model(model_id: str) -> bool:
-    lowered = model_id.lower()
-    return any(marker in lowered for marker in ("anthropic", "haiku", "sonnet", "opus"))
-
-
 def _has_disallowed_schema(node: object) -> bool:
     if isinstance(node, dict):
         if "oneOf" in node or "anyOf" in node:
@@ -948,13 +884,6 @@ def _strip_fence(text: str) -> str:
     if len(lines) >= 2 and lines[-1].strip() == "```":
         return "\n".join(lines[1:-1]).strip()
     return text
-
-
-def _cached_tokens(data: dict) -> int:
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    details = usage.get("input_tokens_details") if isinstance(usage.get("input_tokens_details"), dict) else {}
-    cached = details.get("cached_tokens", usage.get("cached_tokens", 0))
-    return int(cached) if isinstance(cached, int) and not isinstance(cached, bool) else 0
 
 
 def _pegasus_response(data: dict) -> dict:

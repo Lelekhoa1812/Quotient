@@ -6,9 +6,9 @@
 # Logic: Three ECS task roles. Tokyo InvokeModel and
 # InvokeModelWithBidirectionalStream exist only on
 # amazon.nova-2-5-sonic. Sydney InvokeModel and InvokeModelWithResponseStream
-# cover the four global profiles, the foundation-model ARNs those profiles
-# require, and the default Bedrock project the OpenAI Responses endpoint
-# authorizes. An explicit deny blocks every other Tokyo foundation-model invoke.
+# cover the Pegasus profile, the Haiku profile, the Haiku fallback, and the
+# foundation-model ARNs those profiles require. An explicit deny blocks every
+# other Tokyo foundation-model invoke.
 # API and worker are denied writes under artifacts/sandbox/. The sandbox role
 # allows object I/O only on that prefix and denies bedrock, DynamoDB, Step
 # Functions, SQS, and Secrets Manager. SendTask* remains resource "*" because
@@ -25,7 +25,6 @@ from quotient.names import (
     SONIC_REGION,
     global_foundation_arns,
     sydney_profile_arns,
-    sydney_project_arn,
     tokyo_sonic_arn,
 )
 
@@ -190,7 +189,7 @@ class TaskRoles(Construct):
                     "bedrock:InvokeModel",
                     "bedrock:InvokeModelWithResponseStream",
                 ],
-                resources=[*sydney_profile_arns(), *global_foundation_arns(), sydney_project_arn()],
+                resources=[*sydney_profile_arns(), *global_foundation_arns()],
             )
         )
         role.add_to_policy(

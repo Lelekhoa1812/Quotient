@@ -14,8 +14,8 @@ VPC_CIDR = "10.50.0.0/16"
 SONIC_MODEL_ID = "amazon.nova-2-5-sonic"
 SONIC_REGION = "ap-northeast-1"
 
-# Global inference profiles invoked from Sydney. The fallback id is the
-# pre-6.1 Sol profile used when gpt-6.1-sol is not invocable.
+# Global and regional inference profiles invoked from Sydney. The fallback id
+# is the global Haiku profile used when the au profile is not invocable.
 PEGASUS_PROFILE = "global.twelvelabs.pegasus-1-5-v1:0"
 LLM_PROFILE = "au.anthropic.claude-haiku-5-5"
 SLM_PROFILE = "au.anthropic.claude-haiku-5-5"
@@ -25,18 +25,13 @@ GLOBAL_PROFILES = (
     PEGASUS_PROFILE,
     LLM_PROFILE,
     LLM_FALLBACK_PROFILE,
-    "global.openai.gpt-6.1-sol",
-    "global.openai.gpt-6-luna",
-    "global.openai.gpt-6-sol",
 )
 
 # Foundation models behind those profiles. Sonic is intentionally absent.
+# Sol and Luna share the Haiku foundation model.
 GLOBAL_FOUNDATION_MODELS = (
     "twelvelabs.pegasus-1-5-v1:0",
     "anthropic.claude-haiku-5-5",
-    "openai.gpt-6.1-sol",
-    "openai.gpt-6-luna",
-    "openai.gpt-6-sol",
 )
 
 # Coarse DAG stage ids. Council entries are the ten blinded dimensions.
@@ -78,13 +73,3 @@ def global_foundation_arns() -> list[str]:
         for model_id in GLOBAL_FOUNDATION_MODELS
     ]
 
-
-def sydney_project_arn() -> str:
-    # Bugs vs Fixes
-    # Bug: POST /openai/v1/responses authorizes bedrock:InvokeModel on
-    # arn:aws:bedrock:REGION:ACCOUNT:project/default. Profile and
-    # foundation-model allows let Pegasus through and deny every Sol and
-    # Luna call, so frames and the digest skip.
-    # Fix: Allow that default project in this region. It is the resource
-    # the Responses endpoint checks, not a second model.
-    return f"arn:aws:bedrock:{REGION}:{ACCOUNT}:project/default"

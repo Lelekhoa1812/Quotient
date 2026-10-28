@@ -33,7 +33,7 @@ Quotient turns a recorded meeting into an evidence-linked brief: published state
 | Analysis worker | Same process as API locally; separate ECS service in CDK | `apps/worker/` |
 | Portal | Next.js 15, React 19 | `apps/web/` |
 | Media | ffmpeg/ffprobe, isolated pyannote diarizer, MarkItDown context venv | `apps/worker/media/`, `scripts/setup-*.sh` |
-| Models | Amazon Bedrock (Nova Sonic, Sol/Luna profiles, Pegasus) | `apps/worker/bedrock/`, `sonic/`, `pegasus/` |
+| Models | Amazon Bedrock (Nova Sonic, Claude Haiku 5.5 for both reasoning roles, Pegasus) | `apps/worker/bedrock/`, `sonic/`, `pegasus/` |
 | IaC | AWS CDK (Python 3.12 venv) | `infra/cdk/` |
 | Tests | pytest (worker, api, contracts, jev); Node test runner (web) | `tests/`, `apps/web/tests/` |
 

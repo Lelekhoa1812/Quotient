@@ -113,6 +113,32 @@ def test_pegasus_1_5_stop_reason_becomes_finish_reason():
     assert mapped == {"finishReason": "length", "message": '{"observations":[]}'}
 
 
+def test_respond_posts_to_converse_and_never_the_responses_endpoint():
+    # Bugs vs Fixes
+    # Bug: A non-Converse model id was posted to /openai/v1/responses.
+    # Fix: respond() always targets /converse, including for the Haiku pin.
+    from bedrock.wire import Transport
+
+    seen: list[str] = []
+
+    def opener(request):
+        seen.append(request.full_url)
+        return 200, b'{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}}}'
+
+    result = Transport(token="local-token", opener=opener).respond(
+        {
+            "model": "au.anthropic.claude-haiku-5-5",
+            "region": "ap-southeast-2",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+        }
+    )
+    assert result["output_text"] == "ok"
+    assert seen == [
+        "https://bedrock-runtime.ap-southeast-2.amazonaws.com/model/au.anthropic.claude-haiku-5-5/converse"
+    ]
+    assert "/openai/v1/responses" not in seen[0]
+
+
 def test_to_converse_body_and_response_extraction():
     from bedrock.wire import _converse_response, _to_converse_body
 

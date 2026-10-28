@@ -163,12 +163,11 @@ Queue `axion-meeting-staging-work`. Eight receives, then `axion-meeting-staging-
 
 Tokyo `bedrock:InvokeModel` and `bedrock:InvokeModelWithBidirectionalStream` are granted only for `arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-5-sonic`. Any other invoke whose requested region is `ap-northeast-1` is denied.
 
-From Sydney the worker may invoke these global profiles, plus the foundation-model ARNs behind them:
+From Sydney the worker may invoke these profiles, plus the foundation-model ARNs behind them:
 
 - `global.twelvelabs.pegasus-1-5-v1:0`
-- `global.openai.gpt-6.1-sol`
-- `global.openai.gpt-6-luna`
-- `global.openai.gpt-6-sol` (fallback only)
+- `au.anthropic.claude-haiku-5-5` (Sol and Luna)
+- `global.anthropic.claude-haiku-5-5` (Sol fallback)
 
 Those Sydney actions are `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`.
 
