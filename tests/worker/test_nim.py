@@ -235,3 +235,15 @@ def test_reasoner_without_plans_keeps_the_bedrock_request_unchanged():
 
     Reasoner(registry(), Fake()).complete(prompt_id="meeting.claim.v1", role="slm", payload={"span_window": [], "proper_nouns": []})
     assert "thinking" not in seen[0] and seen[0]["region"] == "ap-southeast-2"
+
+
+def test_long_reasoning_calls_to_bedrock_wait_longer_than_fast_ones(monkeypatch):
+    from bedrock.wire import _converse_timeout
+
+    monkeypatch.delenv("QUOTIENT_LLM_TIMEOUT_S", raising=False)
+    assert _converse_timeout({"effort": "medium"}) == 180
+    assert _converse_timeout({"effort": "xhigh"}) == 300
+    monkeypatch.setenv("QUOTIENT_LLM_TIMEOUT_S", "9999")
+    assert _converse_timeout({"effort": "xhigh"}) == 600
+    monkeypatch.setenv("QUOTIENT_LLM_TIMEOUT_S", "x")
+    assert _converse_timeout({"effort": "xhigh"}) == 300

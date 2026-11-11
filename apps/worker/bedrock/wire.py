@@ -175,6 +175,20 @@ def _audit_llm(operation: str, **fields: object) -> None:
     record("llm", operation, **fields)
 
 
+
+# Bugs vs Fixes
+# Bug: Every Converse call gave up after 180 s. The walkaway digest on a long meeting (the long-reasoning
+# role at xhigh effort) took longer, timed out twice, and the meeting finished with no digest.
+# Fix: The long-reasoning role may wait up to 300 s (QUOTIENT_LLM_TIMEOUT_S); the fast role keeps 180 s.
+def _converse_timeout(request: dict) -> int:
+    if str(request.get("effort") or "") == "xhigh":
+        try:
+            return max(180, min(int(os.environ.get("QUOTIENT_LLM_TIMEOUT_S", "300")), 600))
+        except ValueError:
+            return 300
+    return 180
+
+
 class Transport:
     """HTTPS adapter. respond() and invoke() match the worker client contracts."""
 
@@ -208,7 +222,7 @@ class Transport:
             _to_converse_body(request),
             model_id=model_id,
             operation="converse",
-            timeout=180,
+            timeout=_converse_timeout(request),
         )
         return _converse_response(data)
 
