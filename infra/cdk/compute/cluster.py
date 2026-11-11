@@ -277,6 +277,12 @@ class MeetingCompute(Construct):
             environment=worker_env,
             log_group=groups.worker,
         )
+        # Analyses run longer than a Lambda may, so the Lambda hands each one to a one-off Fargate task. Set here, not in
+        # _worker_environment, because the task definition itself uses that environment (a reference would be circular).
+        roles.grant_worker_launch(cluster=self.cluster, worker_task=self.worker_task, execution_role=self.execution_role)
+        self.worker_fn.add_environment("LONG_JOB_TASK_DEFINITION_ARN", self.worker_task.task_definition_arn)
+        self.worker_fn.add_environment("LONG_JOB_SECURITY_GROUP_ID", self.worker_sg.security_group_id)
+        self.worker_fn.add_environment("LONG_JOB_SUBNET_IDS", Fn.join(",", [subnet.subnet_id for subnet in vpc.public_subnets]))
         self.worker_fn.add_event_source(
             lambda_event_sources.SqsEventSource(
                 work,

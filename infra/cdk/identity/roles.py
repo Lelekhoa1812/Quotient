@@ -150,6 +150,31 @@ class TaskRoles(Construct):
             )
         )
 
+    def grant_worker_launch(
+        self,
+        *,
+        cluster: ecs.ICluster,
+        worker_task: ecs.ITaskDefinition,
+        execution_role: iam.IRole,
+    ) -> None:
+        """The worker Lambda may start the worker task (one meeting at a time, no time limit) and nothing else."""
+        self.worker.add_to_policy(
+            iam.PolicyStatement(
+                sid="RunWorkerTask",
+                actions=["ecs:RunTask"],
+                resources=[worker_task.task_definition_arn],
+                conditions={"ArnEquals": {"ecs:cluster": cluster.cluster_arn}},
+            )
+        )
+        self.worker.add_to_policy(
+            iam.PolicyStatement(
+                sid="PassWorkerRoles",
+                actions=["iam:PassRole"],
+                resources=[self.worker.role_arn, execution_role.role_arn],
+                conditions={"StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}},
+            )
+        )
+
     def _role(self, construct_id: str, suffix: str) -> iam.Role:
         role = iam.Role(
             self,
