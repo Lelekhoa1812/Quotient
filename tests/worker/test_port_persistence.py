@@ -358,7 +358,11 @@ def test_meeting_adopts_a_newer_remote_row_and_keeps_a_newer_local_one(tmp_path,
         ]
     }
 
+    real = module._seed_module()
+
     class _Seed:
+        adopt = staticmethod(real.adopt)
+
         @staticmethod
         def read_state_or_seed(env=None, run=None):
             return remote, "state/meetings.json"

@@ -70,6 +70,10 @@ def read_remote(
     if not bucket:
         return None
     target_key = key or source.get("QUOTIENT_SEED_KEY", "").strip() or _DEFAULT_KEY
+    if run is None:
+        fast = _read_with_botocore(source, bucket, target_key)
+        if fast is not _FALLBACK:
+            return fast
     runner = run or subprocess.run
     fd, temporary = tempfile.mkstemp(prefix="meeting-seed-", suffix=".json")
     os.close(fd)
@@ -112,6 +116,105 @@ def read_remote(
         return parsed
     finally:
         path.unlink(missing_ok=True)
+
+
+_FALLBACK = object()
+
+
+def _read_with_botocore(source: Mapping[str, str], bucket: str, key: str):
+    """The stored document, None when there is none, or _FALLBACK when botocore cannot say (use the CLI then).
+
+    The CLI starts a whole Python process for each read, which is too slow now that every page read refreshes."""
+    try:
+        import botocore.session
+        from botocore.config import Config
+        from botocore.exceptions import ClientError
+
+        kwargs = {
+            "region_name": source.get("AWS_REGION", "ap-southeast-2"),
+            "config": Config(signature_version="s3v4", s3={"addressing_style": "path"}, connect_timeout=5, read_timeout=30),
+        }
+        endpoint = source.get("QUOTIENT_S3_ENDPOINT_URL", "").strip()
+        if endpoint:
+            kwargs["endpoint_url"] = endpoint
+        client = botocore.session.get_session().create_client("s3", **kwargs)
+        try:
+            body = client.get_object(Bucket=bucket, Key=key)["Body"].read(_MAX_BYTES + 1)
+        except ClientError as exc:
+            if str(exc.response.get("Error", {}).get("Code")) in {"NoSuchKey", "404", "NotFound"}:
+                return None
+            _note(f"meeting storage skipped: {exc.response.get('Error', {}).get('Code')}")
+            return None
+    except Exception as exc:
+        _note(f"meeting storage read via botocore failed: {type(exc).__name__}")
+        return _FALLBACK
+    if len(body) > _MAX_BYTES:
+        _note("meeting storage skipped: the document is larger than limit")
+        return None
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        _note("meeting storage skipped: the document is not JSON")
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def on_cloud(env: Mapping[str, str] | None = None) -> bool:
+    """True when the meeting store is shared through S3 by several processes (API instances, workers, tasks)."""
+    source = os.environ if env is None else env
+    return bool(source.get("ARTIFACTS_BUCKET", "").strip()) and source.get("QUOTIENT_ENVIRONMENT", "").strip().lower() != "local"
+
+
+def _valid(row: object) -> bool:
+    return (
+        isinstance(row, dict)
+        and isinstance(row.get("meeting_id"), str)
+        and bool(row.get("meeting_id"))
+        and isinstance(row.get("subject"), str)
+        and bool(row.get("subject"))
+    )
+
+
+def merge_rows(stored: list, mine: list) -> list:
+    """Rows to write: everything already stored, with my row winning where it is at least as new.
+
+    Bugs vs Fixes
+    Bug: The whole document was replaced on every save from one process's memory, so a meeting another process had
+    added or advanced since this one loaded was erased.
+    Fix: Merge by meeting. The later updated_at wins, and a tie goes to the writer, who holds the latest edit."""
+    merged: dict[str, dict] = {}
+    for row in stored:
+        if _valid(row):
+            merged[row["meeting_id"]] = row
+    for row in mine:
+        if not _valid(row):
+            continue
+        other = merged.get(row["meeting_id"])
+        if other is None or str(row.get("updated_at") or "") >= str(other.get("updated_at") or ""):
+            merged[row["meeting_id"]] = row
+    return list(merged.values())
+
+
+def adopt(port: object, rows: list) -> int:
+    """Take meetings another process added, and rows another process has advanced, into this port's memory."""
+    current = getattr(port, "_rows", None)
+    index = getattr(port, "_idempotency", None)
+    if not isinstance(current, dict) or not isinstance(index, dict):
+        return 0
+    taken = 0
+    for row in rows:
+        if not _valid(row):
+            continue
+        meeting_id = row["meeting_id"]
+        local = current.get(meeting_id)
+        if local is not None and (local.get("subject") != row["subject"] or str(row.get("updated_at") or "") <= str(local.get("updated_at") or "")):
+            continue
+        current[meeting_id] = copy.deepcopy(row)
+        idem = row.get("idempotency_key")
+        if isinstance(idem, str) and idem:
+            index[(row["subject"], idem)] = meeting_id
+        taken += 1
+    return taken
 
 
 def save_remote_state(
@@ -216,7 +319,10 @@ def _install(port: object, rows: list) -> int:
         if meeting_id in current:
             continue
         stored = copy.deepcopy(row)
-        if stored.get("reindexing"):
+        if on_cloud():
+            # Another process (a worker Lambda or the long-job task) may be analysing this meeting right now.
+            pass
+        elif stored.get("reindexing"):
             stored["reindexing"] = False
             stored["reindex_error"] = None
             stored["status"] = stored.pop("previous_status", None) or "needs_review"

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import importlib.util
 import shutil
@@ -519,9 +520,22 @@ class Port:
                 try:
                     mod = _seed_module()
                     if mod is not None:
-                        mod.save_remote_state(payload)
+                        mod.save_remote_state(self._merged_for_write(mod, payload))
                 except Exception as exc:
                     print(f"remote state save error: {exc}", file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _merged_for_write(module, payload: dict) -> dict:
+        """What is stored now plus this process's rows, so a save never erases another process's meetings."""
+        try:
+            document, _source = module.read_state_or_seed()
+        except Exception as exc:
+            print(f"remote state merge skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+            return payload
+        stored = document.get("meetings") if isinstance(document, dict) else None
+        if not isinstance(stored, list):
+            return payload
+        return {**payload, "meetings": module.merge_rows(stored, list(payload.get("meetings") or []))}
 
     def _save_locked(self) -> None:
         payload = {"version": 1, "meetings": list(self._rows.values())}
@@ -800,6 +814,11 @@ class Port:
                     kwargs["aws_secret_access_key"] = creds.secret_key
                     kwargs["aws_session_token"] = creds.token
                 sqs = session.create_client("sqs", **kwargs)
+                # Bugs vs Fixes
+                # Bug: The meeting row was put to storage by a background thread, so a worker (or another API instance)
+                # could be told about a meeting that was not stored yet, and the page said it could not be opened.
+                # Fix: Store the row, then announce it.
+                self._drain_remote()
                 sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps({"meeting_id": meeting_id}))
                 print(f"enqueued meeting {meeting_id} to SQS {queue_url}", file=sys.stderr, flush=True)
                 return
@@ -1141,26 +1160,29 @@ class Port:
         ledger.known_names = known
 
     def meeting(self, meeting_id: str, subject: str) -> dict | None:
-        self._pull_remote(meeting_id)
+        self._sync_remote(meeting_id)
         with self._lock:
             row = self._rows.get(meeting_id)
             if row is None or row["subject"] != subject:
                 return None
             return copy.deepcopy(row)
 
-    def _pull_remote(self, meeting_id: str) -> None:
-        # Bugs vs Fixes
-        # Bug: Submit stores the meeting in the API process. The worker, a
-        # different process, writes the finished row to the artifacts object.
-        # The API kept polling its queued copy, so a finished job stayed queued.
-        # Fix: While the local row is queued or working, adopt the stored row
-        # when its updated_at is later. This read does not write the object back.
+    def _sync_remote(self, meeting_id: str | None = None) -> None:
+        """Bring in what other processes have stored: meetings this one never saw, and rows they have advanced.
+
+        Bugs vs Fixes
+        Bug: Each API instance and each worker loaded the stored meetings once, when it started. A meeting submitted
+        on one instance was "not found" on the next, a finished job stayed queued, and a list showed only what that
+        instance knew.
+        Fix: Before a read or an edit, adopt any stored row that is missing here or newer (at most once a second).
+        This read does not write the object back."""
         if not getattr(self, "_remote_storage_enabled", False):
             return
+        now = time.monotonic()
         with self._lock:
-            local = self._rows.get(meeting_id)
-            if local is None or local.get("status") not in {"queued", "working"}:
+            if now - getattr(self, "_last_remote_sync", 0.0) < 1.0:
                 return
+            self._last_remote_sync = now
         module = _seed_module()
         if module is None:
             return
@@ -1172,21 +1194,8 @@ class Port:
         rows = document.get("meetings") if isinstance(document, dict) else None
         if not isinstance(rows, list):
             return
-        remote = next(
-            (row for row in rows if isinstance(row, dict) and row.get("meeting_id") == meeting_id),
-            None,
-        )
-        if remote is None:
-            return
         with self._lock:
-            local = self._rows.get(meeting_id)
-            if local is None or local.get("status") not in {"queued", "working"}:
-                return
-            if str(remote.get("updated_at") or "") <= str(local.get("updated_at") or ""):
-                return
-            if remote.get("subject") != local.get("subject"):
-                return
-            self._rows[meeting_id] = copy.deepcopy(remote)
+            module.adopt(self, rows)
 
     def list_meetings(self, subject: str) -> list[dict]:
         with self._lock:
@@ -1948,6 +1957,35 @@ def load_port() -> Port:
     if not is_local:
         _load_seed(port)
     return port
+
+
+# Every method a person's request reaches first brings in what other processes have stored.
+# Motivation vs Logic
+# Motivation: On AWS several processes serve one meeting store (API instances, worker Lambdas, the long-job task).
+# Logic: Wrap the API-facing methods so each starts with a throttled refresh. Methods that only the analysis
+# itself calls are not wrapped: that process is the writer of the meeting it analyses.
+def _synced(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        self._sync_remote()
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+for _name in (
+    "list_meetings",
+    "accept_action",
+    "revise_speaker",
+    "merge_speakers",
+    "reindex",
+    "revise_text",
+    "rename_meeting",
+    "cancel",
+    "export_bytes",
+    "media_url",
+):
+    setattr(Port, _name, _synced(getattr(Port, _name)))
 
 
 def _seed_module():
