@@ -1,7 +1,7 @@
 """Long analyses leave the 15-minute Lambda for a one-off Fargate task; the Lambda falls back to itself when it can't."""
 
 import sys
-from pathlib import Path
+import types
 
 import pytest
 
@@ -65,9 +65,7 @@ def test_the_handler_does_not_analyse_inline_when_the_task_started(configured, m
         def _analyze(self, meeting_id):
             ran.append(meeting_id)
 
-    import quotient.worker.port as worker_port
-
-    monkeypatch.setattr(worker_port, "load_worker_port", lambda: Port())
+    _fake_worker_port(monkeypatch, Port())
     monkeypatch.setattr(lambda_runner, "start_long_job", lambda meeting_id, client=None: True)
     out = lambda_runner.handler({"Records": [{"body": '{"meeting_id": "m1"}'}]}, None)
     assert out["processed"] == 1 and ran == []
@@ -78,7 +76,6 @@ def test_the_handler_does_not_analyse_inline_when_the_task_started(configured, m
 
 def test_the_task_runner_analyses_the_named_meeting_and_flushes(monkeypatch):
     import task_runner
-    import quotient.worker.port as worker_port
 
     seen = []
 
@@ -89,7 +86,7 @@ def test_the_task_runner_analyses_the_named_meeting_and_flushes(monkeypatch):
         def flush_storage(self):
             seen.append(("flush",))
 
-    monkeypatch.setattr(worker_port, "load_worker_port", lambda: Port())
+    _fake_worker_port(monkeypatch, Port())
     monkeypatch.setenv("MEETING_ID", "m9")
     assert task_runner.main() == 0 and seen == [("analyze", "m9"), ("flush",)]
     monkeypatch.delenv("MEETING_ID")
@@ -98,7 +95,6 @@ def test_the_task_runner_analyses_the_named_meeting_and_flushes(monkeypatch):
 
 def test_an_error_outside_the_analysis_marks_the_meeting_failed(monkeypatch):
     import task_runner
-    import quotient.worker.port as worker_port
 
     failed = []
 
@@ -109,6 +105,13 @@ def test_an_error_outside_the_analysis_marks_the_meeting_failed(monkeypatch):
         def _fail(self, meeting_id, message):
             failed.append(meeting_id)
 
-    monkeypatch.setattr(worker_port, "load_worker_port", lambda: Port())
+    _fake_worker_port(monkeypatch, Port())
     monkeypatch.setenv("MEETING_ID", "m3")
     assert task_runner.main() == 1 and failed == ["m3"]
+
+
+def _fake_worker_port(monkeypatch, port):
+    # Not the real module: importing it changes how PortError resolves for every test that runs after this one.
+    module = types.ModuleType("quotient.worker.port")
+    module.load_worker_port = lambda: port
+    monkeypatch.setitem(sys.modules, "quotient.worker.port", module)
