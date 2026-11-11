@@ -12,6 +12,7 @@
  * from lib/present.ts.
  */
 import { useState } from "react";
+import { usePlayable } from "@/components/ui/moment";
 import { dueText, formatMs, isProposed } from "@/lib/format";
 import {
   NOT_MENTIONED,
@@ -56,6 +57,7 @@ export function Boards({
   onSeekSpan: (span: Span) => void;
   onAccept: (actionId: string) => void;
 }) {
+  const playable = usePlayable();
   const counts = new Map<Dimension, number>();
   for (const finding of findings) {
     if (finding.none_in_transcript) continue;
@@ -117,7 +119,7 @@ export function Boards({
       <div id="topic-panel" role="tabpanel" aria-labelledby={`tab-${dimension}`} className="q-cards">
         <p className="q-kicker">{dimensionQuestion(dimension)}</p>
         {isOpenPointTopic(dimension) && rows.length > 0 ? <p className="q-muted">{OPEN_POINT_NOTE}</p> : null}
-        {absent && !unconfirmedTotal && !incomplete ? <p className="q-empty">{NOT_MENTIONED}.</p> : null}
+        {absent && !unconfirmedTotal && !incomplete ? <p className="q-empty">{playable ? NOT_MENTIONED : NOT_MENTIONED.replace("the video", "the transcript")}.</p> : null}
         {absent && (unconfirmedTotal > 0 || incomplete) ? (
           <p className="q-empty">
             No confirmed points on this topic.
