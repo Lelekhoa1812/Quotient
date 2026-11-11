@@ -43,3 +43,11 @@ def test_an_upload_issued_without_a_task_belongs_only_to_the_person_it_was_issue
     assert owns_upload("bob", "task9", "uploads/task9/notes.vtt")  # the task's own key (the elicitation flow)
     assert not owns_upload("bob", "task9", "uploads/task8/notes.vtt")
     assert owns_upload("bob", None, "derivatives/sample.mp4")  # only browser uploads are bound to a person
+
+
+def test_a_queued_transcript_reports_pending_times_not_estimated_ones():
+    from quotient.graph.gate import _source_view
+
+    assert _source_view({"kind": "transcript", "format": "vtt", "timings": "pending"})["timings"] == "pending"
+    assert _source_view({"kind": "transcript", "timings": "exact"})["timings"] == "exact"
+    assert _source_view({"kind": "transcript"})["timings"] == "estimated"

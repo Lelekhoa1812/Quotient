@@ -198,7 +198,7 @@ def _source_view(value: object) -> dict | None:
     return {
         "kind": "transcript",
         "format": str(value.get("format") or "text")[:12],
-        "timings": "exact" if value.get("timings") == "exact" else "estimated",
+        "timings": value.get("timings") if value.get("timings") in ("exact", "pending") else "estimated",
         "speakers": count("speakers"),
         "words": count("words"),
         "title": value.get("title") if isinstance(value.get("title"), str) else None,

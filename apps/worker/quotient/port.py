@@ -619,6 +619,15 @@ class Port:
                 "model_provider": chosen,
                 "model_overrides": models.clean_overrides(model_overrides) if chosen == "nim" else {},
             }
+            # Say it is a transcript from the start, so the page does not call a queued transcript a recording.
+            from media import storage as _storage
+
+            if _storage.is_transcript_upload(object_key):
+                self._rows[meeting_id]["source"] = {
+                    "kind": "transcript",
+                    "format": Path(str(object_key)).suffix.lstrip(".").lower() or "text",
+                    "timings": "pending",
+                }
             if context:
                 self._rows[meeting_id]["context"] = context
             try:

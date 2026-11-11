@@ -144,3 +144,13 @@ def test_transcripts_do_not_wait_behind_a_recording_on_the_local_queue(tmp_path,
     assert port._work_queue.empty()
     port._enqueue_analysis("r")
     assert port._work_queue.get_nowait() == "r"
+
+
+def test_a_queued_transcript_is_marked_as_one_before_it_is_read(tmp_path):
+    port = make_port(tmp_path)
+    row = port._rows[submit(port)]  # uploads/t1/sync.md
+    assert row["source"] == {"kind": "transcript", "format": "md", "timings": "pending"}
+    other = make_port(tmp_path)
+    other._enqueue_analysis = lambda meeting_id: None
+    recording = other._rows[other.submit(subject="me", object_key="uploads/t2/call.mp4", context_names=(), idempotency_key=None)]
+    assert "source" not in recording
