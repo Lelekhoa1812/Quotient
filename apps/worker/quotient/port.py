@@ -443,6 +443,10 @@ class Port:
             name="quotient-analysis-worker",
         )
         self._worker_thread.start()
+        # A transcript is light (no audio, no video, no ffmpeg), so it does not wait behind a long recording on this machine.
+        # Its workers start with the first transcript, not with the port.
+        self._transcript_queue: queue.Queue[str] = queue.Queue()
+        self._transcript_workers_started = False
         self._remote_save_lock = threading.Lock()
         self._remote_write_lock = threading.Lock()
         self._remote_save_event = threading.Event()
@@ -736,10 +740,40 @@ class Port:
         except Exception:
             pass
 
+    def _is_transcript_row(self, meeting_id: str) -> bool:
+        from transcript.parse import is_transcript_name
+
+        with self._lock:
+            row = self._rows.get(meeting_id) or {}
+            return is_transcript_name(str(row.get("object_key") or ""))
+
+    def _ensure_transcript_workers(self) -> None:
+        with self._lock:
+            if self._transcript_workers_started:
+                return
+            self._transcript_workers_started = True
+        try:
+            count = max(1, min(8, int(os.environ.get("QUOTIENT_TRANSCRIPT_THREADS", "3"))))
+        except ValueError:
+            count = 3
+        for number in range(count):
+            threading.Thread(target=self._transcript_worker, daemon=True, name=f"quotient-transcript-worker-{number}").start()
+
+    def _transcript_worker(self) -> None:
+        while True:
+            meeting_id = self._transcript_queue.get()
+            try:
+                self._analyze(meeting_id)
+            except Exception as exc:
+                print(f"transcript worker error for {meeting_id}: {exc}", file=sys.stderr, flush=True)
+            finally:
+                self._transcript_queue.task_done()
+
     def _enqueue_analysis(self, meeting_id: str) -> None:
         """Enqueue a meeting for sequential background analysis so concurrent jobs never saturate compute."""
+        local_transcript = not os.environ.get("WORK_QUEUE_URL", "").strip() and self._is_transcript_row(meeting_id)
         with self._lock:
-            if self._active_analysis is not None and self._active_analysis != meeting_id:
+            if not local_transcript and self._active_analysis is not None and self._active_analysis != meeting_id:
                 row = self._rows.get(meeting_id)
                 if row and row.get("status") == "queued":
                     row["progress_message"] = "Queued: waiting for active analysis to finish"
@@ -762,7 +796,11 @@ class Port:
                 return
             except Exception as exc:
                 print(f"failed to enqueue to SQS: {exc}; falling back to local thread", file=sys.stderr, flush=True)
-        self._work_queue.put(meeting_id)
+        if local_transcript:
+            self._ensure_transcript_workers()
+            self._transcript_queue.put(meeting_id)
+        else:
+            self._work_queue.put(meeting_id)
 
     def _queue_worker(self) -> None:
         """Single-task background worker: processes meetings one at a time to preserve system stability."""

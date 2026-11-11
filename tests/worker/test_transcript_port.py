@@ -126,3 +126,21 @@ def test_reindex_of_a_transcript_never_borrows_another_meetings_voices(tmp_path)
     port._find_cached_turns = lambda *a, **k: called.append(1) or [(0, 5000, "spk_0")]
     ledger = port._reconstruct_ledger(meeting_id, row)
     assert not called and ledger.kind == "transcript" and ledger.turns == []
+
+
+def test_transcripts_do_not_wait_behind_a_recording_on_the_local_queue(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.delenv("WORK_QUEUE_URL", raising=False)
+    monkeypatch.setenv("QUOTIENT_TRANSCRIPT_THREADS", "2")
+    port = make_port(tmp_path)
+    started = threading.Event()
+    port._analyze = lambda meeting_id: started.set()
+    port._rows["t"] = {"meeting_id": "t", "subject": "me", "object_key": "uploads/x/notes.vtt", "status": "queued"}
+    port._rows["r"] = {"meeting_id": "r", "subject": "me", "object_key": "uploads/x/call.mp4", "status": "queued"}
+    port._active_analysis = "r"  # a long recording is being analysed
+    port._enqueue_analysis("t")
+    assert started.wait(5), "the transcript waited behind the recording"
+    assert port._work_queue.empty()
+    port._enqueue_analysis("r")
+    assert port._work_queue.get_nowait() == "r"
