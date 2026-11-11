@@ -54,6 +54,13 @@ Lambda cannot read the attestation manifest `buildx` adds by default, so `--prov
 
 **Uploads and Lambda instances.** A task lives in the memory of one Lambda instance, so the portal does not wait for an upload inside a task. It asks `submit_meeting` for a signed target (no task), uploads the file straight to S3, then calls `submit_meeting` with the stored key and follows the meeting by id. A target issued this way is bound to the signed-in person, and only that person can submit it.
 
+**Removing test meetings.** The portal's trash icon only hides a meeting in that browser. To remove a meeting from the shared store, use the operator script, which dry-runs unless `--apply` is given, backs up the stored document to `.local/run/`, refuses meetings still queued or working, and leaves a tombstone so no warm process can write the meeting back:
+
+```bash
+.venv/bin/python scripts/purge_meetings.py --bucket axion-meeting-staging-artifacts --key state/meetings.json <id> [<id> ...]
+.venv/bin/python scripts/purge_meetings.py --bucket axion-meeting-staging-artifacts --key state/meetings.json --apply <id> [<id> ...]
+```
+
 **Long meetings.** The worker Lambda stops at 900 s. A transcript on NIM, or a short recording, finishes inside that. A long recording can run past it; the queue redelivers (16 minute visibility, 8 receives, then the dead-letter queue). Treat very long meetings as a manual run.
 
 The sections below describe the earlier Fargate and ALB layout and are kept for reference where the resources still exist.
