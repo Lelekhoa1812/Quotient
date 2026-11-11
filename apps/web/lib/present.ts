@@ -291,7 +291,7 @@ const STEP_MATCHERS: RegExp[] = [
   /^(preparing the media|streaming audio|fetching the transcript|reading the transcript)/i,
   /^(compacting|checking audio against|extracting claims)/i,
   /^checking transcript coverage/i,
-  /^(analy[sz]ing all|building the evidence|summari[sz]ing|extracting and grounding)/i,
+  /^(analy[sz]ing all|building the evidence|summari[sz]ing|extracting and grounding|writing the walkaway)/i,
   /^building charts/i,
 ];
 

@@ -126,3 +126,20 @@ test("progress steps read a transcript instead of transcribing a recording", asy
   assert.equal(friendlyError("This PDF is password-protected."), "This PDF is password-protected.");
   assert.equal(friendlyError("boom"), "Something went wrong. Please try again.");
 });
+
+test("every stage message the worker sends lands on a step", async () => {
+  const { analysisStepIndex } = await import("@/lib/present");
+  const stages: [string, number][] = [
+    ["Reading the transcript", 0],
+    ["Compacting transcript spans", 1],
+    ["Extracting claims from the transcript", 1],
+    ["Checking transcript coverage", 2],
+    ["Analyzing all ten evidence lenses", 3],
+    ["Building the evidence-backed brief", 3],
+    ["Summarizing the available evidence", 3],
+    ["Extracting and grounding follow-up actions", 3],
+    ["Writing the walkaway: summary, decisions, actions and topics", 3],
+    ["Building charts and checking publish readiness", 4],
+  ];
+  for (const [message, step] of stages) assert.equal(analysisStepIndex(message), step, message);
+});
