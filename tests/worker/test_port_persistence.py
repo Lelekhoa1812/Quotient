@@ -362,6 +362,8 @@ def test_meeting_adopts_a_newer_remote_row_and_keeps_a_newer_local_one(tmp_path,
 
     class _Seed:
         adopt = staticmethod(real.adopt)
+        deleted_ids = staticmethod(real.deleted_ids)
+        merge_rows = staticmethod(real.merge_rows)
 
         @staticmethod
         def read_state_or_seed(env=None, run=None):

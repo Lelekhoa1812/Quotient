@@ -384,6 +384,7 @@ class Port:
         self._model_plan = model_plan
         self._lock = threading.Lock()
         self._rows: dict[str, dict] = {}
+        self._deleted: set[str] = set()  # meetings deleted on purpose; never written back
         self._idempotency: dict[tuple[str, str], str] = {}
         self._context_batches: dict[str, dict] = {}
         self._exports: dict[tuple[str, str], tuple[str, bytes]] = {}
@@ -403,6 +404,8 @@ class Port:
             rows = payload.get("meetings", [])
             if not isinstance(rows, list):
                 raise ValueError(f"{where} has an invalid meetings collection. It was left unchanged.")
+            deleted = payload.get("deleted") or []
+            self._deleted = {item for item in deleted if isinstance(item, str) and item} if isinstance(deleted, list) else set()
             for row in rows:
                 if not isinstance(row, dict) or not isinstance(row.get("meeting_id"), str):
                     raise ValueError(f"{where} contains a row that is not a meeting object with a meeting_id. It was left unchanged.")
@@ -434,6 +437,8 @@ class Port:
                 idem = row.get("idempotency_key")
                 if isinstance(idem, str):
                     self._idempotency[(str(row.get("subject", "")), idem)] = row["meeting_id"]
+            for meeting_id in self._deleted:
+                self._rows.pop(meeting_id, None)
             self._save_locked()
         self._work_queue: queue.Queue[str] = queue.Queue()
         self._active_analysis: str | None = None
@@ -532,13 +537,15 @@ class Port:
         except Exception as exc:
             print(f"remote state merge skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
             return payload
+        deleted = set(payload.get("deleted") or []) | module.deleted_ids(document)
         stored = document.get("meetings") if isinstance(document, dict) else None
         if not isinstance(stored, list):
-            return payload
-        return {**payload, "meetings": module.merge_rows(stored, list(payload.get("meetings") or []))}
+            return {**payload, "deleted": sorted(deleted)}
+        merged = module.merge_rows(stored, list(payload.get("meetings") or []), deleted)
+        return {**payload, "meetings": merged, "deleted": sorted(deleted)}
 
     def _save_locked(self) -> None:
-        payload = {"version": 1, "meetings": list(self._rows.values())}
+        payload = {"version": 1, "meetings": list(self._rows.values()), "deleted": sorted(self._deleted)}
         if self._state_path is not None:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             # default=str: one unexpected value (an enum, a Path) must not make every later save raise.
@@ -1193,9 +1200,11 @@ class Port:
             return
         rows = document.get("meetings") if isinstance(document, dict) else None
         if not isinstance(rows, list):
-            return
+            rows = []
+        deleted = module.deleted_ids(document)
         with self._lock:
-            module.adopt(self, rows)
+            self._deleted |= deleted
+            module.adopt(self, rows, deleted)
 
     def list_meetings(self, subject: str) -> list[dict]:
         with self._lock:

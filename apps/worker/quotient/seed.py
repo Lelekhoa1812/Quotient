@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 
 _DEFAULT_KEY = "seed/meetings.json"
@@ -175,13 +175,22 @@ def _valid(row: object) -> bool:
     )
 
 
-def merge_rows(stored: list, mine: list) -> list:
+def deleted_ids(document: object) -> set[str]:
+    """Meetings that were deleted on purpose. A deleted meeting stays deleted: no process may write it back."""
+    raw = document.get("deleted") if isinstance(document, dict) else None
+    if not isinstance(raw, list):
+        return set()
+    return {item for item in raw if isinstance(item, str) and item}
+
+
+def merge_rows(stored: list, mine: list, deleted: Collection[str] = ()) -> list:
     """Rows to write: everything already stored, with my row winning where it is at least as new.
 
     Bugs vs Fixes
     Bug: The whole document was replaced on every save from one process's memory, so a meeting another process had
     added or advanced since this one loaded was erased.
-    Fix: Merge by meeting. The later updated_at wins, and a tie goes to the writer, who holds the latest edit."""
+    Fix: Merge by meeting. The later updated_at wins, and a tie goes to the writer, who holds the latest edit.
+    A deleted meeting is dropped from both sides, so a warm process that still holds it cannot save it back."""
     merged: dict[str, dict] = {}
     for row in stored:
         if _valid(row):
@@ -192,20 +201,29 @@ def merge_rows(stored: list, mine: list) -> list:
         other = merged.get(row["meeting_id"])
         if other is None or str(row.get("updated_at") or "") >= str(other.get("updated_at") or ""):
             merged[row["meeting_id"]] = row
+    for meeting_id in deleted:
+        merged.pop(meeting_id, None)
     return list(merged.values())
 
 
-def adopt(port: object, rows: list) -> int:
-    """Take meetings another process added, and rows another process has advanced, into this port's memory."""
+def adopt(port: object, rows: list, deleted: Collection[str] = ()) -> int:
+    """Take meetings another process added, and rows another process has advanced, into this port's memory.
+    A meeting another process deleted is removed here too."""
     current = getattr(port, "_rows", None)
     index = getattr(port, "_idempotency", None)
     if not isinstance(current, dict) or not isinstance(index, dict):
         return 0
+    for meeting_id in deleted:
+        current.pop(meeting_id, None)
+        for key in [key for key, value in index.items() if value == meeting_id]:
+            index.pop(key, None)
     taken = 0
     for row in rows:
         if not _valid(row):
             continue
         meeting_id = row["meeting_id"]
+        if meeting_id in deleted:
+            continue
         local = current.get(meeting_id)
         if local is not None and (local.get("subject") != row["subject"] or str(row.get("updated_at") or "") <= str(local.get("updated_at") or "")):
             continue
