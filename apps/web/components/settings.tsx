@@ -10,10 +10,169 @@
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
 import { Check, Copy } from "lucide-react";
 import { copyToClipboard } from "@/lib/clipboard";
+import { mcp } from "@/lib/mcp/client";
+import {
+  effectiveProvider,
+  knownOverrides,
+  loadPreference,
+  nimChoice,
+  providerLabel,
+  providerModels,
+  savePreference,
+  speedLabel,
+  type ModelOptions,
+  type ModelPair,
+  type ModelPreference,
+} from "@/lib/models";
 import { apiBase } from "@/lib/origin";
 import type { SettingField } from "@/lib/settings";
+import type { ModelProvider } from "@/lib/types";
 
 type LoadedField = SettingField & { set: boolean; value: string };
+
+const PROVIDER_ORDER: ModelProvider[] = ["bedrock", "nim"];
+
+const ROLE_LABEL: Record<keyof ModelPair, string> = {
+  slm: "Fast passes (easy tasks)",
+  llm: "Long reasoning (complex tasks)",
+};
+
+/**
+ * Motivation vs Logic
+ * Motivation: The person chooses which model family runs the text analysis, and which NIM models run the
+ * fast and the long-reasoning passes. The choice is kept on this computer and applies to meetings started
+ * after it is made.
+ * Logic: The server says which families it has set up (model_options). NIM is disabled, with a plain reason,
+ * when it is not. Each change is saved at once. Radio buttons give the keyboard and screen-reader behaviour.
+ */
+function ModelChoice() {
+  const [options, setOptions] = useState<ModelOptions | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [preference, setPreference] = useState<ModelPreference | null>(null);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    let cancel = false;
+    // Read the saved choice here, not during render, so the page renders the same on the server and in the browser.
+    setPreference(loadPreference());
+    void (async () => {
+      try {
+        const loaded = await mcp.modelOptions();
+        if (cancel) return;
+        setOptions(loaded);
+        setFailed(loaded === null);
+      } catch {
+        if (!cancel) setFailed(true);
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  function saveChoice(next: ModelPreference) {
+    const saved = savePreference(next);
+    setPreference(next);
+    setNote(saved ? "Saved. New meetings use this choice. Meetings already started keep the model they were started with." : "This choice lasts for this visit only, because the browser would not keep it.");
+  }
+
+  if (loading) {
+    return (
+      <fieldset className="q-settings-group">
+        <legend>Models</legend>
+        <p className="q-muted">Loading the model choices.</p>
+      </fieldset>
+    );
+  }
+  if (!options) {
+    return (
+      <fieldset className="q-settings-group">
+        <legend>Models</legend>
+        <p role="alert">The model choices could not be loaded from this server. Meetings use the server's default model family.</p>
+      </fieldset>
+    );
+  }
+
+  const provider = effectiveProvider(preference, options) ?? options.default;
+  const nimReady = options.providers.some((item) => item.id === "nim" && item.available);
+  const bedrock = providerModels(options, "bedrock");
+
+  return (
+    <fieldset className="q-settings-group">
+      <legend>Models</legend>
+      <div className="q-segmented" role="group" aria-label="Model family">
+        {PROVIDER_ORDER.map((id) => {
+          const available = id === "nim" ? nimReady : options.providers.some((item) => item.id === id && item.available);
+          return (
+            <label key={id}>
+              <input
+                className="q-sr"
+                type="radio"
+                name="model-provider"
+                value={id}
+                checked={provider === id}
+                disabled={!available}
+                aria-describedby={!available && id === "nim" ? "nim-unavailable" : undefined}
+                onChange={() => saveChoice({ provider: id, overrides: preference?.overrides ?? {} })}
+              />
+              <span>{providerLabel(id)}</span>
+            </label>
+          );
+        })}
+      </div>
+      {!nimReady ? <p id="nim-unavailable" className="q-muted">NVIDIA NIM isn't set up on this server.</p> : null}
+      {provider === "bedrock" ? (
+        <dl className="q-model-pins">
+          <dt>Fast passes</dt>
+          <dd>{bedrock.slm || "Not set"}</dd>
+          <dt>Long reasoning</dt>
+          <dd>{bedrock.llm || "Not set"}</dd>
+        </dl>
+      ) : null}
+      {provider === "nim" ? (
+        options.nimModels.length === 0 ? (
+          <p className="q-muted">No NVIDIA models are listed by this server.</p>
+        ) : (
+          (["slm", "llm"] as const).map((role) => {
+            const current = nimChoice(preference, options, role);
+            const model = options.nimModels.find((item) => item.id === current);
+            const id = `model-${role}`;
+            return (
+              <div key={role} className="q-label">
+                <label htmlFor={id}>{ROLE_LABEL[role]}</label>
+                <select
+                  id={id}
+                  className="q-field"
+                  value={current}
+                  aria-describedby={`${id}-help`}
+                  onChange={(event) => saveChoice({ provider: "nim", overrides: knownOverrides({ ...(preference?.overrides ?? {}), [role]: event.target.value }, options) })}
+                >
+                  {options.nimModels.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}{item.speed ? ` (${speedLabel(item.speed)})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div id={`${id}-help`} className="q-muted">
+                  {model?.speed ? <span className="q-badge" data-speed={model.speed}>{speedLabel(model.speed)}</span> : null}
+                  {model?.notes ? <span> {model.notes}</span> : null}
+                  {options.roles[role] ? <span className="q-faint"> {options.roles[role]}</span> : null}
+                </div>
+              </div>
+            );
+          })
+        )
+      ) : null}
+      <p className="q-muted">Audio transcription and video scanning always use AWS Bedrock. This choice applies to the text analysis, and to everything for a transcript upload.</p>
+      {note ? <p role="status">{note}</p> : null}
+    </fieldset>
+  );
+}
+
+
 
 type ApiKeyRecord = {
   key_id: string;
@@ -253,11 +412,12 @@ export function Settings() {
         <p className="q-lede">{!ready
           ? "Loading settings."
           : shared
-            ? "The integration key can be shown, copied, and revoked. Service keys are the task role on this deployment. The models Quotient uses are set by its release and are shown for reference."
-            : "API keys for this computer. A blank service key keeps the one already saved. The integration key can be shown, copied, and revoked. The models Quotient uses are set by its release and are shown for reference."}</p>
+            ? "Choose the model family for text analysis under Models. The integration key can be shown, copied, and revoked. Service keys are the task role on this deployment. Release pins are shown for reference."
+            : "Choose the model family for text analysis under Models. API keys for this computer: a blank service key keeps the one already saved. The integration key can be shown, copied, and revoked. Release pins are shown for reference."}</p>
       </header>
       {ready && !blocked ? <p className="q-muted">API base {base}</p> : null}
       {blocked ? <p role="status">Settings can be changed on this computer only.</p> : null}
+      <ModelChoice />
       {!blocked ? <IntegrationKey /> : null}
       {error ? <p role="alert">{error}</p> : null}
       {!blocked && fields.length === 0 && !error ? <p className="q-muted">Loading settings.</p> : null}
@@ -268,7 +428,7 @@ export function Settings() {
             if (grouped.length === 0) return null;
             return (
             <fieldset key={group} className="q-settings-group">
-              <legend>{group === "Models" ? "Models in use (set by the release)" : group}</legend>
+              <legend>{group === "Models" ? "Release pins" : group}</legend>
               {grouped.map((field) => (
                 <label key={field.key} className="q-label">
                   {field.label}

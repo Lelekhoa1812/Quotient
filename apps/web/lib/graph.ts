@@ -25,7 +25,9 @@ import {
   type GraphPage,
   type IdentityState,
   type MeetingContext,
+  type MeetingSource,
   type MeetingStatus,
+  type ModelProvider,
   type Playback,
   type RawTranscript,
   type ScreenView,
@@ -85,6 +87,8 @@ export function emptyGraph(): GraphPage {
     observations: [],
     identities: {},
     screens: [],
+    source: null,
+    modelProvider: null,
     next_cursor: null,
   };
 }
@@ -165,6 +169,8 @@ export function parseGraph(result: unknown, meetingId: string): GraphPage {
     observations: parseObservations(graph),
     identities: parseIdentities(graph.identities),
     screens: parseScreens(graph.screens),
+    source: parseSource(graph.source),
+    modelProvider: parseModelProvider(graph.model_provider),
     next_cursor: asString(graph.next_cursor) ?? asString(graph.nextCursor),
   };
 }
@@ -203,6 +209,8 @@ export function mergeGraph(base: GraphPage, page: GraphPage): GraphPage {
     observations: dedupeObservations([...base.observations, ...page.observations]),
     identities: Object.keys(page.identities).length > 0 ? page.identities : base.identities,
     screens: page.screens.length > 0 ? page.screens : base.screens,
+    source: page.source ?? base.source,
+    modelProvider: page.modelProvider ?? base.modelProvider,
     next_cursor: page.next_cursor,
   };
 }
@@ -242,6 +250,51 @@ export function parseMeetingStatus(result: unknown, fallbackId: string): Meeting
     })(),
     context: parseMeetingContext(meeting.context),
     identity: parseIdentityState(meeting.identity),
+    source: parseSource(meeting.source),
+    modelProvider: parseModelProvider(meeting.model_provider),
+  };
+}
+
+/**
+ * Motivation vs Logic
+ * Motivation: A transcript meeting has no recording. The screens must know that before they draw a
+ * player, and a missing field must never make a recording look like a transcript.
+ * Logic: Only kind "transcript" is read; anything else, or no source at all, is a recording (null).
+ * Counts that are not positive numbers become zero, and an unknown timings value counts as exact.
+ */
+export function parseSource(value: unknown): MeetingSource | null {
+  const record = asRecord(value);
+  if (!record || record.kind !== "transcript") return null;
+  const speakers = asFinite(record.speakers);
+  const words = asFinite(record.words);
+  return {
+    kind: "transcript",
+    format: (asString(record.format) ?? "").trim().toUpperCase(),
+    timings: record.timings === "estimated" ? "estimated" : "exact",
+    speakers: speakers !== null && speakers > 0 ? Math.floor(speakers) : 0,
+    words: words !== null && words > 0 ? Math.floor(words) : 0,
+    title: (asString(record.title) ?? "").trim(),
+    truncated: record.truncated === true,
+  };
+}
+
+/** The model family that analysed a meeting; anything else is unknown (null). */
+export function parseModelProvider(value: unknown): ModelProvider | null {
+  return value === "bedrock" || value === "nim" ? value : null;
+}
+
+/**
+ * The one-line notice for a transcript meeting ("Transcript · SRT · 5 speakers · 4,210 words"), and the
+ * second line when its times are estimated rather than read from the file.
+ */
+export function transcriptNotice(source: MeetingSource): { line: string; estimate: string | null } {
+  const parts = ["Transcript"];
+  if (source.format) parts.push(source.format);
+  if (source.speakers > 0) parts.push(`${source.speakers} ${source.speakers === 1 ? "speaker" : "speakers"}`);
+  if (source.words > 0) parts.push(`${source.words.toLocaleString("en-AU")} ${source.words === 1 ? "word" : "words"}`);
+  return {
+    line: parts.join(" · "),
+    estimate: source.timings === "estimated" ? "Times are estimated from word count." : null,
   };
 }
 

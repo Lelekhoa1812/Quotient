@@ -225,7 +225,27 @@ export type VideoObservation = {
 
 export type TranscriptGap = { id: string; spanIds: string[]; reason: string };
 
+/** Which model family ran the text analysis. */
+export type ModelProvider = "bedrock" | "nim";
+
+/** What a meeting was made from when it is a transcript; null for a recording. */
+export type MeetingSource = {
+  kind: "transcript";
+  /** Upper-case file format, for example "SRT". Empty when the service did not say. */
+  format: string;
+  /** "estimated" when the words had no timings and the times are spread by word count. */
+  timings: "exact" | "estimated";
+  speakers: number;
+  words: number;
+  title: string;
+  truncated: boolean;
+};
+
 export type GraphPage = {
+  /** Null for a recording. Present (kind "transcript") when the meeting came from a transcript file. */
+  source: MeetingSource | null;
+  /** The model family that analysed the meeting; null when the service did not say. */
+  modelProvider: ModelProvider | null;
   spans: Span[];
   claims: Claim[];
   findings: Finding[];
@@ -275,6 +295,10 @@ export type MeetingStatus = {
   context: MeetingContext | null;
   /** Present only when a name was saved after the analysis, or a reindex is running or has failed. */
   identity: IdentityState | null;
+  /** Null for a recording; the transcript's facts when the meeting came from a transcript file. */
+  source: MeetingSource | null;
+  /** The model family that analysed the meeting; null when the service did not say. */
+  modelProvider: ModelProvider | null;
 };
 
 export type ContextUseStatus = "pending" | "ready" | "skipped" | "failed";

@@ -69,6 +69,7 @@ export function UnknownVoiceDialog({
   slices,
   candidates,
   source,
+  transcript = false,
   busy = false,
   onName,
   onRegister,
@@ -81,6 +82,8 @@ export function UnknownVoiceDialog({
   candidates: Candidate[];
   /** The recording's playback URI (quotient:// or a URL). */
   source: string;
+  /** A transcript meeting has no recording, so there are no clips to load. */
+  transcript?: boolean;
   busy?: boolean;
   onName: (name: string) => void;
   onRegister: (candidate: Candidate) => void;
@@ -91,7 +94,7 @@ export function UnknownVoiceDialog({
   const hintId = useId();
   const inputId = useId();
   const [name, setName] = useState("");
-  const media = useMediaSource(open ? source : "");
+  const media = useMediaSource(open && !transcript ? source : "");
 
   useEffect(() => {
     const dialog = ref.current;
@@ -123,8 +126,10 @@ export function UnknownVoiceDialog({
           <p id={hintId} className="q-muted">
             Listen to where this voice spoke, then name them, or pick someone already detected if it is the same person.
           </p>
-          {media.note ? <p className="q-muted" role="status">{media.note}</p> : null}
-          {slices.length === 0 ? <p className="q-muted">No clear stretch of this voice was found.</p> : null}
+          {transcript ? <p className="q-muted" role="status">Voice clips aren't available for a transcript.</p> : null}
+          {!transcript && media.note ? <p className="q-muted" role="status">{media.note}</p> : null}
+          {!transcript && slices.length === 0 ? <p className="q-muted">No clear stretch of this voice was found.</p> : null}
+          {transcript ? null : (
           <ol className="q-clips">
             {slices.map((slice, index) => (
               <li key={`${slice.id}-${slice.startMs}`} className="q-clip">
@@ -142,6 +147,7 @@ export function UnknownVoiceDialog({
               </li>
             ))}
           </ol>
+          )}
           <form
             className="q-voice-form"
             onSubmit={(event) => {

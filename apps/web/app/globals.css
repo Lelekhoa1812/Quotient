@@ -2150,6 +2150,25 @@ label:has(input[type="file"]:focus-visible) {
 /* Information, not a failure: the same box without the red edge. */
 .q-player-note.is-info { border-left-color: color-mix(in srgb, var(--ink) 35%, transparent); }
 
+/* Settings > Models: a two-option switch of native radio buttons. The radios are visually hidden; focus shows on the label. */
+.q-segmented { display: inline-flex; max-width: 100%; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.q-segmented label { position: relative; padding: 0.45rem 1rem; cursor: pointer; font-size: 0.9375rem; }
+.q-segmented label + label { border-left: 1px solid var(--line); }
+.q-segmented label:has(input:checked) { background: var(--control); color: var(--on-control); }
+.q-segmented label:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
+.q-segmented label:focus-within { box-shadow: inset 0 0 0 2px var(--mark); }
+.q-model-pins { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.9375rem; }
+.q-model-pins dt { color: var(--muted); }
+.q-model-pins dd { margin: 0; }
+
+/* A transcript meeting: the notice stands where the player would be, and nothing on it seeks. */
+.q-transcript-note { display: flex; gap: 0.6rem; align-items: flex-start; margin: 0.5rem 0 0; padding: 0.75rem 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--mark); font-size: 0.9375rem; }
+.q-transcript-note svg { flex: none; margin-top: 0.2rem; }
+.q-transcript-note p { margin: 0; }
+.q-transcript-note p + p { margin-top: 0.25rem; }
+.q-moment.is-static, .q-moment.is-static:hover, .q-moment.is-static:focus-visible { cursor: default; border-color: transparent; background: transparent; }
+.q-col:disabled, .q-dot:disabled, .q-sbar-label:disabled { cursor: default; }
+
 .q-data { font-size: 0.8125rem; }
 .q-data > summary { cursor: pointer; color: var(--muted); width: fit-content; }
 .q-data > summary:hover, .q-data > summary:focus-visible { color: var(--ink); }

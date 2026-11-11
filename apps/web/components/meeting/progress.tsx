@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 import { statusLabel } from "@/lib/format";
-import { ANALYSIS_STEPS, analysisStepIndex, friendlyError } from "@/lib/present";
+import { analysisStepIndex, analysisStepLabels, friendlyError } from "@/lib/present";
 import type { MeetingStatus, TaskSnapshot } from "@/lib/types";
 
 function stepState(index: number, current: number, finished: boolean): "done" | "now" | "later" {
@@ -39,6 +39,7 @@ export function Progress({
   const failed = meeting?.status === "failed" || task?.status === "failed";
   const stopped = meeting?.status === "cancelled" || task?.status === "cancelled";
   const message = task?.progressMessage || meeting?.progressMessage || task?.statusMessage || "";
+  const transcript = meeting?.source?.kind === "transcript" || /transcript/i.test(message);
   const headline = stopped
     ? "This analysis was stopped"
     : failed
@@ -48,7 +49,7 @@ export function Progress({
         ? "The analysis is complete"
         : "The analysis is complete, with some points to check"
       : inProgress
-        ? "Analysing the recording"
+        ? transcript ? "Analysing the transcript" : "Analysing the recording"
         : statusLabel(meeting?.status || task?.status || "") || "Waiting to start";
   const active = inProgress && !finished && !failed && !stopped;
   const current = analysisStepIndex(message);
@@ -57,7 +58,7 @@ export function Progress({
     <section className="q-cards">
       <div>
         <h2>{headline}</h2>
-        {active ? <p className="q-lede">This usually takes several minutes for a long recording. You can leave this page and come back.</p> : null}
+        {active ? <p className="q-lede">{transcript ? "This usually takes several minutes for a long transcript." : "This usually takes several minutes for a long recording."} You can leave this page and come back.</p> : null}
         {message && !failed && !stopped ? <p className="q-muted" role="status">{message}</p> : null}
       </div>
       {failed ? (
@@ -76,7 +77,7 @@ export function Progress({
         <span style={active ? undefined : { width: fraction === null || fraction === undefined ? "0%" : `${Math.max(0, Math.min(1, fraction)) * 100}%` }} />
       </div>
       <ol className="q-steps">
-        {ANALYSIS_STEPS.map((label, index) => {
+        {analysisStepLabels(transcript).map((label, index) => {
           const state = failed || stopped ? "later" : stepState(index, current, finished);
           return (
             <li key={label} data-state={state}>

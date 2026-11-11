@@ -12,6 +12,7 @@
  * Charts take already-computed numbers (lib/analytics.ts) and never derive meaning themselves.
  */
 import { useId, useState, type ReactNode } from "react";
+import { Moment, usePlayable } from "@/components/ui/moment";
 import { formatMs } from "@/lib/format";
 
 // Deep enough to keep 3:1 against both the white and the near-black page; speakers and evidence tiers use separate sets.
@@ -69,7 +70,7 @@ export function DataTable({ columns, rows, onSeek, caption }: { columns: string[
             {rows.map((row, index) => (
               <tr key={index}>
                 <th scope="row">
-                  {row.atMs === null ? "" : <button type="button" className="q-moment" onClick={() => onSeek(row.atMs as number)} aria-label={`Play from ${formatMs(row.atMs)}`}>{formatMs(row.atMs)}</button>}
+                  {row.atMs === null ? "" : <Moment ms={row.atMs} onPlay={onSeek} />}
                 </th>
                 {row.cells.map((cell, inner) => <td key={inner}>{cell}</td>)}
               </tr>
@@ -175,6 +176,7 @@ export function StackedColumns({ columns, durationMs, active, format, onSeek, ba
   height?: number;
   label: string;
 }) {
+  const playable = usePlayable();
   const [hover, setHover] = useState<number | null>(null);
   const width = 640;
   const pad = { left: 6, right: 6, top: 8, bottom: 22 };
@@ -198,7 +200,7 @@ export function StackedColumns({ columns, durationMs, active, format, onSeek, ba
           const left = x(column.startMs);
           const columnWidth = Math.max(1, x(column.endMs) - left - 1.5);
           return (
-            <g key={index} onMouseEnter={() => setHover(index)} onClick={() => onSeek(column.startMs)} style={{ cursor: "pointer" }}>
+            <g key={index} onMouseEnter={() => setHover(index)} onClick={() => playable && onSeek(column.startMs)} style={{ cursor: playable ? "pointer" : "default" }}>
               <rect x={left} y={pad.top} width={columnWidth} height={height - pad.top - pad.bottom} fill="transparent" />
               {column.parts.map((part) => {
                 const top = y(base + part.value);
@@ -227,6 +229,7 @@ export type StepSeries = { key: string; label: string; color: string; steps: { a
 
 /** Running totals as step lines, with a crosshair that reads every series at one moment. */
 export function StepLines({ series, durationMs, hidden, onSeek, height = 200, label }: { series: StepSeries[]; durationMs: number; hidden: Set<string>; onSeek: (ms: number) => void; height?: number; label: string }) {
+  const playable = usePlayable();
   const [at, setAt] = useState<number | null>(null);
   const id = useId();
   const width = 640;
@@ -259,8 +262,8 @@ export function StepLines({ series, durationMs, hidden, onSeek, height = 200, la
           const fraction = (((event.clientX - box.left) / box.width) * width - pad.left) / (width - pad.left - pad.right);
           setAt(Math.max(0, Math.min(durationMs, fraction * durationMs)));
         }}
-        onClick={() => at !== null && onSeek(at)}
-        style={{ cursor: "pointer" }}
+        onClick={() => playable && at !== null && onSeek(at)}
+        style={{ cursor: playable ? "pointer" : "default" }}
       >
         {ticks.map((tick) => (
           <g key={`${id}${tick}`}>
@@ -293,6 +296,7 @@ export type BarPart = { key: string; label: string; value: number; color: string
 
 /** Horizontal stacked bars, one row each, clickable to play the row's start. */
 export function StackedBars({ rows, active, format, onSeek, label }: { rows: { key: string; label: string; startMs: number; parts: BarPart[] }[]; active: string | null; format: (value: number) => string; onSeek: (ms: number) => void; label: string }) {
+  const playable = usePlayable();
   const peak = Math.max(1, ...rows.map((row) => row.parts.reduce((sum, part) => sum + part.value, 0)));
   return (
     <ul className="q-sbars" aria-label={label}>
@@ -300,7 +304,7 @@ export function StackedBars({ rows, active, format, onSeek, label }: { rows: { k
         const total = row.parts.reduce((sum, part) => sum + part.value, 0);
         return (
           <li key={row.key}>
-            <button type="button" className="q-sbar-label" onClick={() => onSeek(row.startMs)} title={`Play from ${formatMs(row.startMs)}`}>
+            <button type="button" className="q-sbar-label" disabled={!playable} onClick={() => onSeek(row.startMs)} title={`Play from ${formatMs(row.startMs)}`}>
               <span className="q-time">{formatMs(row.startMs)}</span>
               <span>{row.label}</span>
             </button>
@@ -323,6 +327,7 @@ export type Lane = { key: string; label: string; points: { startMs: number; text
 
 /** One lane per kind of outcome on a shared time axis; hollow = unresolved, filled = settled. */
 export function Lanes({ lanes, durationMs, onSeek, label }: { lanes: Lane[]; durationMs: number; onSeek: (ms: number) => void; label: string }) {
+  const playable = usePlayable();
   const [hover, setHover] = useState<{ lane: number; point: number } | null>(null);
   const width = 640;
   const left = 96;
@@ -348,9 +353,9 @@ export function Lanes({ lanes, durationMs, onSeek, label }: { lanes: Lane[]; dur
                   fill={point.tone === "open" ? "var(--bg)" : voiceColor(laneIndex)}
                   stroke={voiceColor(laneIndex)}
                   strokeWidth="2"
-                  style={{ cursor: "pointer" }}
+                  style={{ cursor: playable ? "pointer" : "default" }}
                   onMouseEnter={() => setHover({ lane: laneIndex, point: pointIndex })}
-                  onClick={() => onSeek(point.startMs)}
+                  onClick={() => playable && onSeek(point.startMs)}
                 />
               ))}
             </g>

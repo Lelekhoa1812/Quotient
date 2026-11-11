@@ -18,13 +18,27 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Crosshair, Pencil } from "lucide-react";
-import { IconButton } from "@/components/ui/moment";
+import { IconButton, usePlayable } from "@/components/ui/moment";
 import { VoiceName } from "@/components/meeting/voices";
 import type { Chapter } from "@/lib/digest";
 import { formatMs, quoteParts, speakerText } from "@/lib/format";
 import { voiceStats } from "@/lib/analytics";
 import { friendlyError, speakerName } from "@/lib/present";
 import type { Citation, Span, VideoObservation } from "@/lib/types";
+
+/**
+ * The time at the start of a transcript line. With a recording it plays from there; for a transcript
+ * meeting there is nothing to play, so it is only text and not a control.
+ */
+function LineTime({ ms, onPlay, label }: { ms: number; onPlay: () => void; label?: string }) {
+  const playable = usePlayable();
+  if (!playable) return <span className="q-time is-static" title="A transcript has no recording to play">{formatMs(ms)}</span>;
+  return (
+    <button className="q-time" type="button" onClick={onPlay} aria-label={label}>
+      {formatMs(ms)}
+    </button>
+  );
+}
 
 /** The voice's rank by speaking time, the order the Insights charts colour them in. */
 function voiceOf(span: Span, ranks: Map<string, number>): number {
@@ -59,6 +73,7 @@ export function Transcript({
 }) {
   const ranks = useMemo(() => new Map(voiceStats(spans, names).map((voice, index) => [voice.id, index] as const)), [spans, names]);
   const [query, setQuery] = useState("");
+  const playable = usePlayable();
   const [follow, setFollow] = useState(true);
   const [focusVoice, setFocusVoice] = useState<string | null>(null);
   const lineRefs = useRef(new Map<string, HTMLLIElement>());
@@ -150,9 +165,11 @@ export function Transcript({
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <IconButton label="Follow playback" pressed={follow} onClick={() => setFollow((value) => !value)}>
-          <Crosshair size={16} aria-hidden="true" />
-        </IconButton>
+        {playable ? (
+          <IconButton label="Follow playback" pressed={follow} onClick={() => setFollow((value) => !value)}>
+            <Crosshair size={16} aria-hidden="true" />
+          </IconButton>
+        ) : null}
       </div>
       {focusVoice ? (
         <div className="q-inline">
@@ -174,7 +191,7 @@ export function Transcript({
           <li key={span.id} className="q-line q-line-gap">
             <div className="q-line-head">
               {span.start_ms !== null ? (
-                <button className="q-time" type="button" onClick={() => onSeek(span)} aria-label={`Play from ${formatMs(span.start_ms)}`}>{formatMs(span.start_ms)}</button>
+                <LineTime ms={span.start_ms} onPlay={() => onSeek(span)} label={`Play from ${formatMs(span.start_ms)}`} />
               ) : null}
               <span className="q-speaker">Not transcribed</span>
             </div>
@@ -221,7 +238,7 @@ export function Transcript({
                 <div className="q-line-head">
                   {item.at !== null ? (
                     item.span ? (
-                      <button className="q-time" type="button" onClick={() => onSeek(item.span as Span)}>{formatMs(item.at)}</button>
+                      <LineTime ms={item.at} onPlay={() => onSeek(item.span as Span)} />
                     ) : (
                       <span className="q-time is-static">{formatMs(item.at)}</span>
                     )
@@ -277,9 +294,7 @@ function Line({
     >
       <div className="q-line-head">
         {span.start_ms !== null ? (
-          <button className="q-time" type="button" onClick={() => onSeek(span)} aria-label={`Play from ${formatMs(span.start_ms)}`}>
-            {formatMs(span.start_ms)}
-          </button>
+          <LineTime ms={span.start_ms} onPlay={() => onSeek(span)} label={`Play from ${formatMs(span.start_ms)}`} />
         ) : null}
         {voiceId ? (
           <VoiceName

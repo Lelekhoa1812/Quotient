@@ -4,9 +4,11 @@
  * elicitation on the task, not as a meetings REST call.
  * Logic: Read an http(s) target from the elicitation params, PUT the staged
  * file or its parts, and return only schema fields the portal can fill from
- * the file metadata.
+ * the file metadata. A transcript (SRT, VTT, text, Word, PDF and so on) is a
+ * meeting input too, so its type table and the choice of primary input live here.
  */
 
+import { extensionOf, isRecording } from "@/lib/context";
 import { asArray, asFinite, asRecord, asString } from "@/lib/json";
 
 type Part = {
@@ -41,11 +43,81 @@ const EXTENSION_TYPES: Record<string, string> = {
   opus: "audio/ogg",
 };
 
+const WORD_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** Every extension the service accepts as a transcript, with the media type sent for it. */
+export const TRANSCRIPT_TYPES: Record<string, string> = {
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  txt: "text/plain",
+  text: "text/plain",
+  log: "text/plain",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  docx: WORD_TYPE,
+  pdf: "application/pdf",
+  html: "text/html",
+  htm: "text/html",
+  rtf: "application/rtf",
+  json: "application/json",
+};
+
+/** The value for an <input accept> that lets transcript-only extensions through. */
+export const TRANSCRIPT_ACCEPT = Object.keys(TRANSCRIPT_TYPES).map((ext) => `.${ext}`).join(",");
+
+const SUBTITLE_EXTENSIONS = new Set(["srt", "vtt"]);
+
 /** The file's media type, falling back to its extension when the browser does not know it. */
 export function mediaTypeOf(file: File): string {
   if (file.type && /^(audio|video)\//.test(file.type)) return file.type;
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return EXTENSION_TYPES[extension] ?? (file.type || "application/octet-stream");
+  return EXTENSION_TYPES[extension] ?? TRANSCRIPT_TYPES[extension] ?? (file.type || "application/octet-stream");
+}
+
+/** Whether the service takes this name as a transcript. */
+export function isTranscriptFile(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(TRANSCRIPT_TYPES, extensionOf(name));
+}
+
+/** A subtitle file is always the transcript, never reference material. */
+export function isSubtitleFile(name: string): boolean {
+  return SUBTITLE_EXTENSIONS.has(extensionOf(name));
+}
+
+/**
+ * Which picked file is the meeting's primary input, if any. A subtitle file always is; then a
+ * recording; then the first document the service reads as a transcript (only used when no recording
+ * is picked, so a document is never mistaken for the recording's notes).
+ */
+export function pickPrimary(files: File[]): File | null {
+  return (
+    files.find((file) => isSubtitleFile(file.name)) ??
+    files.find((file) => isRecording(file)) ??
+    files.find((file) => isTranscriptFile(file.name)) ??
+    null
+  );
+}
+
+export type PrimaryChoice = {
+  /** The primary input after the pick. */
+  primary: File | null;
+  /** The previous primary input when the pick replaced it; a document goes back to Context, a recording is dropped. */
+  displaced: File | null;
+  /** Every other picked file, in order. */
+  rest: File[];
+};
+
+/**
+ * Decide the primary input after files are picked. A document never replaces an existing recording or
+ * transcript: it stays reference. A recording or subtitle replaces whatever was primary.
+ */
+export function choosePrimary(current: File | null, picked: File[]): PrimaryChoice {
+  const candidate = pickPrimary(picked);
+  if (!candidate) return { primary: current, displaced: null, rest: picked };
+  const documentOnly = !isSubtitleFile(candidate.name) && !isRecording(candidate);
+  if (documentOnly && current !== null) return { primary: current, displaced: null, rest: picked };
+  const displaced = current && current !== candidate ? current : null;
+  return { primary: candidate, displaced, rest: picked.filter((file) => file !== candidate) };
 }
 
 export async function prepareElicitationContent(

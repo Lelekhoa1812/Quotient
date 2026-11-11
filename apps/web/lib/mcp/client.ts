@@ -21,6 +21,7 @@ import {
   type ContextItem,
 } from "@/lib/context";
 import { mediaTypeOf, prepareElicitationContent, putFile } from "@/lib/mcp/upload";
+import { parseModelOptions, type ModelOptions, type SubmitModelArgs } from "@/lib/models";
 import type { GraphPage, MeetingStatus, TaskSnapshot } from "@/lib/types";
 
 export type SkillSummary = {
@@ -610,7 +611,18 @@ export const mcp = {
   stagedFiles(taskId: string): File[] {
     return staged.get(taskId) ?? [];
   },
-  async submitMeeting(primary: File, others: File[], title: string, context?: SubmitContext): Promise<TaskSnapshot> {
+  /** The models the server offers and which family it uses by default. Read-only. */
+  async modelOptions(): Promise<ModelOptions | null> {
+    return parseModelOptions(await callTool("model_options", {}));
+  },
+  /** Starts a meeting. `models` is fixed here: the meeting keeps the family it was started with. */
+  async submitMeeting(
+    primary: File,
+    others: File[],
+    title: string,
+    context?: SubmitContext,
+    models?: SubmitModelArgs | null,
+  ): Promise<TaskSnapshot> {
     await ensure();
     // Reference material goes first; if it cannot be prepared, no meeting is started.
     const contextBatch = context ? await sendContext(context) : null;
@@ -627,6 +639,7 @@ export const mcp = {
         byte_size: primary.size,
         ...(contextBatch ? { context_batch: contextBatch } : {}),
         ...(purpose ? { purpose } : {}),
+        ...(models ? models : {}),
       },
       task: { ttl: 86_400_000 },
       _meta: { progressToken: token },

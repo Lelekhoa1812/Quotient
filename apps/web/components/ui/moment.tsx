@@ -7,13 +7,31 @@
  * Logic: One compact control: speaker icon plus m:ss. The accessible name says what it does.
  * IconButton is the shared icon-only button with a tooltip and an aria-label.
  */
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { Volume2 } from "lucide-react";
 import { formatMs } from "@/lib/format";
 
+/**
+ * Whether the page has a recording to play. A transcript meeting has none, so every moment on it is
+ * shown as a time, not as a control that would seek.
+ */
+export const PlayableContext = createContext(true);
+
+export function usePlayable(): boolean {
+  return useContext(PlayableContext);
+}
+
 export function Moment({ ms, onPlay, label }: { ms: number | null; onPlay: (ms: number) => void; label?: string }) {
+  const playable = usePlayable();
   if (ms === null) return null;
   const time = formatMs(ms);
+  if (!playable) {
+    return (
+      <span className="q-moment is-static" title={`${time} in the transcript`}>
+        <span>{time}</span>
+      </span>
+    );
+  }
   return (
     <button
       type="button"

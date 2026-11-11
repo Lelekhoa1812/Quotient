@@ -19,19 +19,27 @@ import { useMcpPhase } from "@/components/shell";
 import {
   ACCEPT_ATTRIBUTE,
   EMPTY_CONTEXT,
+  classifyFile,
   contextBadge,
   hasContext,
   isActive,
   isRecording,
   planAdditions,
   skippedNotice,
-  splitRecordings,
+  type ContextItem,
   type ContextState,
 } from "@/lib/context";
 import { formatClock, formatWhen, meetingTitle, reviewLine, statusLabel, statusTone } from "@/lib/format";
 import { hideLibrary, isHidden, readLibrary, reconcileOrphans, upsertLibrary, writeLibrary, type LibraryRecord } from "@/lib/library";
 import { ContextPrepareError, McpDisconnected, mcp } from "@/lib/mcp/client";
-import type { MeetingHeadline } from "@/lib/types";
+import {
+  TRANSCRIPT_ACCEPT,
+  choosePrimary,
+  isSubtitleFile,
+  isTranscriptFile,
+} from "@/lib/mcp/upload";
+import { loadPreference, submitModelArgs, type ModelOptions, type SubmitModelArgs } from "@/lib/models";
+import type { MeetingHeadline, ModelProvider } from "@/lib/types";
 
 const HomeObject = dynamic(() => import("@/components/home-object").then((mod) => mod.HomeObject), {
   ssr: false,
@@ -55,10 +63,6 @@ const FILTERS = [
 
 type FilterId = (typeof FILTERS)[number]["id"];
 
-
-function primaryFile(files: File[]): File {
-  return files.find((file) => isRecording(file)) ?? files[0];
-}
 
 /** True when a title is just the file's own name, so showing the file name again would repeat it. */
 function sameName(title: string, filename: string): boolean {
@@ -97,6 +101,8 @@ export function Home() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   // What each meeting was and what came out of it, from its walkaway (when it has one).
   const [headlines, setHeadlines] = useState<Record<string, MeetingHeadline>>({});
+  // Which model family analysed each meeting, so a NIM meeting can say so in the list.
+  const [providers, setProviders] = useState<Record<string, ModelProvider>>({});
   // Reference material for the next meeting. It lives here so it survives opening and closing the modal.
   const [context, setContext] = useState<ContextState>(EMPTY_CONTEXT);
   const [contextOpen, setContextOpen] = useState(false);
@@ -156,6 +162,8 @@ export function Home() {
                 status = await mcp.getMeeting(row.meetingId);
               }
               linkOfMeeting.set(row.meetingId, { taskId: status.taskId || null, sourceName: status.sourceName || null });
+              const provider = status.modelProvider;
+              if (provider && row.meetingId) setProviders((current) => ({ ...current, [row.meetingId as string]: provider }));
               const headline = status.headline;
               if (headline && row.meetingId) setHeadlines((current) => ({ ...current, [row.meetingId as string]: headline }));
               // A meeting this browser did not create has no known creation time; use the server's.
@@ -284,39 +292,73 @@ export function Home() {
 
   /**
    * Motivation vs Logic
-   * Motivation: Slides, notes and spreadsheets are reference, not the recording. They should land in
-   * Context wherever the person drops or picks them, and a file that cannot be used should say why.
-   * Logic: Recordings stay in the recording list. Everything else goes through the same rules as the
-   * Context modal; accepted files join the context list and refused ones are named with their reason.
+   * Motivation: Slides, notes and spreadsheets are reference, not the recording. A transcript (SRT or VTT,
+   * or a text document when no recording is picked) is the meeting's own words, so it becomes the primary
+   * input instead. Whatever the person drops, a file that cannot be used should say why.
+   * Logic: One primary input at a time (a recording or a transcript), chosen by choosePrimary. Other
+   * documents go through the same rules as the Context modal; refused ones are named with their reason.
+   * A subtitle file is always the transcript, and any extra recording or transcript is left out with a note.
    */
   function takeFiles(picked: File[]) {
     if (busy) return; // the files are being sent; changing them now would leave some behind
-    const { recordings, others } = splitRecordings(picked);
-    const notes: string[] = [];
-    if (recordings.length > 0) {
-      // One meeting is one recording: say which one is kept instead of silently dropping the rest.
-      setFiles([recordings[0]]);
-      if (recordings.length > 1) notes.push(`A meeting takes one recording, so ${recordings[0].name} will be used and ${recordings.length - 1 === 1 ? "the other was" : "the others were"} left out.`);
-      else if (files[0] && files[0].name !== recordings[0].name) notes.push(`${recordings[0].name} replaced ${files[0].name}.`);
+    const current = files[0] ?? null;
+    const choice = choosePrimary(current, picked);
+    const next = choice.primary;
+    const parts: string[] = [];
+    const toContext: File[] = [];
+    if (next !== current) setFiles(next ? [next] : []);
+    if (next && current && next !== current) parts.push(`${next.name} replaced ${current.name}.`);
+    if (next && !current && !isRecording(next)) parts.push(`${next.name} is the transcript.`);
+    if (choice.displaced && !isRecording(choice.displaced)) {
+      toContext.push(choice.displaced);
+      parts.push(`${choice.displaced.name} went back to Context.`);
     }
-    if (others.length === 0) {
-      if (notes.length > 0) setContextNote(notes.join(" "));
-      return;
+    const left = choice.rest.filter((file) => isRecording(file) || isSubtitleFile(file.name));
+    if (left.length > 0) {
+      parts.push(`A meeting takes one recording or transcript, so ${left.map((file) => file.name).join(", ")} ${left.length === 1 ? "was" : "were"} left out.`);
     }
-    const plan = planAdditions(context.items, others);
-    const kept = plan.items.filter(isActive);
-    const refused = plan.items.filter((item) => !isActive(item));
-    if (kept.length > 0) setContext({ ...context, items: [...context.items, ...kept] });
-    const parts: string[] = [...notes];
-    if (kept.length > 0) parts.push(`Added ${kept.length} ${kept.length === 1 ? "file" : "files"} to Context.`);
-    for (const item of refused) parts.push(`${item.name} was not added: ${item.reason}.`);
-    if (plan.notice) parts.push(plan.notice);
+    toContext.push(...choice.rest.filter((file) => !isRecording(file) && !isSubtitleFile(file.name)));
+    if (toContext.length > 0) {
+      const plan = planAdditions(context.items, toContext);
+      const kept = plan.items.filter(isActive);
+      const refused = plan.items.filter((item) => !isActive(item));
+      if (kept.length > 0) {
+        setContext({ ...context, items: [...context.items, ...kept] });
+        parts.push(`Added ${kept.length} ${kept.length === 1 ? "file" : "files"} to Context.`);
+      }
+      for (const item of refused) parts.push(`${item.name} was not added: ${item.reason}.`);
+      if (plan.notice) parts.push(plan.notice);
+    }
+    if (parts.length > 0) setContextNote(parts.join(" "));
+  }
+
+  /** Use a Context document as the transcript. Not offered while a recording is the primary input. */
+  function useAsTranscript(item: ContextItem) {
+    if (busy || !item.file) return;
+    const current = files[0] ?? null;
+    if (current && isRecording(current)) return;
+    const file = item.file;
+    const remaining = context.items.filter((entry) => entry.id !== item.id);
+    const back = current ? planAdditions(remaining, [current]).items.filter(isActive) : [];
+    setContext({ ...context, items: [...remaining, ...back] });
+    setFiles([file]);
+    const parts = [`${file.name} is the transcript.`];
+    if (current) parts.push(`${current.name} went back to Context.`);
     setContextNote(parts.join(" "));
   }
 
+  /** Keep the transcript as Context instead. Offered only for files that can be Context. */
+  function useAsContext(file: File) {
+    if (busy || !classifyFile(file).ok) return;
+    setFiles([]);
+    const kept = planAdditions(context.items, [file]).items.filter(isActive);
+    if (kept.length > 0) setContext({ ...context, items: [...context.items, ...kept] });
+    setContextNote(`${file.name} is now Context. Add a recording or a transcript to start.`);
+  }
+
   async function onSubmit() {
-    const primary = files[0] ? primaryFile(files) : null;
-    // The name is optional: a recording is usually named well enough by its file.
+    const primary = files[0] ?? null;
+    // The name is optional: a recording or transcript is usually named well enough by its file.
     const title = name.trim() || (primary ? primary.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() : "");
     if (!primary || !title) return;
     setBusy(true);
@@ -330,9 +372,10 @@ export function Home() {
       setContext((current) => ({ ...current, items: current.items.map((item) => ({ ...item, status: "ready", progress: 0, reason: "" })) }));
     }
     try {
+      const models = await chosenModels();
       const task = await mcp.submitMeeting(
         primary,
-        files.filter((file) => file !== primary),
+        [],
         title,
         sendingContext
           ? {
@@ -344,6 +387,7 @@ export function Home() {
               },
             }
           : undefined,
+        models,
       );
       const skipped = context.items.filter((item) => failed.has(item.id)).map((item) => item.name);
       if (skipped.length === 0) {
@@ -370,12 +414,32 @@ export function Home() {
             ? "Quotient cloud service is unreachable. Please wait a moment for services to wake up and try again."
             : sendingContext
               ? "The meeting could not be started. Try again, or remove the context to start without it."
-              : "The meeting could not be started. Check that the file is an audio or video recording and try again.",
+              : "The meeting could not be started. Check that the file is a recording or a transcript and try again.",
         );
       }
       setBusy(false);
     }
   }
+
+  /**
+   * The model family chosen in Settings, read when the meeting starts. A failed lookup of the server's
+   * choices does not stop the meeting: the saved choice is sent as it is, or nothing when none is saved.
+   */
+  async function chosenModels(): Promise<SubmitModelArgs | null> {
+    let options: ModelOptions | null = null;
+    try {
+      options = await mcp.modelOptions();
+    } catch (error) {
+      if (error instanceof McpDisconnected) throw error;
+    }
+    return submitModelArgs(loadPreference(), options);
+  }
+
+  // A transcript can be picked from Context only while no recording is the primary input.
+  const recordingPicked = files.some((file) => isRecording(file));
+  const contextTranscripts = recordingPicked
+    ? []
+    : context.items.filter((item) => item.file !== null && isActive(item) && isTranscriptFile(item.name));
 
   const emptyCopy = rows.length === 0
     ? connecting
@@ -416,7 +480,7 @@ export function Home() {
       >
         <div className="q-start-copy">
           <h1 id="start-heading">Start a meeting</h1>
-          <p className="q-lede">Name the meeting and add a recording. Slides, notes and other reference go in Context.</p>
+          <p className="q-lede">Name the meeting and add a recording or a transcript (SRT, VTT, TXT, MD, DOCX, PDF).</p>
           <label className="q-start-name">
             <span>Meeting name</span>
             <input
@@ -433,7 +497,7 @@ export function Home() {
                 className="q-sr"
                 type="file"
                 multiple
-                accept={`video/*,audio/*,${ACCEPT_ATTRIBUTE}`}
+                accept={`video/*,audio/*,${ACCEPT_ATTRIBUTE},${TRANSCRIPT_ACCEPT}`}
                 onChange={(event) => {
                   takeFiles([...(event.target.files ?? [])]);
                   event.target.value = "";
@@ -463,16 +527,40 @@ export function Home() {
           </div>
           {files.length > 0 ? (
             <ul className="q-files">
-              {files.map((file) => (
-                <li key={`${file.name}:${file.size}:${file.lastModified}`}>
-                  <span>{file.name}</span>
-                  <button
-                    className="q-icon-btn"
-                    type="button"
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() => setFiles((current) => current.filter((item) => item !== file))}
-                  >
-                    <X size={14} aria-hidden="true" />
+              {files.map((file) => {
+                const transcript = !isRecording(file);
+                // A subtitle file is always the transcript; only a readable document can go back to Context.
+                const canBeContext = transcript && !isSubtitleFile(file.name) && classifyFile(file).ok;
+                return (
+                  <li key={`${file.name}:${file.size}:${file.lastModified}`}>
+                    <span>{file.name}</span>
+                    <span className="q-faint">{transcript ? "Transcript" : "Recording"}</span>
+                    {canBeContext ? (
+                      <button className="q-link" type="button" disabled={busy} onClick={() => useAsContext(file)}>
+                        Use as context
+                      </button>
+                    ) : null}
+                    <button
+                      className="q-icon-btn"
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => setFiles((current) => current.filter((item) => item !== file))}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {contextTranscripts.length > 0 ? (
+            <ul className="q-files" aria-label="Context files that can be the transcript">
+              {contextTranscripts.map((item) => (
+                <li key={item.id}>
+                  <span>{item.name}</span>
+                  <span className="q-faint">Context</span>
+                  <button className="q-link" type="button" disabled={busy} onClick={() => useAsTranscript(item)}>
+                    Use as transcript
                   </button>
                 </li>
               ))}
@@ -576,6 +664,7 @@ export function Home() {
                     ) : (
                       <Link className="q-meeting-main" href={href}>
                         <span className="q-meeting-title">{title}</span>
+                        {row.meetingId && providers[row.meetingId] === "nim" ? <span className="q-badge" title="Analysed with NVIDIA NIM">NIM</span> : null}
                         {row.filename && !sameName(title, row.filename) ? <span className="q-meeting-file">{row.filename}</span> : null}
                         {headline?.summary ? <span className="q-meeting-gist">{headline.summary}</span> : null}
                         {meta ? <span className="q-meeting-meta">{meta}</span> : null}

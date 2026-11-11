@@ -234,6 +234,23 @@ const SERVER_SENTENCES = new Set([
   "The analysis service declined this recording.",
   "The analysis took too long and was stopped. Please try again.",
   "The analysis could not be completed. Please try again.",
+  // Transcript files: the worker's own sentences about a file it could not read.
+  "NVIDIA NIM is not set up on this server. Choose AWS Bedrock in Settings, or add the NIM keys.",
+  "NVIDIA NIM did not answer after trying every model and key. Try again, or switch to AWS Bedrock in Settings.",
+  "This Word file could not be read. It may be damaged or password-protected.",
+  "This Word file could not be read. It may be damaged.",
+  "This Word file could not be read. It may be damaged or too large.",
+  "This PDF is password-protected.",
+  "This PDF could not be read. It may be damaged.",
+  "No text was found in this PDF. A scanned PDF needs OCR first.",
+  "This file type is not supported as a transcript.",
+  "No readable text was found in this file.",
+  "No caption cues were found in this file.",
+  "No spoken or written content was found in this file.",
+  "No content was found in this file.",
+  "This JSON file could not be read.",
+  "This JSON file does not look like a transcript.",
+  "This file could not be read as a transcript.",
 ]);
 
 const KNOWN_ERRORS: [RegExp, string][] = [
@@ -267,12 +284,17 @@ export const ANALYSIS_STEPS = [
 ] as const;
 
 const STEP_MATCHERS: RegExp[] = [
-  /^(preparing the media|streaming audio)/i,
+  /^(preparing the media|streaming audio|fetching the transcript|reading the transcript)/i,
   /^(compacting|checking audio against|extracting claims)/i,
   /^checking transcript coverage/i,
   /^(analy[sz]ing all|building the evidence|summari[sz]ing|extracting and grounding)/i,
   /^building charts/i,
 ];
+
+/** The first step reads a transcript instead of transcribing a recording. */
+export function analysisStepLabels(transcript: boolean): readonly string[] {
+  return transcript ? ["Reading the transcript", ...ANALYSIS_STEPS.slice(1)] : ANALYSIS_STEPS;
+}
 
 export function analysisStepIndex(message: string): number {
   return STEP_MATCHERS.findIndex((pattern) => pattern.test(message.trim()));

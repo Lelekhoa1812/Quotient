@@ -12,6 +12,7 @@
  * (counts are printed), seeks the recording on click, and has a table view.
  */
 import { useMemo } from "react";
+import { usePlayable } from "@/components/ui/moment";
 import { formatMs } from "@/lib/format";
 import { buildInsights, type BarRow, type Insight } from "@/lib/insights";
 import { countText } from "@/lib/present";
@@ -121,6 +122,7 @@ function Columns({
   onSeek: (spanId: string | null | undefined, ms?: number | null) => void;
 }) {
   const top = Math.max(...rows.map((row) => row.value), 1);
+  const playable = usePlayable();
   return (
     <div>
       <div className="q-cols" role="group" aria-label={`Speech per minute, up to ${top} ${unit}`}>
@@ -129,6 +131,7 @@ function Columns({
             key={row.key}
             type="button"
             className="q-col"
+            disabled={!playable}
             title={`${row.label}: ${row.display}`}
             aria-label={`${row.label}, ${row.display}. Play from here.`}
             onClick={() => onSeek(row.spanId, row.startMs)}
@@ -154,6 +157,7 @@ function Moments({
   insight: Extract<Insight, { kind: "moments" }>;
   onSeek: (spanId: string | null | undefined, ms?: number | null) => void;
 }) {
+  const playable = usePlayable();
   return (
     <div className="q-lanes">
       {insight.lanes.map((lane) => (
@@ -165,6 +169,7 @@ function Moments({
                 key={point.id}
                 type="button"
                 className="q-dot"
+                disabled={!playable}
                 style={{ left: `${Math.min(99, (point.startMs / insight.durationMs) * 100)}%` }}
                 title={`${formatMs(point.startMs)} · ${point.text}`}
                 aria-label={`${lane.label} at ${formatMs(point.startMs)}: ${point.text}`}
