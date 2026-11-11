@@ -12,7 +12,7 @@
  * from lib/present.ts.
  */
 import { useState } from "react";
-import { usePlayable } from "@/components/ui/moment";
+import { usePlayable, Wording } from "@/components/ui/moment";
 import { dueText, formatMs, isProposed } from "@/lib/format";
 import {
   NOT_MENTIONED,
@@ -124,7 +124,7 @@ export function Boards({
           <p className="q-empty">
             No confirmed points on this topic.
             {unconfirmedTotal > 0 ? ` ${unconfirmedTotal} statements in this meeting could not be confirmed yet, so something may be missing. See “To check”.` : ""}
-            {incomplete ? " Part of the recording could not be analysed." : ""}
+            {incomplete ? <Wording>{" Part of the recording could not be analysed."}</Wording> : ""}
           </p>
         ) : null}
         {unevaluated ? <p className="q-empty">This topic could not be analysed. Run the analysis again to check it.</p> : null}
@@ -147,7 +147,7 @@ export function Boards({
               const quote = claim.citations.find((item) => item.quote)?.quote;
               return (
                 <button key={claim.id} className="q-evidence" type="button" onClick={() => onSeekClaim(claim)}>
-                  <span className="q-evidence-label">Heard in the recording</span>
+                  <span className="q-evidence-label"><Wording>Heard in the recording</Wording></span>
                   {quote ? <q>{quote}</q> : <span>{claim.text}</span>}
                   {claim.kind === "decision" ? <span className="q-badge">{decisionStatusText(claim.decision_status)}</span> : null}
                 </button>
@@ -197,7 +197,7 @@ function Actions({
             ) : null}
             <div className="q-inline">
               <span className="q-state" data-state={isProposed(action) ? "proposed" : "accepted"}>
-                {isProposed(action) ? "Needs your confirmation" : human ? "Confirmed by a person" : "Owner stated in the recording"}
+                {isProposed(action) ? "Needs your confirmation" : human ? "Confirmed by a person" : <Wording>Owner stated in the recording</Wording>}
               </span>
               <span className="q-muted">{originText(action.origin)}</span>
             </div>

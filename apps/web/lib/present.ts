@@ -303,3 +303,13 @@ export function analysisStepLabels(transcript: boolean): readonly string[] {
 export function analysisStepIndex(message: string): number {
   return STEP_MATCHERS.findIndex((pattern) => pattern.test(message.trim()));
 }
+
+/** A transcript meeting has no recording and no video: say "the transcript", and say where names came from. */
+export function wordForTranscript(text: string): string {
+  return text
+    .replace("Speakers are told apart automatically, using the video when it shows names.", "Speakers are named as the file names them.")
+    .replace(/\bthe recording\b/g, "the transcript")
+    .replace(/\bThe recording\b/g, "The transcript")
+    .replace(/\bthis recording\b/g, "this transcript")
+    .replace(/\bHeard in the transcript\b/g, "Said in the transcript");
+}

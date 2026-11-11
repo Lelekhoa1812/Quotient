@@ -11,7 +11,7 @@
  * recording that could not be accounted for are listed last.
  */
 import { useState } from "react";
-import { Moment } from "@/components/ui/moment";
+import { Moment, Wording, useWording } from "@/components/ui/moment";
 import { formatTableNumber } from "@/lib/format";
 import { readable } from "@/lib/present";
 import type { Claim, MeetingStatus, Span, TranscriptGap } from "@/lib/types";
@@ -104,7 +104,7 @@ export function Review({
       <div>
         <h2>Evidence</h2>
         <p className="q-lede">
-          Every point in the overview rests on statements checked against the recording. Here is what was used, and what was left out and why.
+          <Wording>Every point in the overview rests on statements checked against the recording. Here is what was used, and what was left out and why.</Wording>
         </p>
       </div>
       <p className="q-evidence-tally">
@@ -124,14 +124,14 @@ export function Review({
       <List key={tab} groups={shown} used={tab === "used"} onSeek={onSeek} text={(value) => readable(value, names, voices)} />
       {gaps.length > 0 ? (
         <details className="q-details">
-          <summary>Parts of the recording that were not checked ({gaps.length})</summary>
+          <summary><Wording>{`Parts of the recording that were not checked (${gaps.length})`}</Wording></summary>
           <ul className="q-rows">
             {gaps.map((gap) => {
               const first = gap.spanIds.map((spanId) => spans.find((item) => item.id === spanId)).find(Boolean) ?? null;
               return (
                 <li key={gap.id} className="q-row">
                   <div className="q-row-main">
-                    <p>{first?.text || first?.raw_text || "This part of the recording."}</p>
+                    <p>{first?.text || first?.raw_text || <Wording>This part of the recording.</Wording>}</p>
                     <p className="q-row-meta">{gap.reason || "The analysis could not turn this part into a statement."}</p>
                   </div>
                   {first ? <Moment ms={first.start_ms} onPlay={() => onSeekSpan(first)} /> : null}
@@ -154,7 +154,7 @@ function Row({ claim, count, used, onSeek, text }: { claim: Claim; count: number
       <div className="q-row-main">
         <p>{claim.text ? text(claim.text) : "Statement without text"}</p>
         <p className="q-row-meta">
-          {used ? (claim.confidence === "confirmed" ? "Confirmed" : "Likely: it matches the recording, but one check was not certain") : null}
+          {used ? (claim.confidence === "confirmed" ? "Confirmed" : <Wording>Likely: it matches the recording, but one check was not certain</Wording>) : null}
           {used && count > 1 ? " · " : ""}
           {count > 1 ? `said ${count} times` : ""}
         </p>
@@ -166,6 +166,7 @@ function Row({ claim, count, used, onSeek, text }: { claim: Claim; count: number
 
 function List({ groups, used, onSeek, text }: { groups: Group[]; used: boolean; onSeek: (claim: Claim) => void; text: (value: string) => string }) {
   const [limit, setLimit] = useState(PAGE);
+  const w = useWording();
   if (groups.length === 0) {
     return <p className="q-empty">{used ? "No statement could be confirmed yet." : "Nothing was left out."}</p>;
   }
@@ -206,8 +207,8 @@ function List({ groups, used, onSeek, text }: { groups: Group[]; used: boolean; 
         if (rows.length === 0) return null;
         const total = groups.filter((group) => reasonOf(group.claim) === reason).length;
         return (
-          <section key={reason} className="q-reason-group" aria-label={REASON[reason]}>
-            <h3 className="q-reason-title">{REASON[reason]} <span className="q-faint">({total})</span></h3>
+          <section key={reason} className="q-reason-group" aria-label={w(REASON[reason])}>
+            <h3 className="q-reason-title">{w(REASON[reason])} <span className="q-faint">({total})</span></h3>
             <ul className="q-rows">
               {rows.map((group) => <Row key={group.claim.id} {...group} used={false} onSeek={onSeek} text={text} />)}
             </ul>

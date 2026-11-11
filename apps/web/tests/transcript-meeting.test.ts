@@ -143,3 +143,11 @@ test("every stage message the worker sends lands on a step", async () => {
   ];
   for (const [message, step] of stages) assert.equal(analysisStepIndex(message), step, message);
 });
+
+test("a transcript meeting never says recording or video where it means the file", async () => {
+  const { wordForTranscript } = await import("@/lib/present");
+  assert.equal(wordForTranscript("Built from 9 confirmed statements in the recording."), "Built from 9 confirmed statements in the transcript.");
+  assert.equal(wordForTranscript("Heard in the recording"), "Said in the transcript");
+  assert.equal(wordForTranscript("No speech was found in this recording."), "No speech was found in this transcript.");
+  assert.match(wordForTranscript("Speakers are told apart automatically, using the video when it shows names. Use the pencil."), /^Speakers are named as the file names them\. Use/);
+});

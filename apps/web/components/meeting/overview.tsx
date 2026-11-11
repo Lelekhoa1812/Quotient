@@ -15,7 +15,7 @@ import { Check, CircleHelp, Flag, GitCompareArrows, ListChecks, Route, RotateCw,
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Diagram } from "@/components/diagram";
 import { Markdown } from "@/components/markdown";
-import { IconButton, Likely, Moment } from "@/components/ui/moment";
+import { IconButton, Likely, Moment, Wording } from "@/components/ui/moment";
 import { ScreenCardView, Storyline } from "@/components/meeting/storyline";
 import { UnknownVoiceButton } from "@/components/meeting/unknown-voice";
 import { VoiceName } from "@/components/meeting/voices";
@@ -416,7 +416,7 @@ export function Overview({
                   );
                 })}
               </ul>
-              <p className="q-faint">Speakers are told apart automatically, using the video when it shows names. Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
+              <p className="q-faint"><Wording>Speakers are told apart automatically, using the video when it shows names.</Wording> Use the pencil to name someone; the name is kept and used everywhere, including the charts.{unknownSet.size > 0 ? " A red marker means nobody could tell who that is; select it to listen and name them." : ""}</p>
             </>
           ) : null}
           {argued.length ? (
@@ -452,7 +452,7 @@ export function Overview({
       <ContextUsed context={context} />
 
       <footer className="q-provenance">
-        Built from {confirmed} confirmed{likely ? ` and ${likely} likely` : ""} statements in the recording.
+        <Wording>{`Built from ${confirmed} confirmed${likely ? ` and ${likely} likely` : ""} statements in the recording.`}</Wording>
         {unchecked > 0 ? (
           <> {unchecked} others could not be checked and are left out. <button type="button" className="q-link" onClick={() => onGo("review")}>See the evidence</button></>
         ) : null}

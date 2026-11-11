@@ -10,6 +10,7 @@
  * the brief left out. A needs_review meeting shows its confirmed-only sentences
  * under a "partial brief" notice that links to what was left out.
  */
+import { Wording } from "@/components/ui/moment";
 import { Markdown } from "@/components/markdown";
 import { dimensionTitle, isOpenPointTopic } from "@/lib/present";
 import type { Finding, SynthesisOmission, SynthesisSentence } from "@/lib/types";
@@ -43,7 +44,7 @@ export function Synthesis({
       <div>
         <h2>Brief</h2>
         <p className="q-lede">
-          A short written summary. Select any sentence to see the part of the recording that supports it.
+          <Wording>A short written summary. Select any sentence to see the part of the recording that supports it.</Wording>
         </p>
       </div>
       {partial ? (
@@ -68,7 +69,7 @@ export function Synthesis({
           <h3>Nothing to summarise</h3>
           <p>
             {speechLines === 0
-              ? "No speech was found in this recording, so there is nothing to write a brief about."
+              ? <Wording>No speech was found in this recording, so there is nothing to write a brief about.</Wording>
               : `Only ${speechLines === 1 ? "one short line was" : `${speechLines} short lines were`} found, which is not enough to write a brief.`}
           </p>
           {speechLines > 0 ? (
@@ -88,7 +89,7 @@ export function Synthesis({
               </p>
             ) : null}
             {cited.length > 0 && cited.every((finding) => isOpenPointTopic(finding.dimension)) ? (
-              <p className="q-muted">Raised as an open point. It may be answered elsewhere in the recording.</p>
+              <p className="q-muted"><Wording>Raised as an open point. It may be answered elsewhere in the recording.</Wording></p>
             ) : null}
             <div className="q-inline">
               <button className="q-btn-ghost" type="button" aria-pressed={sentence.id === activeId} onClick={() => onOpen(sentence)}>

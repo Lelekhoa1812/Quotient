@@ -16,6 +16,7 @@ import os
 import random
 import re
 import threading
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -26,6 +27,7 @@ from errors import NotInvocable
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 REQUEST_TIMEOUT_SECONDS = 300
 MAX_DISPATCHES = 7
+SLOW_CALL_MS = 15_000
 # NVIDIA's free tier allows roughly 40 requests a minute per key. Stay under it.
 PER_KEY_PER_MINUTE = 30
 COOLDOWN_DEFAULT_SECONDS = 30
@@ -397,6 +399,10 @@ class NimTransport:
         except (urllib.error.URLError, TimeoutError, OSError, ConnectionError) as exc:
             raise _Retry("key", f"transport {type(exc).__name__}") from exc
         elapsed = int((time.perf_counter() - started) * 1000)
+        if status >= 400 or elapsed >= SLOW_CALL_MS:
+            # No key, no prompt: only what is needed to see where the minutes went.
+            thinking = "chat_template_kwargs" not in body
+            print(f"nim call: {model} thinking={'on' if thinking else 'off'} HTTP {status} {elapsed / 1000:.0f}s", file=sys.stderr, flush=True)
         if status >= 400:
             self._audit(model, status, elapsed, len(raw), error=True)
             raise self._classify(status, payload)
