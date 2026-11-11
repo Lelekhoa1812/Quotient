@@ -24,6 +24,40 @@ Library pin: `aws-cdk-lib==2.272.0` in `requirements.txt`. CLI pin: `aws-cdk@2.1
 
 A full 84-minute meeting is a manual start of the state machine. It is not part of deploy or CI. The budgeted live test is the 5-minute slice.
 
+## Current deployment: Lambda, nothing always on
+
+The stack now runs on **Lambda behind CloudFront** and sleeps at zero when idle. There is no ECS service, ALB or NAT gateway in use.
+
+| Piece | What runs it |
+| --- | --- |
+| Portal | Lambda `axion-meeting-staging-web` (arm64 image, 1 GB) |
+| MCP API | Lambda `axion-meeting-staging-api` (arm64 image, 2 GB, Lambda Web Adapter) |
+| Analysis | Lambda `axion-meeting-staging-worker` (arm64 image, 2 GB, 900 s), fed by the SQS work queue |
+| Routing | CloudFront: `/mcp`, `/v1`, `/health`, `/warmup`, `/.well-known` go to the API, everything else to the portal |
+
+Ship a change:
+
+```bash
+R=255834078973.dkr.ecr.ap-southeast-2.amazonaws.com
+aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin $R
+for s in api worker web; do
+  docker buildx build --platform linux/arm64 --provenance=false --sbom=false -f apps/$s/Dockerfile \
+    --output type=image,name=$R/axion-meeting-staging-$s:staging,push=true,oci-mediatypes=false .
+done
+(cd infra/cdk && npx --yes aws-cdk@2.1144.0 deploy axion-meeting-staging --parameters AlarmEmail=<inbox>)
+for f in api worker web; do aws lambda update-function-code --function-name axion-meeting-staging-$f --image-uri $R/axion-meeting-staging-$f:staging; done
+```
+
+Lambda cannot read the attestation manifest `buildx` adds by default, so `--provenance=false --sbom=false` and Docker media types are required. A new image only runs once `update-function-code` points the function at it.
+
+**NVIDIA NIM keys** live in Secrets Manager secret `axion-meeting-staging/nim` as `{"keys": ["nvapi-...", ...]}`. The stack grants read to the API and worker roles and passes the name as `NIM_SECRET_ARN`. Create or rotate it with `aws secretsmanager put-secret-value`; never put the keys in an environment variable.
+
+**Uploads and Lambda instances.** A task lives in the memory of one Lambda instance, so the portal does not wait for an upload inside a task. It asks `submit_meeting` for a signed target (no task), uploads the file straight to S3, then calls `submit_meeting` with the stored key and follows the meeting by id. A target issued this way is bound to the signed-in person, and only that person can submit it.
+
+**Long meetings.** The worker Lambda stops at 900 s. A transcript on NIM, or a short recording, finishes inside that. A long recording can run past it; the queue redelivers (16 minute visibility, 8 receives, then the dead-letter queue). Treat very long meetings as a manual run.
+
+The sections below describe the earlier Fargate and ALB layout and are kept for reference where the resources still exist.
+
 ## Images
 
 Both repositories are mutable and keep the last 10 images. The task definitions pull tag `staging`. Images must be `linux/arm64`.
