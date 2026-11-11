@@ -137,8 +137,9 @@ def run(
             try:
                 return once(repaired)
             except (SchemaRejected, TimeoutError, RuntimeError) as again:
+                # The reason names the schema rule that failed, never the meeting's text.
                 print(
-                    f"quality skip: {prompt_id} {type(again).__name__}",
+                    f"quality skip: {prompt_id} {type(again).__name__}: {str(again)[:160]}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -475,8 +476,15 @@ def _contest(ledger: Ledger, call, claim: Claim) -> None:
         # Bug: The next round still advertised open_span, so the model called it
         # again and the loop ended on an empty schema object.
         # Fix: After a real open, the next round is a schema fill. _fill is not a model field.
+        # Bugs vs Fixes
+        # Bug: This round carried only the span texts. Each request is standalone, so the model had no claim to test and
+        # answered in prose ("the claim to test isn't in the input I received"). Bedrock then rejected every counter-
+        # evidence reply, and every claim stayed unverified.
+        # Fix: Say what is being checked again, alongside what was opened.
         payload = {
             "_fill": True,
+            "paraphrase": claim.paraphrase,
+            "quotes": [claim.quote],
             "tool_results": results,
             "opened_ids": list(dict.fromkeys(opened)),
         }

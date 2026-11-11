@@ -158,10 +158,20 @@ class Reasoner:
             raise ValueError("refusing to send a max_output_tokens below the vendor maximum")
         budget = plan.input_budget_tokens if plan is not None else INPUT_TOKEN_BUDGET
         prefix_parts = [prompt.body]
-        if prompt.tools:
+        # Bugs vs Fixes
+        # Bug: The final JSON pass of a tool prompt still listed the tool and the opening instructions. Bedrock does not
+        # enforce a schema that uses oneOf, so the model tried to open spans again (or wrote prose) and the reply was
+        # rejected; every claim then stayed unverified.
+        # Fix: That pass names no tools and says it is the final step: answer with the JSON object, from what is above.
+        if prompt.tools and not schema_mode:
             prefix_parts.append(json.dumps(prompt.tools, sort_keys=True))
         if schema_mode and schema is not None:
             prefix_parts.append(json.dumps(schema, sort_keys=True))
+            if prompt.tools:
+                prefix_parts.append(
+                    "This is the final step. Do not call any tool and do not ask for more. Reply with only the JSON object "
+                    "that fits the schema above, using what the earlier steps already found."
+                )
         prefix = "\n".join(prefix_parts)
         user = trace if schema_mode else json.dumps(payload, sort_keys=True, default=str)
         if estimate_tokens(prefix + user) > budget:
