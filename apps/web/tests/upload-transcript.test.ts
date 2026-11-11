@@ -121,3 +121,20 @@ test("a pick with nothing usable leaves the current primary input alone", () => 
   assert.equal(choice.displaced, null);
   assert.equal(choice.rest.length, 2);
 });
+
+test("an issued upload target is read from the task-less submit_meeting result", async () => {
+  const { parseIssuedUpload } = await import("@/lib/mcp/upload");
+  const ok = {
+    content: [{ type: "text", text: JSON.stringify({ status: "upload_target_issued", upload_url: "https://s3.example/x?sig=1", object_key: "uploads/u-abc-1/notes.vtt", headers: { "Content-Type": "text/vtt" } }) }],
+  };
+  assert.deepEqual(parseIssuedUpload(ok), { url: "https://s3.example/x?sig=1", headers: { "Content-Type": "text/vtt" }, objectKey: "uploads/u-abc-1/notes.vtt" });
+  const refused = { isError: true, content: [{ type: "text", text: JSON.stringify({ error: "The transcript is larger than 50 MB." }) }] };
+  assert.throws(() => parseIssuedUpload(refused), /larger than 50 MB/);
+  assert.throws(() => parseIssuedUpload({ content: [{ type: "text", text: "{}" }] }), /did not issue/);
+});
+
+test("the refusals the server gives before an upload reach the person unchanged", async () => {
+  const { friendlyError } = await import("@/lib/present");
+  assert.equal(friendlyError("The transcript is larger than 50 MB."), "The transcript is larger than 50 MB.");
+  assert.equal(friendlyError("The recording is larger than 5 GB."), "The recording is larger than 5 GB.");
+});

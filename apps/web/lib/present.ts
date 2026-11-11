@@ -244,6 +244,10 @@ const SERVER_SENTENCES = new Set([
   "This PDF could not be read. It may be damaged.",
   "No text was found in this PDF. A scanned PDF needs OCR first.",
   "This file type is not supported as a transcript.",
+  // Refused before the upload starts.
+  "Upload an audio or video recording, or a transcript (SRT, VTT, TXT, MD, DOCX, PDF).",
+  "The transcript is larger than 50 MB.",
+  "The recording is larger than 5 GB.",
   "No readable text was found in this file.",
   "No caption cues were found in this file.",
   "No spoken or written content was found in this file.",

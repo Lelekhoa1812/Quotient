@@ -9,6 +9,7 @@
  */
 
 import { extensionOf, isRecording } from "@/lib/context";
+import { unwrapTool } from "@/lib/graph";
 import { asArray, asFinite, asRecord, asString } from "@/lib/json";
 
 type Part = {
@@ -306,4 +307,27 @@ function isHttp(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Motivation vs Logic
+ * Motivation: On AWS a task lives in one Lambda instance, so a task that waits for the browser to upload is lost
+ * when the next request reaches another instance. The portal asks for the signed target first, uploads, and
+ * only then starts the meeting with the stored key.
+ * Logic: Read the target a task-less submit_meeting call returns, or throw the server's own message.
+ */
+export type IssuedUpload = { url: string; headers: Record<string, string>; objectKey: string };
+
+export function parseIssuedUpload(result: unknown): IssuedUpload {
+  const record = asRecord(result);
+  const payload = asRecord(unwrapTool(result));
+  if (record?.isError === true || !payload || !asString(payload.upload_url) || !asString(payload.object_key)) {
+    const message = asString(payload?.error) ?? (record?.isError === true ? asString(asRecord(asArray(record?.content)[0])?.text) : null);
+    throw new Error(message?.trim() || "The server did not issue an upload target.");
+  }
+  return {
+    url: asString(payload.upload_url) as string,
+    headers: stringMap(payload.headers),
+    objectKey: asString(payload.object_key) as string,
+  };
 }

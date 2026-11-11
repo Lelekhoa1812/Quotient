@@ -12,6 +12,7 @@ input_required is only the incomplete-upload elicitation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import secrets
 
 from quotient.graph.gate import project_meeting, summary
@@ -22,6 +23,28 @@ from quotient.worker.port import PortError
 
 _POLL_SECONDS = 0.25
 _ELICIT_ATTEMPTS = 3
+
+
+# Motivation vs Logic
+# Motivation: A task lives in one Lambda instance's memory, so on AWS an upload that waits for the browser inside a
+# task is lost when the next request reaches another instance. The portal therefore asks for a signed upload first
+# (no task), uploads, and then submits the stored key. That key must still be one this person was issued.
+# Logic: A target issued without a task is named uploads/u-<tag of the signed-in subject>-<random>/. A later submit
+# is accepted only for a key under the task's own id (the elicitation flow) or under that subject's tag.
+def issued_upload_id(subject: object) -> str:
+    return f"u-{_subject_tag(subject)}-{secrets.token_hex(8)}"
+
+
+def owns_upload(subject: object, task_id: str | None, key: str) -> bool:
+    if not key.startswith("uploads/"):
+        return True
+    if task_id and key.startswith(f"uploads/{task_id}/"):
+        return True
+    return key.startswith(f"uploads/u-{_subject_tag(subject)}-")
+
+
+def _subject_tag(subject: object) -> str:
+    return hashlib.sha256(str(subject).encode("utf-8")).hexdigest()[:12]
 
 
 async def run_submit(task: TaskRecord, arguments: dict, runtime: object) -> None:
@@ -42,7 +65,7 @@ async def run_submit(task: TaskRecord, arguments: dict, runtime: object) -> None
                 _notify_status(task, runtime)
                 return
         key = str(arguments.get("object_key") or "").strip()
-        if key.startswith("uploads/") and not key.startswith(f"uploads/{task.task_id}/"):
+        if not owns_upload(task.auth_subject, task.task_id, key):
             # A browser upload is only ever analysed under the key the server issued to this very task.
             task.fail_tool("That upload does not belong to this request.")
             _notify_status(task, runtime)

@@ -32,3 +32,14 @@ def test_recording_meeting_is_unchanged():
 def test_unknown_source_and_provider_values_are_not_passed_through():
     projected = project_meeting(row(source={"kind": "hacked"}, model_provider="<script>"))
     assert projected["source"] is None and projected["model_provider"] == "bedrock"
+
+
+def test_an_upload_issued_without_a_task_belongs_only_to_the_person_it_was_issued_to():
+    from quotient.mcp.jobs import issued_upload_id, owns_upload
+
+    mine = f"uploads/{issued_upload_id('alice')}/notes.vtt"
+    assert owns_upload("alice", None, mine)
+    assert not owns_upload("bob", None, mine)
+    assert owns_upload("bob", "task9", "uploads/task9/notes.vtt")  # the task's own key (the elicitation flow)
+    assert not owns_upload("bob", "task9", "uploads/task8/notes.vtt")
+    assert owns_upload("bob", None, "derivatives/sample.mp4")  # only browser uploads are bound to a person

@@ -39,6 +39,7 @@ import {
   isTranscriptFile,
 } from "@/lib/mcp/upload";
 import { loadPreference, submitModelArgs, type ModelOptions, type SubmitModelArgs } from "@/lib/models";
+import { friendlyError } from "@/lib/present";
 import type { MeetingHeadline, ModelProvider } from "@/lib/types";
 
 const HomeObject = dynamic(() => import("@/components/home-object").then((mod) => mod.HomeObject), {
@@ -110,7 +111,8 @@ export function Home() {
   const [sending, setSending] = useState(false);
   const [bypassed, setBypassed] = useState(false);
   // Set when the meeting started but some context could not be uploaded; the person opens it from here.
-  const [startedTask, setStartedTask] = useState<string | null>(null);
+  const [startedMeeting, setStartedMeeting] = useState<string | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const contextButton = useRef<HTMLButtonElement>(null);
   const phase = useMcpPhase();
   const connecting = phase === "idle" || phase === "connecting";
@@ -364,7 +366,8 @@ export function Home() {
     setBusy(true);
     setMessage("");
     setContextNote("");
-    setStartedTask(null);
+    setStartedMeeting(null);
+    setUploadPercent(null);
     const failed = new Set<string>();
     const sendingContext = hasContext(context);
     if (sendingContext) {
@@ -373,7 +376,7 @@ export function Home() {
     }
     try {
       const models = await chosenModels();
-      const task = await mcp.submitMeeting(
+      const started = await mcp.submitMeeting(
         primary,
         [],
         title,
@@ -388,15 +391,17 @@ export function Home() {
             }
           : undefined,
         models,
+        (fraction) => setUploadPercent(Math.round(fraction * 100)),
       );
+      setUploadPercent(null);
       const skipped = context.items.filter((item) => failed.has(item.id)).map((item) => item.name);
       if (skipped.length === 0) {
-        router.push(`/tasks/${task.taskId}`);
+        router.push(`/meetings/${started.meetingId}`);
         return;
       }
       // The meeting is under way. Say what it left out and let the person open it when they have read that.
       setContextNote(skippedNotice(skipped));
-      setStartedTask(task.taskId);
+      setStartedMeeting(started.meetingId);
       setSending(false);
       // The meeting has started: clear the form so the same recording cannot be started twice by mistake.
       setFiles([]);
@@ -405,16 +410,20 @@ export function Home() {
       setBusy(false);
     } catch (error) {
       setSending(false);
+      setUploadPercent(null);
       if (error instanceof ContextPrepareError) {
         setContext((current) => ({ ...current, items: current.items.map((item) => ({ ...item, status: "ready", progress: 0, reason: "" })) }));
         setMessage(`The meeting was not started. The context could not be prepared: ${error.message.replace(/\.$/, "")}. Try again, or remove the context to start without it.`);
       } else {
+        const generic = sendingContext
+          ? "The meeting could not be started. Try again, or remove the context to start without it."
+          : "The meeting could not be started. Check that the file is a recording or a transcript and try again.";
         setMessage(
           error instanceof McpDisconnected
             ? "Quotient cloud service is unreachable. Please wait a moment for services to wake up and try again."
-            : sendingContext
-              ? "The meeting could not be started. Try again, or remove the context to start without it."
-              : "The meeting could not be started. Check that the file is a recording or a transcript and try again.",
+            : error instanceof Error
+              ? friendlyError(error.message, generic)
+              : generic,
         );
       }
       setBusy(false);
@@ -571,10 +580,11 @@ export function Home() {
               Sending context · {context.items.filter((item) => (item.status === "ready" && item.progress === 1) || item.status === "failed").length} of {context.items.length}
             </p>
           ) : null}
+          {uploadPercent !== null ? <p className="q-faint" role="status">Uploading {files[0]?.name ?? "the file"} · {uploadPercent}%</p> : null}
           {contextNote ? <p className="q-ctx-home-note" role="status">{contextNote}</p> : null}
-          {startedTask ? (
+          {startedMeeting ? (
             <p>
-              <Link className="q-btn" href={`/tasks/${startedTask}`}>Open the meeting</Link>
+              <Link className="q-btn" href={`/meetings/${startedMeeting}`}>Open the meeting</Link>
             </p>
           ) : null}
           {message ? <p role="alert">{message}</p> : null}

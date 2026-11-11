@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import secrets
 import time
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
@@ -35,7 +34,9 @@ from quotient.mcp.errors import (
 from quotient.mcp.jobs import (
     _names,
     cancel_meeting_tasks,
+    issued_upload_id,
     notify_resources,
+    owns_upload,
     resolve_client_response,
     run_submit,
     sync_task,
@@ -416,7 +417,7 @@ def _submit_direct(params: dict, request_id: object, session: Session, runtime: 
         port = runtime.port  # type: ignore[attr-defined]
         signer = getattr(port, "upload_target", None)
         if callable(signer):
-            upload_id = secrets.token_hex(8)
+            upload_id = issued_upload_id(session.auth.subject)
             filename = arguments.get("filename") or "recording.mp4"
             media_type = arguments.get("media_type") or "video/mp4"
             byte_size = arguments.get("byte_size")
@@ -452,6 +453,9 @@ def _submit_direct(params: dict, request_id: object, session: Session, runtime: 
     problem = validate_submit_arguments(arguments)
     if problem:
         return error(INVALID_PARAMS, problem, request_id)
+
+    if not owns_upload(session.auth.subject, None, key):
+        return {"jsonrpc": "2.0", "id": request_id, "result": tool_text({"error": "That upload does not belong to this request."}, is_error=True)}
 
     port = runtime.port  # type: ignore[attr-defined]
     batch = arguments.get("context_batch")

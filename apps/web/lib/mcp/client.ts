@@ -20,7 +20,7 @@ import {
   toUploads,
   type ContextItem,
 } from "@/lib/context";
-import { mediaTypeOf, prepareElicitationContent, putFile } from "@/lib/mcp/upload";
+import { mediaTypeOf, parseIssuedUpload, prepareElicitationContent, putFile } from "@/lib/mcp/upload";
 import { parseModelOptions, type ModelOptions, type SubmitModelArgs } from "@/lib/models";
 import type { GraphPage, MeetingStatus, TaskSnapshot } from "@/lib/types";
 
@@ -615,63 +615,59 @@ export const mcp = {
   async modelOptions(): Promise<ModelOptions | null> {
     return parseModelOptions(await callTool("model_options", {}));
   },
-  /** Starts a meeting. `models` is fixed here: the meeting keeps the family it was started with. */
+  /**
+   * Starts a meeting. `models` is fixed here: the meeting keeps the family it was started with.
+   * Bugs vs Fixes
+   * Bug: The upload waited inside a task. On AWS the next request reached another Lambda instance, which knew
+   * nothing of that task, so the file never uploaded ("Needs a file") and the meeting never started.
+   * Fix: Ask for a signed target (no task), upload the file, then start the meeting with the stored key. The
+   * meeting is stored by the server, so the page follows it by its id and no task has to survive.
+   */
   async submitMeeting(
     primary: File,
     others: File[],
     title: string,
     context?: SubmitContext,
     models?: SubmitModelArgs | null,
-  ): Promise<TaskSnapshot> {
+    onUploadProgress?: (fraction: number) => void,
+  ): Promise<{ meetingId: string }> {
+    void others;
     await ensure();
     // Reference material goes first; if it cannot be prepared, no meeting is started.
     const contextBatch = context ? await sendContext(context) : null;
     const purpose = context?.purpose.trim() ?? "";
-    const token = `submit:${primary.size}:${nextId + 1}`;
-    const result = await request("tools/call", {
-      name: "submit_meeting",
-      arguments: {
-        // An empty key asks the server for a signed upload target (input_required).
-        object_key: "",
-        upload_complete: false,
-        filename: primary.name,
-        media_type: mediaTypeOf(primary),
-        byte_size: primary.size,
-        ...(contextBatch ? { context_batch: contextBatch } : {}),
-        ...(purpose ? { purpose } : {}),
-        ...(models ? models : {}),
-      },
-      task: { ttl: 86_400_000 },
-      _meta: { progressToken: token },
+    const file = { filename: primary.name, media_type: mediaTypeOf(primary), byte_size: primary.size };
+    const target = parseIssuedUpload(await callTool("submit_meeting", { object_key: "", upload_complete: false, ...file }));
+    await putFile(target.url, primary, target.headers, onUploadProgress);
+    const result = await callTool("submit_meeting", {
+      object_key: target.objectKey,
+      upload_complete: true,
+      ...file,
+      ...(contextBatch ? { context_batch: contextBatch } : {}),
+      ...(purpose ? { purpose } : {}),
+      ...(models ? models : {}),
     });
-    const core = parseCore(result);
-    if (!core) throw new Error("submit_meeting did not return a task");
-    activeTaskId = core.taskId;
-    tokenToTask.set(token, core.taskId);
-    // Bugs vs Fixes
-    // Bug: The upload elicitation can arrive on the stream before this call returns. Its
-    // handler then waited for files, and storing them here never woke it, so the upload
-    // never started unless the user picked the file again.
-    // Fix: Stage through attachFiles, which also resolves a waiting handler.
-    mcp.attachFiles(core.taskId, [primary, ...others]);
-    const snapshot = publishCore(core);
+    const meetingId = parseMeetingId(result);
+    if (!meetingId || asRecord(result)?.isError === true) {
+      const text = asArray(asRecord(result)?.content).map((block) => asString(asRecord(block)?.text)).find(Boolean);
+      throw new Error(text || "The meeting could not be started.");
+    }
     const now = new Date().toISOString();
     // A name the person typed differs from the one the file name would give; it is theirs from the start.
     const fromFile = primary.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
     upsertLibrary({
-      meetingId: snapshot.meetingId,
-      taskId: snapshot.taskId,
+      meetingId,
+      taskId: null,
       title,
       renamed: title !== fromFile,
       filename: primary.name,
-      status: snapshot.status,
+      status: "queued",
       reviewCount: null,
       createdAt: now,
       updatedAt: now,
     });
-    watchTask(snapshot.taskId);
-    if (snapshot.status === "input_required") ensureResult(snapshot.taskId);
-    return snapshot;
+    emit();
+    return { meetingId };
   },
   watchTask,
   async cancelTask(taskId: string): Promise<void> {

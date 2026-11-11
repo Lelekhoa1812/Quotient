@@ -321,6 +321,7 @@ class MeetingCompute(Construct):
             ),
             additional_behaviors={
                 "/health": api_behavior,
+                "/warmup": api_behavior,
                 "/.well-known": api_behavior,
                 "/.well-known/*": api_behavior,
                 "/v1": api_behavior,
