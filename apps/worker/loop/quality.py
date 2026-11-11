@@ -2,6 +2,8 @@
 # Motivation: The extractor does not verdict its own sentence, and a ceiling withholds the brief without shrinking output tokens.
 # Logic: Compaction, claims, counterevidence, dual entailment, coverage, ten lenses, synthesis, dissent, chart, the publish gate, then a fail-open queue sort.
 
+import re
+import json
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -513,7 +515,14 @@ def _contest(ledger: Ledger, call, claim: Claim) -> None:
     )
     cited: list[str] = []
     if resolution.span_id:
-        cited = [next(span.text for span in ledger.spans if span.id == resolution.span_id)]
+        line = next(span for span in ledger.spans if span.id == resolution.span_id)
+        # Bugs vs Fixes
+        # Bug: A claim says who spoke ("Speaker spk_2 will send the request"), but the cited line carries only the words, so
+        # the check could never entail it: it answered neutral for many plain, correct statements.
+        # Fix: Show the line the way a transcript does, with its speaker. A claim that names the wrong speaker still does
+        # not entail (checked: 0 of 16 judgements, against 7 of 16 for the right speaker).
+        speaker = line.speaker_hypothesis_id
+        cited = [f"{speaker}: {line.text}" if speaker and speaker != "unknown" else line.text]
     if not cited:
         # No span contains the quote, so there is nothing for entailment to read.
         # The claim stays unresolved without spending two model calls on empty text.
@@ -907,6 +916,13 @@ def _reviewed(call, payload, draft_output, draft, ground, handlers=None):
         review = ground(turn.output)
     except Exception as exc:  # the draft is already a valid walkaway
         print(f"digest review skipped: {type(exc).__name__}", file=sys.stderr, flush=True)
+        return draft
+    # Bugs vs Fixes
+    # Bug: A review whose final step lost the transcript wrote "the transcript was not provided" into the outcome and, being
+    # as large as the draft, replaced it.
+    # Fix: A review that says it had no transcript is a failed review: keep the draft.
+    if re.search(r"transcript was not provided|not provided for this review|no transcript was (?:provided|available)", json.dumps(turn.output, default=str), re.I):
+        print("digest review kept the draft: the review had no transcript", file=sys.stderr, flush=True)
         return draft
     if not isinstance(review, dict) or _size(review) < REVIEW_KEEP * _size(draft) or not review.get("summary"):
         print("digest review kept the draft: the review was thinner", file=sys.stderr, flush=True)
