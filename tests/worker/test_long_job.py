@@ -64,6 +64,8 @@ def test_the_handler_does_not_analyse_inline_when_the_task_started(configured, m
     ran = []
 
     class Port:
+        _rows = {"m1": {}, "m2": {}}
+
         def _analyze(self, meeting_id):
             ran.append(meeting_id)
 
@@ -82,6 +84,8 @@ def test_the_task_runner_analyses_the_named_meeting_and_flushes(monkeypatch):
     seen = []
 
     class Port:
+        _rows = {"m9": {}}
+
         def _analyze(self, meeting_id):
             seen.append(("analyze", meeting_id))
 
@@ -101,6 +105,8 @@ def test_an_error_outside_the_analysis_marks_the_meeting_failed(monkeypatch):
     failed = []
 
     class Port:
+        _rows = {"m3": {}}
+
         def _analyze(self, meeting_id):
             raise MemoryError()
 
@@ -137,3 +143,38 @@ def test_the_task_is_started_with_the_aws_cli_because_the_image_has_no_boto3(mon
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 255, stdout="", stderr="AccessDenied"))
     with pytest.raises(RuntimeError, match="exited 255"):
         lambda_runner._aws_run_task({})
+
+
+def test_the_runner_waits_for_a_meeting_that_has_not_reached_it_yet(monkeypatch):
+    import task_runner
+
+    class Port:
+        def __init__(self):
+            self._rows = {}
+            self.syncs = 0
+
+        def _sync_remote(self, meeting_id=None):
+            self.syncs += 1
+            if self.syncs == 2:
+                self._rows["m5"] = {"meeting_id": "m5"}
+
+    monkeypatch.setattr(task_runner.time, "sleep", lambda seconds: None)
+    port = Port()
+    assert task_runner.wait_for_meeting(port, "m5", attempts=5, pause=0) is True and port.syncs == 2
+    assert task_runner.wait_for_meeting(Port(), "never", attempts=3, pause=0) is False
+
+
+def test_the_runner_does_not_pretend_a_missing_meeting_was_analysed(monkeypatch):
+    import task_runner
+
+    class Port:
+        _rows = {}
+        called = False
+
+        def _analyze(self, meeting_id):
+            Port.called = True
+
+    _fake_worker_port(monkeypatch, Port())
+    monkeypatch.setenv("MEETING_ID", "gone")
+    monkeypatch.setattr(task_runner, "wait_for_meeting", lambda port, meeting_id, **kw: False)
+    assert task_runner.main() == 3 and Port.called is False

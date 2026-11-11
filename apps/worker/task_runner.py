@@ -10,6 +10,22 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+
+
+def wait_for_meeting(port, meeting_id: str, *, attempts: int = 10, pause: float = 3.0) -> bool:
+    """Wait for the stored meeting to reach this process (its API instance saves it in the background)."""
+    for attempt in range(attempts):
+        if port._rows.get(meeting_id) is not None:
+            return True
+        if attempt == attempts - 1:
+            break
+        time.sleep(pause)
+        port._last_remote_sync = 0.0  # ask again now, not at the next throttle window
+        sync = getattr(port, "_sync_remote", None)
+        if callable(sync):
+            sync(meeting_id)
+    return port._rows.get(meeting_id) is not None
 
 
 def main() -> int:
@@ -23,6 +39,9 @@ def main() -> int:
     print(f"long-job worker starting analysis for meeting {meeting_id}", file=sys.stderr, flush=True)
     code = 0
     try:
+        if not wait_for_meeting(port, meeting_id):
+            print(f"long-job worker could not find meeting {meeting_id}", file=sys.stderr, flush=True)
+            return 3
         port._analyze(meeting_id)
         print(f"long-job worker completed analysis for meeting {meeting_id}", file=sys.stderr, flush=True)
     except Exception as exc:  # _analyze records its own failures; this is for anything outside it

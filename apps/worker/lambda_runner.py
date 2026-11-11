@@ -92,6 +92,9 @@ def handler(event: dict, context: object) -> dict:
             continue
         print(f"on-demand worker starting analysis for meeting {meeting_id}", file=sys.stderr, flush=True)
         try:
+            from task_runner import wait_for_meeting
+
+            wait_for_meeting(port, str(meeting_id), attempts=5)
             port._analyze(meeting_id)
             processed += 1
             print(f"on-demand worker completed analysis for meeting {meeting_id}", file=sys.stderr, flush=True)
