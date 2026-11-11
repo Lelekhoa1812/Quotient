@@ -281,6 +281,12 @@ def _public_failure(exc: BaseException) -> str:
         return "No speech could be transcribed from this recording. Check that it has clear audio and try again."
     if type(exc).__name__ == "NoAudioTrack":
         return "This recording has no audio, so there is nothing to transcribe."
+    if type(exc).__name__ == "TranscriptError":
+        return detail or "This file could not be read as a transcript."
+    if type(exc).__name__ == "NimUnavailable":
+        return "NVIDIA NIM is not set up on this server. Choose AWS Bedrock in Settings, or add the NIM keys."
+    if type(exc).__name__ == "NotInvocable" and "nim-exhausted" in lowered:
+        return "NVIDIA NIM did not answer after trying every model and key. Try again, or switch to AWS Bedrock in Settings."
     if isinstance(exc, subprocess.TimeoutExpired):
         return "The analysis took too long and was stopped. Please try again."
     if isinstance(exc, FileNotFoundError):
@@ -553,7 +559,20 @@ class Port:
         idempotency_key: str | None,
         context_batch: str | None = None,
         purpose: str | None = None,
+        model_provider: str | None = None,
+        model_overrides: dict | None = None,
     ) -> str:
+        from bedrock import provider as models
+
+        chosen = models.normalise_provider(model_provider)
+        if model_provider and not chosen:
+            _raise("invalid", "The model provider must be bedrock or nim.")
+        chosen = chosen or models.default_provider()
+        if chosen == "nim":
+            from bedrock import nim
+
+            if not nim.available():
+                _raise("invalid", "NVIDIA NIM is not set up on this server. Choose AWS Bedrock, or add the NIM keys.")
         with self._lock:
             if idempotency_key:
                 existing = self._idempotency.get((subject, idempotency_key))
@@ -593,6 +612,8 @@ class Port:
                 "digest": None,
                 "observations": [],
                 "revisions": [],
+                "model_provider": chosen,
+                "model_overrides": models.clean_overrides(model_overrides) if chosen == "nim" else {},
             }
             if context:
                 self._rows[meeting_id]["context"] = context
@@ -874,7 +895,8 @@ class Port:
             )
 
         turns = [tuple(t) for t in (row.get("turns") or [])]
-        if not turns:
+        from_transcript = (row.get("source") or {}).get("kind") == "transcript"
+        if not turns and not from_transcript:
             turns = self._find_cached_turns(meeting_id, row, spans)
 
         if any(s.speaker_hypothesis_id is None for s in spans if s.kind == "speech") and turns:
@@ -899,7 +921,7 @@ class Port:
         ledger = Ledger(
             meeting_id=meeting_id,
             duration_ms=duration_ms,
-            kind="video" if screens or observations else "audio",
+            kind="transcript" if from_transcript else ("video" if screens or observations else "audio"),
             spans=spans,
             screens=screens,
             observations=observations,
@@ -909,11 +931,16 @@ class Port:
         return ledger
 
     def _run_meeting(self, meeting_id: str, object_key: str, names: tuple[str, ...], reindex: bool = False) -> None:
+        from bedrock import provider as models
         from bedrock.reason import Reasoner
-        from bedrock.wire import Transport
         from loop.ingest import assemble, open_source
         from registry.load import Registry
+        from transcript.parse import is_transcript_name
 
+        with self._lock:
+            settings_row = self._rows.get(meeting_id) or {}
+            provider_name = models.normalise_provider(settings_row.get("model_provider")) or models.default_provider()
+            overrides = settings_row.get("model_overrides")
         ledger = None
         if reindex:
             with self._lock:
@@ -927,7 +954,10 @@ class Port:
                     print(f"ledger reconstruction fallback: {exc}", file=sys.stderr, flush=True)
                     ledger = None
 
-        if ledger is None:
+        if ledger is None and is_transcript_name(object_key):
+            ledger = self._ingest_transcript(meeting_id, object_key)
+            ledger.context = self._load_context(meeting_id)
+        elif ledger is None:
             self._set_progress(meeting_id, "Preparing the media and building the transcript")
             # A file that is not on this disk is copied from the media bucket into a
             # private directory that is removed whatever happens next.
@@ -949,8 +979,13 @@ class Port:
             ledger.context = self._load_context(meeting_id)
         self._apply_identity_state(meeting_id, ledger)
         registry = Registry()
-        reasoner = Reasoner(registry, Transport())
-        print("analysis stage: quality", file=sys.stderr, flush=True)
+        # Bedrock keeps the pinned release exactly (no plans); NIM gets the plan for its role split.
+        reasoner = Reasoner(
+            registry,
+            models.transport_for(provider_name),
+            plans=models.plans("nim", overrides) if provider_name == "nim" else None,
+        )
+        print(f"analysis stage: quality (provider {provider_name})", file=sys.stderr, flush=True)
         existing_data = None
         if reindex:
             with self._lock:
@@ -992,6 +1027,44 @@ class Port:
                 file=sys.stderr,
                 flush=True,
             )
+
+    def model_options(self) -> dict:
+        from bedrock import provider as models
+
+        return models.catalogue()
+
+    def _ingest_transcript(self, meeting_id: str, object_key: str):
+        """A transcript file takes the place of transcription: no audio, no voice separation, no picture scan."""
+        from loop.ingest import open_source
+        from transcript.ingest import assemble_transcript
+
+        self._set_progress(meeting_id, "Fetching the transcript")
+        path, scratch = open_source(object_key)
+        try:
+            ledger, info = assemble_transcript(
+                path, meeting_id, progress_callback=lambda message: self._set_progress(meeting_id, message)
+            )
+        finally:
+            if scratch is not None:
+                shutil.rmtree(scratch, ignore_errors=True)
+        with self._lock:
+            row = self._rows.get(meeting_id)
+            if row is not None:
+                row["source"] = {
+                    "kind": "transcript",
+                    "format": info.format,
+                    "timings": "exact" if info.timed else "estimated",
+                    "speakers": info.speakers,
+                    "words": info.words,
+                    "title": info.title,
+                    "truncated": info.truncated,
+                }
+                # Names the file gave are used like typed names; a person's own correction is never replaced.
+                names = row.setdefault("speaker_names", {})
+                for voice, name in info.names.items():
+                    names.setdefault(voice, name)
+                self._save_locked()
+        return ledger
 
     def _reindex_count(self, meeting_id: str) -> int:
         with self._lock:
@@ -1372,14 +1445,15 @@ class Port:
         """A signed PUT for one browser upload, or None when object storage is not configured."""
         from media import storage
 
-        if not storage.media_type_allowed(media_type):
-            _raise("invalid", "Only audio or video recordings can be uploaded.")
+        if not storage.upload_allowed(filename, media_type):
+            _raise("invalid", "Upload an audio or video recording, or a transcript (SRT, VTT, TXT, MD, DOCX, PDF).")
         if isinstance(byte_size, str) and byte_size.strip().isdigit():
             byte_size = int(byte_size)
-        if isinstance(byte_size, int) and not isinstance(byte_size, bool) and byte_size > storage.MAX_UPLOAD_BYTES:
-            _raise("invalid", "The recording is larger than 5 GB.")
+        limit = storage.TRANSCRIPT_MAX_BYTES if storage.is_transcript_upload(filename) else storage.MAX_UPLOAD_BYTES
+        if isinstance(byte_size, int) and not isinstance(byte_size, bool) and byte_size > limit:
+            _raise("invalid", "The transcript is larger than 50 MB." if limit == storage.TRANSCRIPT_MAX_BYTES else "The recording is larger than 5 GB.")
         key = storage.upload_key(task_id, filename)
-        content_type = storage.base_media_type(media_type)  # the signed header and the browser's PUT must agree
+        content_type = storage.base_media_type(media_type) or "application/octet-stream"  # the signed header and the browser's PUT must agree
         try:
             url = storage.presign_put(key, content_type)
         except storage.StorageUnavailable:
@@ -1399,6 +1473,8 @@ class Port:
             if row is None or row["subject"] != subject:
                 return None
             key = row.get("object_key")
+            if (row.get("source") or {}).get("kind") == "transcript":
+                return None  # there is no recording to play
             # A client chooses object_key. Sign it only once this meeting has ingested media of its
             # own; a failed or queued submission naming someone else's key gets no URL.
             if row.get("status") not in {"ready", "needs_review"} and not row.get("spans"):

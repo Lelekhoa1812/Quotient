@@ -107,6 +107,8 @@ class WorkerPort(Protocol):
 
     def media_url(self, meeting_id: str, subject: str) -> str | None: ...
 
+    def model_options(self) -> dict: ...
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]

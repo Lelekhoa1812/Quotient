@@ -101,6 +101,9 @@ def project_meeting(raw: dict) -> dict:
         if isinstance(raw.get("object_key"), str) and raw.get("object_key")
         else f"meetings/{meeting_id}"
     )
+    source = _source_view(cleaned.get("source"))
+    if source and source["kind"] == "transcript":
+        playback = ""  # a transcript has no recording to play
     release = _release(cleaned.get("prompt_release"))
     identities = _identities(cleaned.get("identities"))
     graph = {
@@ -124,9 +127,11 @@ def project_meeting(raw: dict) -> dict:
         "digest": _digest(cleaned.get("digest"), spans_by_id),
         "captions": (
             f"quotient://meetings/{meeting_id}/exports/captions.vtt"
-            if any(span.get("kind") == "speech" for span in spans)
+            if any(span.get("kind") == "speech" for span in spans) and not (source and source.get("timings") == "estimated")
             else None
         ),
+        "source": source,
+        "model_provider": raw.get("model_provider") if raw.get("model_provider") in {"bedrock", "nim"} else "bedrock",
         "synthesis_omissions": _omissions(cleaned.get("synthesis_omissions"), "finding_id"),
         "dissent_omissions": _omissions(cleaned.get("synthesis_omissions"), "finding_id"),
     }
@@ -166,6 +171,8 @@ def project_meeting(raw: dict) -> dict:
         "withheld": withheld,
         "updated_at": cleaned.get("updated_at") if isinstance(cleaned.get("updated_at"), str) else None,
         "source_name": _source_name(raw.get("object_key")),
+        "source": source,
+        "model_provider": raw.get("model_provider") if raw.get("model_provider") in {"bedrock", "nim"} else "bedrock",
         "task_id": _task_id(raw.get("object_key")),
         "context": _context_view(raw.get("context")),
         "failure_message": _safe_failure(cleaned.get("failure_message")),
@@ -178,6 +185,24 @@ def project_meeting(raw: dict) -> dict:
             "counts": counts,
             "claims": review_claims,
         },
+    }
+
+
+def _source_view(value: object) -> dict | None:
+    """What the meeting was made from: a recording (the default, None) or a transcript file."""
+    if not isinstance(value, dict) or value.get("kind") != "transcript":
+        return None
+    def count(key: str) -> int:
+        item = value.get(key)
+        return item if isinstance(item, int) and not isinstance(item, bool) and item >= 0 else 0
+    return {
+        "kind": "transcript",
+        "format": str(value.get("format") or "text")[:12],
+        "timings": "exact" if value.get("timings") == "exact" else "estimated",
+        "speakers": count("speakers"),
+        "words": count("words"),
+        "title": value.get("title") if isinstance(value.get("title"), str) else None,
+        "truncated": bool(value.get("truncated")),
     }
 
 
@@ -198,6 +223,9 @@ def summary(projected: dict) -> dict:
         result["source_name"] = projected["source_name"]  # additive: a readable fallback title
     if projected.get("task_id"):
         result["task_id"] = projected["task_id"]  # additive: lets a client tie its own submission to this meeting
+    if projected.get("source"):
+        result["source"] = projected["source"]  # additive: transcript meetings have no recording
+    result["model_provider"] = projected.get("model_provider", "bedrock")  # additive
     if projected.get("context"):
         result["context"] = projected["context"]  # additive: what reference material the analysis was given
     identity = projected.get("identity") or {}
@@ -241,6 +269,8 @@ def page_graph(graph: dict, offset: int, page_size: int) -> tuple[dict, int | No
                 "dissent_omissions": graph.get("dissent_omissions") or [],
                 "identities": graph.get("identities") or {},
                 "screens": graph.get("screens") or [],
+                "source": graph.get("source"),
+                "model_provider": graph.get("model_provider") or "bedrock",
             }
         )
     more = False

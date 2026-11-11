@@ -1,6 +1,6 @@
 """Submit one media object to the local Quotient MCP API and record a benchmark.
 
-Usage: scripts/bench_meeting.py <object_key> <label>
+Usage: scripts/bench_meeting.py <object_key> <label> [bedrock|nim]
 Writes .local/run/bench/<label>-{submitted,result,summary,graph}.json and prints the summary.
 The object must already exist under derivatives/ (the worker reads it from disk).
 """
@@ -49,7 +49,7 @@ status, created, _ = post({
     "jsonrpc": "2.0", "id": 2, "method": "tools/call",
     "params": {
         "name": "submit_meeting",
-        "arguments": {"object_key": OBJECT_KEY, "upload_complete": True},
+        "arguments": {"object_key": OBJECT_KEY, "upload_complete": True, **({"model_provider": sys.argv[3]} if len(sys.argv) > 3 else {})},
         "task": {"ttl": 86_400_000},
         "_meta": {"progressToken": LABEL},
     },

@@ -17,7 +17,7 @@ import secrets
 from quotient.graph.gate import project_meeting, summary
 from quotient.mcp.errors import RELATED_TASK
 from quotient.mcp.tasks import TaskRecord, tool_error, tool_text
-from quotient.mcp.tools import upload_incomplete, validate_submit_arguments
+from quotient.mcp.tools import submit_extras, upload_incomplete, validate_submit_arguments
 from quotient.worker.port import PortError
 
 _POLL_SECONDS = 0.25
@@ -57,11 +57,7 @@ async def run_submit(task: TaskRecord, arguments: dict, runtime: object) -> None
                 _notify_status(task, runtime)
                 return
         _progress(task, runtime, 1, "Recording the meeting.")
-        extra = {}
-        if isinstance(batch, str) and batch:
-            extra["context_batch"] = batch
-        if isinstance(arguments.get("purpose"), str) and arguments["purpose"].strip():
-            extra["purpose"] = arguments["purpose"].strip()
+        extra = submit_extras(arguments)
         meeting_id = runtime.port.submit(  # type: ignore[attr-defined]
             subject=task.auth_subject,
             object_key=str(arguments.get("object_key")).strip(),

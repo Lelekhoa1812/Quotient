@@ -21,6 +21,12 @@ EXPECTED = {
         "destructiveHint": False,
         "required": ["files"],
     },
+    "model_options": {
+        "taskSupport": "forbidden",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "required": [],
+    },
     "get_meeting": {
         "taskSupport": "forbidden",
         "readOnlyHint": True,

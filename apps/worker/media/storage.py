@@ -27,6 +27,12 @@ CONTEXT_EXTENSIONS = frozenset({
 UPLOAD_URL_SECONDS = 900
 MAX_UPLOAD_BYTES = 5 * 1024**3  # single signed PUT limit
 _ALLOWED_TYPES = re.compile(r"^(audio|video)/[a-z0-9.+-]+$")
+TRANSCRIPT_MAX_BYTES = 50 * 1024**2
+# A transcript is accepted by its extension; the type the browser sent only has to be one a transcript can carry,
+# because browsers send "" or application/octet-stream for .srt and .md.
+_TRANSCRIPT_TYPES = re.compile(
+    r"^(text/[a-z0-9.+-]+|application/(pdf|json|rtf|msword|octet-stream|x-subrip|x-rtf|vnd\.openxmlformats-officedocument\.wordprocessingml\.document))$"
+)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -88,6 +94,19 @@ def base_media_type(media_type: str | None) -> str:
 
 def media_type_allowed(media_type: str | None) -> bool:
     return bool(_ALLOWED_TYPES.match(base_media_type(media_type)))
+
+
+def is_transcript_upload(filename: str | None) -> bool:
+    from transcript.parse import is_transcript_name
+
+    return bool(filename) and is_transcript_name(str(filename))
+
+
+def upload_allowed(filename: str | None, media_type: str | None) -> bool:
+    """A recording by its media type, or a transcript by its file extension."""
+    if media_type_allowed(media_type):
+        return True
+    return is_transcript_upload(filename) and bool(_TRANSCRIPT_TYPES.match(base_media_type(media_type) or "application/octet-stream"))
 
 
 def presign_put(key: str, media_type: str) -> str:

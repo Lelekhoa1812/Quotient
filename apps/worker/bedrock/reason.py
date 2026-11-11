@@ -38,10 +38,19 @@ def estimate_tokens(text: str) -> int:
 
 
 class Reasoner:
-    def __init__(self, registry: Registry, transport):
+    def __init__(self, registry: Registry, transport, plans: dict | None = None):
         self.registry = registry
         self.transport = transport
         self.fallback_log: list[dict] = []
+        # provider.plans(): per role the model, limits and fallbacks. None keeps the pinned Bedrock release.
+        self.plans = plans
+
+    def _role(self, role: str) -> tuple[str, int, str | None]:
+        """(model, output limit, one Bedrock fallback) for a role."""
+        if self.plans and role in self.plans:
+            plan = self.plans[role]
+            return plan.model, plan.max_output_tokens, (plan.fallbacks[0] if plan.fallbacks and plan.region != "nvidia" else None)
+        return _MODELS[role]
 
     def complete(
         self,
@@ -54,7 +63,7 @@ class Reasoner:
         prompt = self.registry.prompt(prompt_id, expected_role=role)
         if prompt.model_role not in _MODELS:
             raise NotInvocable(prompt.model_role or "", "unpinned-role")
-        _model, cap, _fallback = _MODELS[prompt.model_role]
+        _model, cap, _fallback = self._role(prompt.model_role)
         if max_output_tokens is not None and max_output_tokens != cap:
             raise ValueError(f"max_output_tokens must stay at the vendor maximum {cap}")
         schema = self.registry.schema(prompt.schema_id) if prompt.schema_id else None
@@ -100,7 +109,7 @@ class Reasoner:
         return ModelTurn(output=output, trace=trace, cached_tokens=cached_first + cached_second)
 
     def _tools(self, prompt, payload: dict) -> tuple[str, list[ToolCall], int]:
-        model_id, cap, fallback = _MODELS[prompt.model_role]
+        model_id, cap, fallback = self._role(prompt.model_role)
         request = self._request(model_id, cap, prompt, None, payload, False, "", tools=True)
         try:
             response = self.transport.respond(request)
@@ -126,7 +135,7 @@ class Reasoner:
         return response.get("output_text", ""), calls, int((response.get("usage") or {}).get("cached_tokens") or 0)
 
     def _pass(self, prompt, schema, payload, *, schema_mode: bool, trace: str) -> tuple[str, int]:
-        model_id, cap, fallback = _MODELS[prompt.model_role]
+        model_id, cap, fallback = self._role(prompt.model_role)
         request = self._request(model_id, cap, prompt, schema, payload, schema_mode, trace, tools=False)
         try:
             response = self.transport.respond(request)
@@ -144,8 +153,10 @@ class Reasoner:
         return response.get("output_text", ""), int((response.get("usage") or {}).get("cached_tokens") or 0)
 
     def _request(self, model_id, cap, prompt, schema, payload, schema_mode: bool, trace: str, *, tools: bool) -> dict:
-        if cap not in (SOL_MAX_OUTPUT_TOKENS, LUNA_MAX_OUTPUT_TOKENS):
+        plan = self.plans.get(prompt.model_role) if self.plans else None
+        if plan is None and cap not in (SOL_MAX_OUTPUT_TOKENS, LUNA_MAX_OUTPUT_TOKENS):
             raise ValueError("refusing to send a max_output_tokens below the vendor maximum")
+        budget = plan.input_budget_tokens if plan is not None else INPUT_TOKEN_BUDGET
         prefix_parts = [prompt.body]
         if prompt.tools:
             prefix_parts.append(json.dumps(prompt.tools, sort_keys=True))
@@ -153,9 +164,9 @@ class Reasoner:
             prefix_parts.append(json.dumps(schema, sort_keys=True))
         prefix = "\n".join(prefix_parts)
         user = trace if schema_mode else json.dumps(payload, sort_keys=True, default=str)
-        if estimate_tokens(prefix + user) > INPUT_TOKEN_BUDGET:
+        if estimate_tokens(prefix + user) > budget:
             raise InputTooLarge(
-                f"assembled input estimates above {INPUT_TOKEN_BUDGET} tokens; compact the state object"
+                f"assembled input estimates above {budget} tokens; compact the state object"
             )
         # Bugs vs Fixes
         # Bug: A boolean prompt_cache_breakpoint on a string content field is
@@ -165,7 +176,7 @@ class Reasoner:
         effort = "xhigh" if prompt.model_role == "llm" else "medium"
         request = {
             "model": model_id,
-            "region": REASON_REGION,
+            "region": plan.region if plan is not None else REASON_REGION,
             "max_output_tokens": cap,
             "effort": effort,
             "prompt_cache_options": {"mode": "explicit", "ttl": "30m"},
@@ -183,6 +194,9 @@ class Reasoner:
                 {"role": "user", "content": [{"type": "input_text", "text": user}]},
             ],
         }
+        if plan is not None and plan.region == "nvidia":
+            request["thinking"] = plan.thinking
+            request["fallback_models"] = list(plan.fallbacks)
         if tools:
             request["tools"] = _function_tools(prompt.tools)
             request["tool_choice"] = "auto"

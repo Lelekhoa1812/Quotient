@@ -76,6 +76,8 @@ class MemoryPort:
         idempotency_key: str | None,
         context_batch: str | None = None,
         purpose: str | None = None,
+        model_provider: str | None = None,
+        model_overrides: dict | None = None,
     ) -> str:
         with self._lock:
             if idempotency_key:

@@ -50,6 +50,7 @@ from quotient.mcp.tools import (
     TOOLS,
     call_immediate,
     list_tools,
+    submit_extras,
     task_mode_error,
     upload_incomplete,
     validate_submit_arguments,
@@ -463,11 +464,7 @@ def _submit_direct(params: dict, request_id: object, session: Session, runtime: 
                 "result": tool_text({"error": "The context you added was not found. Add it again and start the analysis."}, is_error=True),
             }
 
-    extra = {}
-    if isinstance(batch, str) and batch:
-        extra["context_batch"] = batch
-    if isinstance(arguments.get("purpose"), str) and arguments["purpose"].strip():
-        extra["purpose"] = arguments["purpose"].strip()
+    extra = submit_extras(arguments)
 
     try:
         meeting_id = port.submit(

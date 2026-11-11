@@ -34,7 +34,7 @@ TOOLS: list[dict] = [
         "name": "submit_meeting",
         "title": "Submit meeting",
         "description": (
-            "Start analysis of one uploaded media object already stored under an object key. "
+            "Start analysis of one uploaded recording (audio or video) or transcript (SRT, VTT, TXT, MD, DOCX, PDF) already stored under an object key. "
             "Upload filenames are not speaker names or action owners. "
             "Call this tool as a task. Poll tasks/get with the same access token until the task "
             "reaches a terminal status, then read tasks/result. "
@@ -65,7 +65,7 @@ TOOLS: list[dict] = [
                 },
                 "media_type": {
                     "type": "string",
-                    "description": "audio/* or video/* type of the file to upload.",
+                    "description": "audio/* or video/* type of the recording, or the type of a transcript file (text/plain, text/markdown, text/vtt, application/pdf, a Word type).",
                 },
                 "byte_size": {"type": "integer", "description": "Size of the file to upload, in bytes."},
                 "context_batch": {
@@ -75,6 +75,16 @@ TOOLS: list[dict] = [
                 "purpose": {
                     "type": "string",
                     "description": "Optional, at most 2000 characters: what the meeting is about, in the person's words. Reference only.",
+                },
+                "model_provider": {
+                    "type": "string",
+                    "enum": ["bedrock", "nim"],
+                    "description": "Which provider runs the text analysis: AWS Bedrock (default) or NVIDIA NIM. Call model_options to see what this server offers.",
+                },
+                "model_overrides": {
+                    "type": "object",
+                    "properties": {"slm": {"type": "string"}, "llm": {"type": "string"}},
+                    "description": "Optional NVIDIA NIM model per role (slm: fast passes, llm: long reasoning). Only models listed by model_options are accepted.",
                 },
             },
             [],
@@ -122,6 +132,23 @@ TOOLS: list[dict] = [
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    },
+    {
+        "name": "model_options",
+        "title": "Model options",
+        "description": (
+            "List the providers this server can use for the text analysis, whether each is available, the default, "
+            "and the models that can be assigned to the fast and long-reasoning roles."
+        ),
+        "inputSchema": _schema({}, []),
+        "execution": {"taskSupport": "forbidden"},
+        "annotations": {
+            "title": "Model options",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
             "openWorldHint": False,
         },
     },
@@ -381,6 +408,7 @@ def call_immediate(name: str, arguments: dict, *, subject: str, port: object, re
 def _handlers() -> dict[str, Callable]:
     return {
         "prepare_context": _prepare_context,
+        "model_options": _model_options,
         "get_meeting": _get_meeting,
         "read_graph": _read_graph,
         "read_span": _read_span,
@@ -392,6 +420,28 @@ def _handlers() -> dict[str, Callable]:
         "rename_meeting": _rename_meeting,
         "cancel_meeting": _cancel_meeting,
     }
+
+
+def _model_options(arguments: dict, subject: str, port: object) -> dict:
+    options = getattr(port, "model_options", None)
+    if not callable(options):
+        return {"default": "bedrock", "providers": [{"id": "bedrock", "label": "AWS Bedrock", "available": True}], "nim_models": [], "roles": {}}
+    return options()
+
+
+def submit_extras(arguments: dict) -> dict:
+    """The optional submit arguments the port understands, already validated by validate_submit_arguments."""
+    extra: dict = {}
+    batch = arguments.get("context_batch")
+    if isinstance(batch, str) and batch:
+        extra["context_batch"] = batch
+    if isinstance(arguments.get("purpose"), str) and arguments["purpose"].strip():
+        extra["purpose"] = arguments["purpose"].strip()
+    if isinstance(arguments.get("model_provider"), str) and arguments["model_provider"].strip():
+        extra["model_provider"] = arguments["model_provider"].strip().lower()
+    if isinstance(arguments.get("model_overrides"), dict) and arguments["model_overrides"]:
+        extra["model_overrides"] = {str(k): str(v) for k, v in arguments["model_overrides"].items()}
+    return extra
 
 
 def _owned(port: object, meeting_id: str, subject: str) -> dict:
@@ -573,6 +623,16 @@ def validate_submit_arguments(arguments: dict) -> str | None:
     purpose = arguments.get("purpose")
     if purpose is not None and (not isinstance(purpose, str) or len(purpose) > 2000):
         return "purpose must be text of at most 2000 characters"
+    provider = arguments.get("model_provider")
+    if provider is not None and (not isinstance(provider, str) or provider.strip().lower() not in {"bedrock", "nim"}):
+        return "model_provider must be bedrock or nim"
+    overrides = arguments.get("model_overrides")
+    if overrides is not None:
+        if not isinstance(overrides, dict) or len(overrides) > 4:
+            return "model_overrides must be an object with slm and llm"
+        for role, model in overrides.items():
+            if role not in {"slm", "llm"} or not isinstance(model, str) or not 1 <= len(model) <= 100:
+                return "model_overrides must name a model for slm and/or llm"
     idem = arguments.get("idempotency_key")
     if idem is not None:
         if not isinstance(idem, str) or len(idem) > 128:
