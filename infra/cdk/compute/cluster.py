@@ -126,6 +126,13 @@ class MeetingCompute(Construct):
         )
         self.portal_token.grant_read(self.execution_role)
 
+        # NVIDIA NIM keys for the text analysis. The secret is created by hand (aws secretsmanager create-secret) so
+        # the key values never appear in this template; the stack only references it by name and grants read access
+        # to the API (provider availability check) and the worker (the analysis itself).
+        self.nim_secret = secretsmanager.Secret.from_secret_name_v2(self, "NimKeys", f"{PREFIX}/nim")
+        self.nim_secret.grant_read(roles.api)
+        self.nim_secret.grant_read(roles.worker)
+
         # S3 CORS
         for bucket in (buckets.media, buckets.artifacts):
             bucket.add_cors_rule(
@@ -387,6 +394,7 @@ class MeetingCompute(Construct):
             "DERIVATIVES_PREFIX": DERIVATIVES_PREFIX,
             "SANDBOX_PREFIX": SANDBOX_PREFIX,
             "PARTNER_SECRET_ARN": auth.partner_secret.secret_arn,
+            "NIM_SECRET_ARN": f"{PREFIX}/nim",
         }
 
     def _worker_environment(
@@ -410,6 +418,7 @@ class MeetingCompute(Construct):
             "DERIVATIVES_PREFIX": DERIVATIVES_PREFIX,
             "SANDBOX_PREFIX": SANDBOX_PREFIX,
             "WORK_QUEUE_URL": work.queue_url,
+            "NIM_SECRET_ARN": f"{PREFIX}/nim",
             "BEDROCK_REGION": REGION,
             "BEDROCK_SONIC_MODEL_ID": SONIC_MODEL_ID,
             "BEDROCK_SONIC_REGION": SONIC_REGION,
