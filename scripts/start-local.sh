@@ -105,6 +105,12 @@ load_env() {
     elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
       value="${value:1:${#value}-2}"
     fi
+    # Bug: .env names the AWS media bucket for staging, so a MinIO launch signed uploads for a bucket that does not
+    # exist on MinIO (HTTP 404) and every browser upload stalled at 100%.
+    # Fix: with a local object store endpoint already chosen, its bucket is not replaced by the file.
+    if [[ "$name" == QUOTIENT_MEDIA_BUCKET && -n "${QUOTIENT_S3_ENDPOINT_URL:-}" && -n "${QUOTIENT_MEDIA_BUCKET:-}" ]]; then
+      continue
+    fi
     printf -v "$name" '%s' "$value"
     export "$name"
   done <"$file"

@@ -57,6 +57,11 @@ const nextConfig = {
           destination: mcp,
         },
       ],
+      // The shell pings these on load to wake the API; without a rewrite they 404 on the portal origin.
+      afterFiles: [
+        { source: "/health", destination: new URL("/health", mcp).toString() },
+        { source: "/warmup", destination: new URL("/warmup", mcp).toString() },
+      ],
     };
   },
 };
